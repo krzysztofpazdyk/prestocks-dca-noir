@@ -129,20 +129,19 @@ export function SettingsView() {
       let buyDespite = readBuyDespiteIpo();
 
       try {
+        const wallet = publicKey?.toBase58() ?? null;
         const [status, prefsRes] = await Promise.all([
-          keeperStatus(),
-          keeperGetPrefs(),
+          keeperStatus(wallet ?? undefined),
+          keeperGetPrefs(wallet ?? undefined),
         ]);
         if (cancelled) return;
 
         const configuredOwner =
           (typeof status.owner === "string" && status.owner.trim()) || null;
-        const wallet = publicKey?.toBase58() ?? null;
         const ownerConflict =
           !!configuredOwner && !!wallet && configuredOwner !== wallet;
 
-        // Daemon stores a single prefs.json (global). Apply when GET ok and
-        // there is no owner/wallet mismatch.
+        // Per-owner prefs when wallet known. Skip apply on owner mismatch.
         if (prefsRes.ok && prefsRes.prefs && !ownerConflict) {
           const applied = applyApiPrefsToLocal(prefsRes.prefs);
           exclusionsRaw = applied.exclusionsRaw;
@@ -267,7 +266,11 @@ export function SettingsView() {
         signMessage,
       );
       if (!res.ok) {
-        setPrefsSaveMsg(t("settings.prefsSignFailed"));
+        setPrefsSaveMsg(
+          res.error
+            ? `${t("settings.prefsSignFailed")}: ${res.error}`
+            : t("settings.prefsSignFailed"),
+        );
         return;
       }
       setSyncedBaseline(
@@ -397,12 +400,11 @@ export function SettingsView() {
           <input
             type="number"
             min={1}
-            max={10}
             step={1}
             value={weekly}
             onChange={(e) => {
               const n = Number(e.target.value);
-              setWeekly(Number.isFinite(n) ? Math.min(10, Math.max(1, n)) : 1);
+              setWeekly(Number.isFinite(n) ? Math.max(1, n) : 1);
               predca.clearMessages();
             }}
             className="mono-num w-full rounded border border-[#1e2633] bg-[#0c0e12] px-3 py-2.5 text-base text-[#2dd4bf] outline-none focus:border-[#2dd4bf66]"

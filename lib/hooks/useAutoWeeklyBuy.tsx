@@ -14,7 +14,6 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import {
   keeperDisable,
   keeperEnable,
-  keeperPushPrefs,
   keeperHealth,
   keeperStatus,
 } from "@/lib/keeper-client";
@@ -88,28 +87,26 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
   enabledRef.current = enabled;
   const tRef = useRef(t);
   tRef.current = t;
-  const localeRef = useRef(locale);
-  localeRef.current = locale;
   const ignoreOffUntilRef = useRef(0);
 
   useEffect(() => {
     if (publicKey) ignoreOffUntilRef.current = Date.now() + 2000;
     let cancelled = false;
     void (async () => {
-      const st = await keeperStatus();
-      const local = readAutoWeeklyBuyPref();
       const owner = ownerRef.current;
+      const st = await keeperStatus(owner ?? undefined);
+      const local = readAutoWeeklyBuyPref();
       if (cancelled) return;
       const keeperOn = st.enabled === true;
       const configuredOwner =
         (typeof st.owner === "string" && st.owner.trim()) || null;
       const sameOwner =
-        !!owner && !!configuredOwner && owner === configuredOwner;
-      // Prefer same-owner + keeper status; do not auto-sign enable on mount
-      // (wallet popup). Toggle / startCycle signs explicitly.
-      const showOn = (sameOwner && keeperOn) || (sameOwner && local === true);
+        !owner || !configuredOwner || owner === configuredOwner;
+      // Per-owner status when wallet known; do not auto-sign enable on mount.
+      // Keeper is source of truth for this wallet — never OR local over keeper Off.
+      const showOn = Boolean(owner) && sameOwner && keeperOn;
       setEnabledState(showOn);
-      if (showOn) writeAutoWeeklyBuy(true);
+      writeAutoWeeklyBuy(showOn);
       setPrefsReady(true);
     })();
     return () => {
@@ -129,6 +126,13 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
         void (async () => {
           const res = await keeperDisable(owner, sign);
           if (!res.ok) {
+            // Idempotent off: keeper already off → success (no scary mismatch error).
+            const st = await keeperStatus(owner);
+            if (st.enabled === false) {
+              setPhase("idle");
+              setMessage(tRef.current("auto.status.off"));
+              return;
+            }
             setPhase("error");
             setMessage(
               res.error?.includes("signature") || res.error?.includes("sign_")
@@ -197,19 +201,13 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
       });
       setPhase("buying");
       setMessage(tRef.current("auto.status.buyingKeeper"));
-      const prefsRes = await keeperPushPrefs(
-        rankPrefsForApi(readRankPrefs()),
+      // One signature: daemon syncs prefs on enable.
+      const ran = await keeperEnable(
         owner,
+        true,
         sign,
+        rankPrefsForApi(readRankPrefs()),
       );
-      if (!prefsRes.ok) {
-        throw new Error(
-          prefsRes.error?.includes("signature") || prefsRes.error?.includes("sign_")
-            ? `Podpis odrzucony (prefs): ${prefsRes.error}`
-            : prefsRes.error || "prefs failed",
-        );
-      }
-      const ran = await keeperEnable(owner, true, sign);
       if (!ran.ok) {
         const err = ran.error || tRef.current("auto.status.keeperDown");
         if (
@@ -223,28 +221,44 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
         }
         throw new Error(err);
       }
-      setEnabledState(true);
-      writeAutoWeeklyBuy(true);
+      const forceOff = async (reason: string) => {
+        setEnabledState(false);
+        writeAutoWeeklyBuy(false);
+        try {
+          await keeperDisable(owner, sign);
+        } catch {
+          /* best-effort */
+        }
+        setPhase("error");
+        const vaultish = /vault|USDC|za mało|Za mało|vault_low/i.test(reason);
+        setMessage(
+          vaultish
+            ? tRef.current("auto.status.vaultLow", {
+                have: "?",
+                need: amount.toFixed(2),
+              })
+            : tRef.current("auto.status.error", { reason }),
+        );
+      };
       if (ran.skipped) {
         if (ran.reason === "busy") {
-          throw new Error("Keeper jest w trakcie zakupu — spróbuj za chwilę.");
+          // Busy-only: temporary — do not commit enabled.
+          setPhase("buying");
+          setMessage("Keeper jest w trakcie zakupu — spróbuj za chwilę.");
+          return;
         }
-        setPhase("idle");
-        setDue(false);
-        if (ran.nextAt) {
-          setNextAt(Date.parse(ran.nextAt) || Date.now() + WEEK_MS);
-        }
-        setMessage(tRef.current("auto.status.next", {
-          when: formatWarsawWhen(
-            ran.nextAt ? Date.parse(ran.nextAt) : Date.now() + WEEK_MS,
-            localeRef.current,
-          ),
-        }));
+        const err = String(ran.error || ran.reason || "purchase skipped");
+        await forceOff(err);
         return;
       }
-      if (ran.names && ran.names.length >= 3) {
-        setLastTop3(ran.names.map((name) => ({ name, score: 0 })));
+      if (!ran.signature || !ran.names || ran.names.length < 3) {
+        await forceOff("Keeper returned success without a completed purchase.");
+        return;
       }
+      // Real purchase succeeded — only now commit enabled (UI + local cache).
+      setEnabledState(true);
+      writeAutoWeeklyBuy(true);
+      setLastTop3(ran.names.map((name) => ({ name, score: 0 })));
       writeAutoBuyMeta({
         lastAttemptMs: Date.now(),
         lastSuccessMs: Date.now(),
@@ -263,8 +277,25 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
       );
     } catch (e) {
       const reason = e instanceof Error ? e.message : String(e);
+      setEnabledState(false);
+      writeAutoWeeklyBuy(false);
+      try {
+        const o = ownerRef.current;
+        const s = signMessageRef.current;
+        if (o && s) await keeperDisable(o, s);
+      } catch {
+        /* best-effort */
+      }
       setPhase("error");
-      setMessage(tRef.current("auto.status.error", { reason }));
+      const vaultish = /vault|USDC|za mało|Za mało|vault_low/i.test(reason);
+      setMessage(
+        vaultish
+          ? tRef.current("auto.status.vaultLow", {
+              have: "?",
+              need: "?",
+            })
+          : tRef.current("auto.status.error", { reason }),
+      );
     } finally {
       cycleInFlight = false;
     }
@@ -272,24 +303,27 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
 
   const tick = useCallback(async () => {
     if (!prefsReady) return;
-    const st = await keeperStatus();
     const wallet = ownerRef.current;
+    const st = await keeperStatus(wallet ?? undefined);
     const configuredOwner =
       (typeof st.owner === "string" && st.owner.trim()) || null;
     const sameOwner =
       !!wallet && !!configuredOwner && wallet === configuredOwner;
-    // Matching wallet: keeper/file enabled wins over localStorage OFF.
+    // Matching wallet: keeper enabled is sole source of truth (never OR local).
     if (sameOwner && st.enabled === true && !enabledRef.current) {
       setEnabledState(true);
       writeAutoWeeklyBuy(true);
     }
+    if (sameOwner && st.enabled === false && enabledRef.current) {
+      setEnabledState(false);
+      writeAutoWeeklyBuy(false);
+    }
     // Non-matching connected wallet should not inherit another owner's ON.
     if (wallet && configuredOwner && !sameOwner && enabledRef.current) {
       setEnabledState(false);
+      writeAutoWeeklyBuy(false);
     }
-    const on = wallet && configuredOwner
-      ? Boolean(sameOwner && (st.enabled === true || enabledRef.current))
-      : Boolean(st.enabled === true || enabledRef.current);
+    const on = Boolean(wallet && configuredOwner && sameOwner && st.enabled === true);
     if (!on) {
       setPhase("idle");
       setDue(false);
