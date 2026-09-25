@@ -37,7 +37,8 @@ const pl: Dict = {
 
   "faucet.button": "Weź 1000 USDC + 0.1 SOL (demo)",
   "faucet.busy": "Wysyłam USDC + SOL…",
-  "faucet.success": "Wysłano 1000 USDC + 0.1 SOL (demo) · sig {sig}",
+  "faucet.success": "Wysłano 1000 USDC + 0.1 SOL do portfela (demo) · sig {sig}.",
+  "faucet.nextSteps": "Następnie: Deposit do vaulta (≥ budżet tygodniowy) + Wygeneruj rekomendacje — wtedy Dokonaj zakupu się odblokuje.",
   "faucet.error": "Faucet: {error}",
   "faucet.needWallet": "Podłącz portfel, by wziąć demo USDC + SOL.",
 
@@ -111,6 +112,11 @@ const pl: Dict = {
   "msg.noTop3Proxy": "Proxy /rank nie zwróciło top3.",
   "msg.noTypesafeKey": "Brak TYPESAFE_API_KEY w Ustawieniach",
   "msg.tooFewProducts": "Za mało produktów PreStocks do rankingu (<3).",
+  "purchase.disabled.tx": "Transakcja w toku…",
+  "purchase.disabled.noRecs": "Zakup nieaktywny — najpierw kliknij Wygeneruj rekomendacje (top-3).",
+  "purchase.disabled.notReady": "Zakup nieaktywny — Initialize Predca, potem Deposit USDC do vaulta.",
+  "purchase.disabled.vaultLow": "Zakup nieaktywny — vault ma {have} USDC, potrzeba ≥ {need}. Zrób Deposit z portfela (faucet zasila portfel, nie vault).",
+  "purchase.disabled.generic": "Zakup nieaktywny — sprawdź vault, ranking i status Predca.",
   "msg.noRecs": "Brak rekomendacji do zakupu.",
   "msg.vaultLowOnChain":
     "Za mało USDC w vault (on-chain): {have} < {need}.",
@@ -233,7 +239,8 @@ const en: Dict = {
 
   "faucet.button": "Get 1000 USDC + 0.1 SOL (demo)",
   "faucet.busy": "Sending USDC + SOL…",
-  "faucet.success": "Sent 1000 USDC + 0.1 SOL (demo) · sig {sig}",
+  "faucet.success": "Sent 1000 USDC + 0.1 SOL to wallet (demo) · sig {sig}.",
+  "faucet.nextSteps": "Next: Deposit into vault (≥ weekly budget) + Generate recommendations — then Purchase unlocks.",
   "faucet.error": "Faucet: {error}",
   "faucet.needWallet": "Connect a wallet to claim demo USDC + SOL.",
 
@@ -307,6 +314,11 @@ const en: Dict = {
   "msg.noTop3Proxy": "Proxy /rank returned no top3.",
   "msg.noTypesafeKey": "Missing TYPESAFE_API_KEY in Settings",
   "msg.tooFewProducts": "Too few PreStocks products for ranking (<3).",
+  "purchase.disabled.tx": "Transaction in progress…",
+  "purchase.disabled.noRecs": "Purchase disabled — click Generate recommendations first (top-3).",
+  "purchase.disabled.notReady": "Purchase disabled — Initialize Predca, then Deposit USDC into the vault.",
+  "purchase.disabled.vaultLow": "Purchase disabled — vault has {have} USDC, need ≥ {need}. Deposit from wallet (faucet fills wallet, not vault).",
+  "purchase.disabled.generic": "Purchase disabled — check vault, ranking, and Predca status.",
   "msg.noRecs": "No recommendations to purchase.",
   "msg.vaultLowOnChain":
     "Not enough USDC in vault (on-chain): {have} < {need}.",

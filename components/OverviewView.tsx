@@ -103,7 +103,11 @@ export function OverviewView() {
           : res.solSignature
             ? ` · SOL ${res.solSignature.length > 16 ? `${res.solSignature.slice(0, 8)}…${res.solSignature.slice(-8)}` : res.solSignature}`
             : "";
-      setFaucetMsg(t("faucet.success", { sig: `${sigShort}${solPart}` }));
+      setFaucetMsg(
+        t("faucet.success", { sig: `${sigShort}${solPart}` }) +
+          " " +
+          t("faucet.nextSteps"),
+      );
       await predca.refresh();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -275,18 +279,33 @@ export function OverviewView() {
   }
 
   const depositDisabled = predca.txPending || predca.status !== "ready";
+  const vaultTooLow =
+    availableVaultUsdc == null ||
+    !Number.isFinite(availableVaultUsdc) ||
+    availableVaultUsdc < purchaseAmount;
   const purchaseDisabled =
     top3.length === 0 ||
     predca.txPending ||
     (onChainReady
-      ? availableVaultUsdc == null ||
-        !Number.isFinite(availableVaultUsdc) ||
-        availableVaultUsdc < purchaseAmount
+      ? vaultTooLow
       : connected
         ? true // connected but not ready → disable until ready
-        : availableVaultUsdc == null ||
-          !Number.isFinite(availableVaultUsdc) ||
-          availableVaultUsdc < purchaseAmount);
+        : vaultTooLow);
+
+  /** Why Purchase stays gray — shown next to the button (vault check kept). */
+  const purchaseDisabledReason: string | null = (() => {
+    if (!purchaseDisabled) return null;
+    if (predca.txPending) return t("purchase.disabled.tx");
+    if (top3.length === 0) return t("purchase.disabled.noRecs");
+    if (connected && !onChainReady) return t("purchase.disabled.notReady");
+    if (vaultTooLow) {
+      return t("purchase.disabled.vaultLow", {
+        have: (availableVaultUsdc ?? 0).toFixed(2),
+        need: purchaseAmount.toFixed(2),
+      });
+    }
+    return t("purchase.disabled.generic");
+  })();
 
   function fmtTile(value: number | null, digits = 2): string {
     if (value == null || !Number.isFinite(value)) return "—";
@@ -647,6 +666,11 @@ export function OverviewView() {
             </ol>
             {rankError && (
               <p className="mt-3 text-xs text-[#f87171]">{rankError}</p>
+            )}
+            {purchaseDisabledReason && !purchaseMsg && (
+              <p className="mt-3 rounded border border-[#fbbf2433] bg-[#fbbf2411] px-3 py-2 text-xs text-[#fbbf24]">
+                {purchaseDisabledReason}
+              </p>
             )}
             {purchaseMsg && (
               <p className="mt-3 rounded border border-[#2dd4bf33] bg-[#2dd4bf11] px-3 py-2 text-xs text-[#2dd4bf]">
