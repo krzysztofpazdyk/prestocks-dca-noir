@@ -31,6 +31,24 @@ import {
 import { fetchPrestocksProducts } from "@/lib/prestocks";
 import { runRankingNow } from "@/lib/ranking";
 import { useI18n } from "@/lib/i18n";
+import { APP_VERSION } from "@/lib/app-version";
+import type { RankResult } from "@/lib/universe";
+
+/** Short Top-3 h2 from RankResult.mode — never claim live Jev for metrics. */
+function top3TitleFromRank(result: RankResult, locale: string): string {
+  const grok =
+    /grok/i.test(result.sourceLabel || "") ||
+    (result.pipeline || []).some((p) => /grok/i.test(p));
+  if (result.mode === "metrics_fallback") {
+    return locale === "en" ? "Top-3 · metrics" : "Top-3 · metryki";
+  }
+  if (result.mode === "byok_ai") {
+    if (grok) return "Top-3 · Grok+Jev";
+    return "Top-3 · AI (BYOK)";
+  }
+  // hosted_jev / cache / other
+  return locale === "en" ? "Top-3 · ranking" : "Top-3 · ranking";
+}
 
 function resolvePurchaseAmount(weeklyBudgetUsd: number | null): number {
   if (weeklyBudgetUsd != null) return weeklyBudgetUsd;
@@ -75,7 +93,8 @@ export function OverviewView() {
   const [depositAmt, setDepositAmt] = useState(50);
   const [withdrawAmt, setWithdrawAmt] = useState(10);
   const [top3, setTop3] = useState<JevRank[]>([]);
-  const [top3Live, setTop3Live] = useState(false);
+  const [top3Title, setTop3Title] = useState<string | null>(null);
+  const [top3Subtitle, setTop3Subtitle] = useState<string | null>(null);
   const [rankBusy, setRankBusy] = useState(false);
   const [rankError, setRankError] = useState<string | null>(null);
   const [purchaseMsg, setPurchaseMsg] = useState<string | null>(null);
@@ -182,7 +201,8 @@ export function OverviewView() {
           score: r.score,
         })),
       );
-      setTop3Live(true);
+      setTop3Title(top3TitleFromRank(result, locale));
+      setTop3Subtitle(result.sourceLabel || null);
       if (result.error) {
         setRankError(result.error);
       }
@@ -619,9 +639,16 @@ export function OverviewView() {
         <div className="flex min-h-0 flex-col gap-4 lg:h-full">
           <section className="rounded-lg border border-[#1e2633] bg-[#141820] p-5">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-[11px] uppercase tracking-[0.15em] text-[#a78bfa]">
-                {top3Live ? t("top3.titleLive") : t("top3.title")}
-              </h2>
+              <div>
+                <h2 className="text-[11px] uppercase tracking-[0.15em] text-[#a78bfa]">
+                  {top3Title ?? t("top3.title")}
+                </h2>
+                {top3Subtitle ? (
+                  <p className="mt-0.5 text-[10px] normal-case tracking-normal text-[#8b95a8]">
+                    {top3Subtitle}
+                  </p>
+                ) : null}
+              </div>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -679,7 +706,7 @@ export function OverviewView() {
             )}
           </section>
 
-          <section className="flex min-h-[11rem] flex-1 flex-col rounded-lg border border-[#1e2633] bg-[#141820] p-5">
+          <section className="relative flex min-h-[11rem] flex-1 flex-col rounded-lg border border-[#1e2633] bg-[#141820] p-5">
             <h2 className="mb-3 text-[11px] uppercase tracking-[0.15em] text-[#a78bfa]">
               {connected && onChainReady
                 ? t("lastPurchase.titleOnChain")
@@ -687,7 +714,7 @@ export function OverviewView() {
                   ? t("lastPurchase.titleConnected")
                   : t("lastPurchase.titleOffline")}
             </h2>
-            <div className="flex-1 space-y-1 text-sm" key={portfolioRevision}>
+            <div className="flex-1 space-y-1 text-sm pb-5" key={portfolioRevision}>
               {!displayLastPurchase || displayLastPurchase.tokens.length === 0 ? (
                 <p className="text-[#8b95a8]">
                   {connected
@@ -719,6 +746,12 @@ export function OverviewView() {
                 </>
               )}
             </div>
+            <span
+              className="pointer-events-none absolute bottom-2 right-3 mono-num text-[10px] tabular-nums text-[#5c6578]"
+              title="PreStocks DCA Noir"
+            >
+              v{APP_VERSION}
+            </span>
           </section>
         </div>
       </div>

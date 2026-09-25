@@ -86,8 +86,8 @@ const pl: Dict = {
   "holdings.allocation": "alokacja",
   "holdings.share": "udział",
 
-  "top3.title": "Top-3 · Jev",
-  "top3.titleLive": "Top-3 · Jev (live)",
+  "top3.title": "Top-3 · rekomendacje",
+  "top3.titleLive": "Top-3 · ranking (live)",
   "btn.generate": "Wygeneruj rekomendacje",
   "btn.generating": "Generuję…",
   "btn.purchase": "Dokonaj zakupu",
@@ -207,7 +207,7 @@ const pl: Dict = {
     "Wklej własne klucze.",
   "settings.typesafeLabel": "(Jev) — wymagany do rankingu",
   "settings.xaiLabel":
-    "/ Grok — opcjonalny (analiza); pusty = metrics→Jev bez LLM",
+    "/ Grok — opcjonalny klucz klienta do analizy Grok (wysyłany do API rankingu); pusty = Jev/metryki bez Grok. TypeSafe nadal wymagany do Jev.",
   "settings.show": "Pokaż",
   "settings.hide": "Ukryj",
   "settings.saveKeys": "Zapisz klucze w localStorage",
@@ -296,8 +296,8 @@ const en: Dict = {
   "holdings.allocation": "allocation",
   "holdings.share": "share",
 
-  "top3.title": "Top-3 · Jev",
-  "top3.titleLive": "Top-3 · Jev (live)",
+  "top3.title": "Top-3 · recommendations",
+  "top3.titleLive": "Top-3 · ranking (live)",
   "btn.generate": "Generate recommendations",
   "btn.generating": "Generating…",
   "btn.purchase": "Purchase",
@@ -417,7 +417,7 @@ const en: Dict = {
     "Paste your own keys.",
   "settings.typesafeLabel": "(Jev) — required for ranking",
   "settings.xaiLabel":
-    "/ Grok — optional (analysis); empty = metrics→Jev without LLM",
+    "/ Grok — optional client key for Grok analysis (sent to the ranking API); empty = Jev/metrics without Grok. TypeSafe still required for Jev.",
   "settings.show": "Show",
   "settings.hide": "Hide",
   "settings.saveKeys": "Save keys to localStorage",

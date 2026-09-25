@@ -157,6 +157,7 @@ export async function triggerDryRun(
   const body = {
     ...apiPrefs,
     ...(ts ? { typesafe_key: ts } : {}),
+    ...(xai ? { xai_key: xai } : {}),
   };
 
   const resp = await fetchWithTimeout(
@@ -238,11 +239,14 @@ export async function postRank(
     "Content-Type": "application/json",
   };
   const ts = readTypesafeKey();
+  const xai = readXaiKey();
   if (ts) headers.Authorization = `Bearer ${ts}`;
+  if (xai) headers["X-Xai-Api-Key"] = xai;
   const apiPrefs = rankPrefsForApi(prefs);
   const body = {
     ...apiPrefs,
     ...(ts ? { typesafe_key: ts } : {}),
+    ...(xai ? { xai_key: xai } : {}),
   };
   const resp = await fetchWithTimeout(
     `${base}/rank`,
@@ -299,11 +303,14 @@ export function rankResultFromProxy(
   const pipeline = data.pipeline ?? ["prestocks", "jev"];
   const isMetrics =
     pipeline.includes("metrics_rank") && !pipeline.includes("jev");
+  const xaiPresent = readXaiKey().length > 0;
   return {
     mode: isMetrics ? "metrics_fallback" : "byok_ai",
     sourceLabel: isMetrics
       ? "Źródło: metryki (bez AI — Jev niedostępny)"
-      : "Źródło: PreStocks + AI (BYOK · Jev)",
+      : xaiPresent
+        ? "Źródło: PreStocks + AI (BYOK · Grok+Jev)"
+        : "Źródło: PreStocks + AI (BYOK · Jev)",
     pipeline,
     top3: rows.slice(0, 3),
     scores: rows,
