@@ -89,7 +89,7 @@ function mapRunToRank(
   return {
     mode: isMetrics ? "metrics_fallback" : mode,
     sourceLabel: isMetrics
-      ? "Źródło: metryki (bez AI — awaria Jev)"
+      ? "Źródło: metryki (bez AI — Jev niedostępny)"
       : sourceLabel,
     pipeline,
     top3: filled,
@@ -116,12 +116,13 @@ export async function fetchLatestRun(): Promise<RankResult | null> {
   if (!resp.ok) return null;
   const run = (await resp.json()) as LatestRunJson;
   const byok = readTypesafeKey().length > 0;
+  // /run/latest is a server cache (often keeper) — never claim "hosted Jev" without BYOK.
   return mapRunToRank(
     run,
-    byok ? "byok_ai" : "hosted_jev",
+    byok ? "byok_ai" : "metrics_fallback",
     byok
-      ? "Źródło: PreStocks + AI (BYOK)"
-      : "Źródło: PreStocks + Jev (hosted)",
+      ? "Źródło: cache serwera (/run/latest) · masz TypeSafe BYOK"
+      : "Źródło: cache serwera (/run/latest) — bez TypeSafe BYOK (nie Jev klienta)",
     readExclusions(),
   );
 }
@@ -134,7 +135,7 @@ export async function triggerDryRun(
   const base = dcaApiBase();
   if (!base) {
     throw new Error(
-      "Brak NEXT_PUBLIC_DCA_API_URL — nie można uruchomić hosted Jev.",
+      "Brak NEXT_PUBLIC_DCA_API_URL — nie można wywołać API /run/dry.",
     );
   }
   const headers: Record<string, string> = {
@@ -182,14 +183,12 @@ export async function triggerDryRun(
   const byok = !!ts;
   return mapRunToRank(
     run,
-    byok ? "byok_ai" : "hosted_jev",
+    byok ? "byok_ai" : "metrics_fallback",
     byok
       ? xai
         ? "Źródło: PreStocks + AI (BYOK · Grok+Jev)"
         : "Źródło: PreStocks + AI (BYOK · Jev)"
-      : xai
-        ? "Źródło: PreStocks + AI (hosted Jev + BYOK Grok)"
-        : "Źródło: PreStocks + Jev (hosted)",
+      : "Źródło: /run/dry bez TypeSafe BYOK (nie Jev klienta)",
     apiPrefs.exclusions,
   );
 }
@@ -205,8 +204,8 @@ export async function fetchSampleRun(): Promise<RankResult | null> {
     const run = (await resp.json()) as LatestRunJson;
     return mapRunToRank(
       run,
-      "hosted_jev",
-      "Źródło: PreStocks + Jev (przykładowy wynik / sample)",
+      "metrics_fallback",
+      "Źródło: przykładowy wynik (sample) — nie live Jev",
       readExclusions(),
     );
   } catch {
@@ -301,10 +300,10 @@ export function rankResultFromProxy(
   const isMetrics =
     pipeline.includes("metrics_rank") && !pipeline.includes("jev");
   return {
-    mode: isMetrics ? "metrics_fallback" : "hosted_jev",
+    mode: isMetrics ? "metrics_fallback" : "byok_ai",
     sourceLabel: isMetrics
-      ? "Źródło: metryki (bez AI — awaria Jev)"
-      : "Źródło: PreStocks + Jev (hosted)",
+      ? "Źródło: metryki (bez AI — Jev niedostępny)"
+      : "Źródło: PreStocks + AI (BYOK · Jev)",
     pipeline,
     top3: rows.slice(0, 3),
     scores: rows,
