@@ -1,1 +1,1 @@
-
+W tym repozytorium PreStocks DCA Noir to biurko cotygodniowego zakupu na Solana Devnet. Portfel (Phantom albo Solflare) zasila vault testowym USDC, a zakup trzech spółek z listy (SpaceX, Anthropic, OpenAI, Anduril, Neuralink, Figure AI, Kalshi, Polymarket) płaci tylko z vaulta, po równo. Ranking bierze dane PreStocks, opcjonalnie Grok, potem Jev przy własnym kluczu TypeSafe. Bez tego klucza zostaje ranking metryczny. Jeden keeper trzyma osobny harmonogram na portfel.
