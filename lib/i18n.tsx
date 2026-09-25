@@ -35,11 +35,11 @@ const pl: Dict = {
   "overview.clusterNotDevnet":
     "Uwaga: oczekiwano Devnet, genesis RPC = {genesis}. Sprawdź sieć / RPC.",
 
-  "faucet.button": "Weź 1000 USDC (demo)",
-  "faucet.busy": "Mintuję…",
-  "faucet.success": "Wysłano 1000 mock USDC · sig {sig}",
+  "faucet.button": "Weź 1000 USDC + 0.1 SOL (demo)",
+  "faucet.busy": "Wysyłam USDC + SOL…",
+  "faucet.success": "Wysłano 1000 USDC + 0.1 SOL (demo) · sig {sig}",
   "faucet.error": "Faucet: {error}",
-  "faucet.needWallet": "Podłącz portfel, by wziąć demo USDC.",
+  "faucet.needWallet": "Podłącz portfel, by wziąć demo USDC + SOL.",
 
   "predca.title": "Predca on-chain ({cluster})",
   "predca.rpc": "RPC:",
@@ -231,11 +231,11 @@ const en: Dict = {
   "overview.clusterNotDevnet":
     "Warning: expected Devnet, RPC genesis = {genesis}. Check network / RPC.",
 
-  "faucet.button": "Get 1000 USDC (demo)",
-  "faucet.busy": "Minting…",
-  "faucet.success": "Sent 1000 mock USDC · sig {sig}",
+  "faucet.button": "Get 1000 USDC + 0.1 SOL (demo)",
+  "faucet.busy": "Sending USDC + SOL…",
+  "faucet.success": "Sent 1000 USDC + 0.1 SOL (demo) · sig {sig}",
   "faucet.error": "Faucet: {error}",
-  "faucet.needWallet": "Connect a wallet to claim demo USDC.",
+  "faucet.needWallet": "Connect a wallet to claim demo USDC + SOL.",
 
   "predca.title": "Predca on-chain ({cluster})",
   "predca.rpc": "RPC:",

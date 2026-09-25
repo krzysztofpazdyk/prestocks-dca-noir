@@ -97,7 +97,13 @@ export function OverviewView() {
         res.signature.length > 16
           ? `${res.signature.slice(0, 8)}…${res.signature.slice(-8)}`
           : res.signature;
-      setFaucetMsg(t("faucet.success", { sig: sigShort }));
+      const solPart =
+        res.solSkipped
+          ? " (SOL skipped)"
+          : res.solSignature
+            ? ` · SOL ${res.solSignature.length > 16 ? `${res.solSignature.slice(0, 8)}…${res.solSignature.slice(-8)}` : res.solSignature}`
+            : "";
+      setFaucetMsg(t("faucet.success", { sig: `${sigShort}${solPart}` }));
       await predca.refresh();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

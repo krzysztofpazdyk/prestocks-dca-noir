@@ -324,11 +324,15 @@ export type FaucetUsdcResponse = {
   mint: string;
   wallet: string;
   ata?: string;
+  solSignature?: string | null;
+  solAmountUi?: number;
+  solSkipped?: boolean;
+  solSkipReason?: string;
   error?: string;
   detail?: string;
 };
 
-/** Devnet demo faucet: mint 1000 mock USDC to the connected wallet. */
+/** Devnet demo faucet: mint 1000 mock USDC + 0.1 SOL (if needed) to the wallet. */
 export async function claimFaucetUsdc(
   wallet: string,
 ): Promise<FaucetUsdcResponse> {
