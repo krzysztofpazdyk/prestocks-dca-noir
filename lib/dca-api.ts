@@ -143,7 +143,9 @@ export async function triggerDryRun(
   };
   const ts = readTypesafeKey();
   const xai = readXaiKey();
-  if (ts) headers["X-Typesafe-Api-Key"] = ts;
+  // Same TypeSafe contract as postRank / API: Bearer + body.typesafe_key
+  // (X-Typesafe-Api-Key is ignored by the server after BYOK hardening).
+  if (ts) headers.Authorization = `Bearer ${ts}`;
   if (xai) headers["X-Xai-Api-Key"] = xai;
   const apiPrefs = rankPrefsForApi(
     prefs ??
@@ -151,13 +153,17 @@ export async function triggerDryRun(
         ? { ...readRankPrefs(), exclusions }
         : undefined),
   );
+  const body = {
+    ...apiPrefs,
+    ...(ts ? { typesafe_key: ts } : {}),
+  };
 
   const resp = await fetchWithTimeout(
     `${base}/run/dry`,
     {
       method: "POST",
       headers,
-      body: JSON.stringify(apiPrefs),
+      body: JSON.stringify(body),
     },
     RANK_TIMEOUT_MS,
   );
@@ -167,11 +173,10 @@ export async function triggerDryRun(
     detail?: unknown;
   };
   if (!resp.ok) {
-    throw new Error(
-      typeof data.detail === "string"
-        ? data.detail
-        : `API /run/dry HTTP ${resp.status}`,
-    );
+    const errMsg =
+      (data as { error?: string }).error ||
+      (typeof data.detail === "string" ? data.detail : null);
+    throw new Error(errMsg || `API /run/dry HTTP ${resp.status}`);
   }
   const run = data.run ?? (data as LatestRunJson);
   const byok = !!ts;
