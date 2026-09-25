@@ -194,6 +194,14 @@ const pl: Dict = {
   "settings.buyDespiteIpo": "Kup PreStock mimo odbytego IPO",
   "settings.deadlineInvalid": "Termin bez znaczenia",
   "settings.ipoPremium": "Premia IPO ma znaczenie",
+  "settings.prefsDirtyHint":
+    "Zmieniono ustawienia. Aby zapisać je u keepersa, trzeba podpisać wiadomość w portfelu.",
+  "settings.prefsSignSave": "Podpisz i zapisz",
+  "settings.prefsSignSaving": "Podpisywanie…",
+  "settings.prefsConnectWallet": "Podłącz portfel, aby podpisać i zapisać",
+  "settings.prefsSignNeedWallet": "Podłącz portfel z signMessage, aby zapisać",
+  "settings.prefsSignFailed": "Nie udało się zapisać (podpis lub keeper).",
+  "settings.prefsSignOk": "Zapisano u keepersa ✓",
   "settings.byokTitle": "BYOK — własne klucze API (Bring Your Own)",
   "settings.byokIntro":
     "Wklej własne klucze.",
@@ -396,6 +404,14 @@ const en: Dict = {
   "settings.buyDespiteIpo": "Buy PreStock even after IPO",
   "settings.deadlineInvalid": "Deadline irrelevant",
   "settings.ipoPremium": "IPO premium matters",
+  "settings.prefsDirtyHint":
+    "Settings changed. Sign a wallet message to save them to the keeper.",
+  "settings.prefsSignSave": "Sign & save",
+  "settings.prefsSignSaving": "Signing…",
+  "settings.prefsConnectWallet": "Connect wallet to sign and save",
+  "settings.prefsSignNeedWallet": "Connect a wallet with signMessage to save",
+  "settings.prefsSignFailed": "Could not save (signature or keeper).",
+  "settings.prefsSignOk": "Saved to keeper ✓",
   "settings.byokTitle": "BYOK — Bring Your Own API Keys",
   "settings.byokIntro":
     "Paste your own keys.",

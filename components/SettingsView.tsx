@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { DEFAULT_SETTINGS } from "@/lib/mock-data";
 import { usePredca } from "@/lib/hooks/usePredca";
 import { useI18n } from "@/lib/i18n";
 import {
+  parseExclusions,
   readExclusionsRaw,
   writeExclusionsRaw,
 } from "@/lib/exclusions";
@@ -22,12 +23,10 @@ import {
 } from "@/lib/rank-prefs";
 import {
   keeperGetPrefs,
-  keeperHealth,
   keeperPushPrefs,
   keeperStatus,
 } from "@/lib/keeper-client";
 import {
-  readWeeklyBudgetUsd,
   writeWeeklyBudgetUsd,
 } from "@/lib/auto-weekly-buy";
 import { useAutoWeeklyBuy } from "@/lib/hooks/useAutoWeeklyBuy";
@@ -35,10 +34,50 @@ import { useAutoWeeklyBuy } from "@/lib/hooks/useAutoWeeklyBuy";
 const LS_TYPESAFE = "prestocks.TYPESAFE_API_KEY";
 const LS_XAI = "prestocks.XAI_API_KEY";
 
+/** Keeper-synced ranking prefs snapshot for dirty detection. */
+type PrefsBaseline = {
+  exclusionsKey: string;
+  deadlineInvalid: boolean;
+  ipoPremium: boolean;
+  buyDespiteIpo: boolean;
+};
+
+function exclusionsKey(raw: string): string {
+  return parseExclusions(raw)
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean)
+    .sort()
+    .join("\0");
+}
+
+function makeBaseline(
+  exclusionsRaw: string,
+  deadlineInvalid: boolean,
+  ipoPremium: boolean,
+  buyDespiteIpo: boolean,
+): PrefsBaseline {
+  return {
+    exclusionsKey: exclusionsKey(exclusionsRaw),
+    deadlineInvalid,
+    ipoPremium,
+    buyDespiteIpo,
+  };
+}
+
+function baselinesEqual(a: PrefsBaseline | null, b: PrefsBaseline): boolean {
+  if (!a) return false;
+  return (
+    a.exclusionsKey === b.exclusionsKey &&
+    a.deadlineInvalid === b.deadlineInvalid &&
+    a.ipoPremium === b.ipoPremium &&
+    a.buyDespiteIpo === b.buyDespiteIpo
+  );
+}
+
 export function SettingsView() {
   const predca = usePredca();
   const autoBuy = useAutoWeeklyBuy();
-  const { publicKey } = useWallet();
+  const { publicKey, signMessage } = useWallet();
   const { t } = useI18n();
   const [weekly, setWeekly] = useState(DEFAULT_SETTINGS.weeklyAmountUsd);
   const [exclusions, setExclusions] = useState(
@@ -60,6 +99,13 @@ export function SettingsView() {
   const [byokSaved, setByokSaved] = useState(false);
   const [prefsReady, setPrefsReady] = useState(false);
   const [autoConfirmOpen, setAutoConfirmOpen] = useState(false);
+  const [syncedBaseline, setSyncedBaseline] = useState<PrefsBaseline | null>(
+    null,
+  );
+  const [prefsSaving, setPrefsSaving] = useState(false);
+  const [prefsSaveMsg, setPrefsSaveMsg] = useState<string | null>(null);
+  const prevAutoPhase = useRef(autoBuy.phase);
+
   // Hydrate ranking toggles from keeper GET /prefs (authoritative for buys).
   // prefsReady stays false until hydrate finishes so we never push stale local
   // over keeper. Prefs file is global on the demo daemon; still skip apply when
@@ -67,6 +113,8 @@ export function SettingsView() {
   useEffect(() => {
     let cancelled = false;
     setPrefsReady(false);
+    setSyncedBaseline(null);
+    setPrefsSaveMsg(null);
     void (async () => {
       try {
         setTypesafeKey(localStorage.getItem(LS_TYPESAFE) ?? "");
@@ -111,6 +159,9 @@ export function SettingsView() {
       setDeadlineInvalid(deadline);
       setIpoPremium(ipo);
       setBuyDespiteIpo(buyDespite);
+      setSyncedBaseline(
+        makeBaseline(exclusionsRaw, deadline, ipo, buyDespite),
+      );
       setPrefsReady(true);
     })();
     return () => {
@@ -142,18 +193,26 @@ export function SettingsView() {
     writeBuyDespiteIpo(buyDespiteIpo);
   }, [buyDespiteIpo, prefsReady]);
 
-  // UI → keeper prefs.json after hydrate only. Unsigned call is a no-op on the
-  // public API (needs signature) — intentional; sign-on-change deferred.
+  // Enable flow already signed-pushes prefs — adopt current UI as baseline
+  // when a buy cycle completes successfully (buying → ok).
   useEffect(() => {
+    const prev = prevAutoPhase.current;
+    prevAutoPhase.current = autoBuy.phase;
     if (!prefsReady) return;
-    const id = window.setTimeout(() => {
-      void (async () => {
-        if (!(await keeperHealth())) return;
-        await keeperPushPrefs(rankPrefsForApi(readRankPrefs()));
-      })();
-    }, 400);
-    return () => window.clearTimeout(id);
-  }, [deadlineInvalid, ipoPremium, buyDespiteIpo, exclusions, prefsReady]);
+    if (prev === "buying" && autoBuy.phase === "ok") {
+      setSyncedBaseline(
+        makeBaseline(exclusions, deadlineInvalid, ipoPremium, buyDespiteIpo),
+      );
+      setPrefsSaveMsg(null);
+    }
+  }, [
+    autoBuy.phase,
+    prefsReady,
+    exclusions,
+    deadlineInvalid,
+    ipoPremium,
+    buyDespiteIpo,
+  ]);
 
   useEffect(() => {
     if (!prefsReady) return;
@@ -169,8 +228,6 @@ export function SettingsView() {
     }
   }, [predca.weeklyBudgetUsd]);
 
-
-
   useEffect(() => {
     if (!autoConfirmOpen) return;
     function onKey(e: KeyboardEvent) {
@@ -180,6 +237,50 @@ export function SettingsView() {
     return () => window.removeEventListener("keydown", onKey);
   }, [autoConfirmOpen]);
 
+  const currentBaseline = useMemo(
+    () =>
+      makeBaseline(exclusions, deadlineInvalid, ipoPremium, buyDespiteIpo),
+    [exclusions, deadlineInvalid, ipoPremium, buyDespiteIpo],
+  );
+
+  const prefsDirty =
+    prefsReady &&
+    syncedBaseline != null &&
+    !baselinesEqual(syncedBaseline, currentBaseline);
+
+  async function signAndSavePrefs() {
+    setPrefsSaveMsg(null);
+    const owner = publicKey?.toBase58();
+    if (!owner || !signMessage) {
+      setPrefsSaveMsg(t("settings.prefsSignNeedWallet"));
+      return;
+    }
+    setPrefsSaving(true);
+    try {
+      writeExclusionsRaw(exclusions);
+      writeDeadlineInvalid(deadlineInvalid);
+      writeIpoPremiumMatters(ipoPremium);
+      writeBuyDespiteIpo(buyDespiteIpo);
+      const res = await keeperPushPrefs(
+        rankPrefsForApi(readRankPrefs()),
+        owner,
+        signMessage,
+      );
+      if (!res.ok) {
+        setPrefsSaveMsg(t("settings.prefsSignFailed"));
+        return;
+      }
+      setSyncedBaseline(
+        makeBaseline(exclusions, deadlineInvalid, ipoPremium, buyDespiteIpo),
+      );
+      setPrefsSaveMsg(t("settings.prefsSignOk"));
+    } catch {
+      setPrefsSaveMsg(t("settings.prefsSignFailed"));
+    } finally {
+      setPrefsSaving(false);
+    }
+  }
+
   function saveByok() {
     try {
       localStorage.setItem(LS_TYPESAFE, typesafeKey.trim());
@@ -188,12 +289,14 @@ export function SettingsView() {
       writeDeadlineInvalid(deadlineInvalid);
       writeIpoPremiumMatters(ipoPremium);
       writeBuyDespiteIpo(buyDespiteIpo);
-      void keeperPushPrefs(rankPrefsForApi(readRankPrefs()));
+      // Prefs require a wallet signature — do not pretend an unsigned push saves.
       setByokSaved(true);
     } catch {
       setByokSaved(false);
     }
   }
+
+  const canSign = !!publicKey && !!signMessage;
 
   return (
     <div className="mx-auto max-w-xl space-y-5">
@@ -246,6 +349,44 @@ export function SettingsView() {
           checked={ipoPremium}
           onChange={setIpoPremium}
         />
+        {prefsDirty ? (
+          <div className="space-y-2 border-t border-[#fbbf2433] pt-3">
+            <p className="text-xs leading-relaxed text-[#fbbf24]">
+              {t("settings.prefsDirtyHint")}
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={prefsSaving || !canSign}
+                onClick={() => void signAndSavePrefs()}
+                title={
+                  !canSign ? t("settings.prefsConnectWallet") : undefined
+                }
+                className="rounded border border-[#fbbf2466] bg-[#0c0e12] px-3 py-1.5 text-[10px] uppercase tracking-wider text-[#fbbf24] hover:bg-[#fbbf2411] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {prefsSaving
+                  ? t("settings.prefsSignSaving")
+                  : t("settings.prefsSignSave")}
+              </button>
+              {!canSign ? (
+                <span className="text-[10px] text-[#8b95a8]">
+                  {t("settings.prefsConnectWallet")}
+                </span>
+              ) : null}
+            </div>
+            {prefsSaveMsg ? (
+              <p
+                className={`text-[10px] ${
+                  prefsSaveMsg === t("settings.prefsSignOk")
+                    ? "text-[#2dd4bf]"
+                    : "text-[#fca5a5]"
+                }`}
+              >
+                {prefsSaveMsg}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       <div className="space-y-2 rounded-lg border border-[#1e2633] bg-[#141820] p-5">
