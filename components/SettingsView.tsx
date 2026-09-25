@@ -164,6 +164,38 @@ export function SettingsView() {
         </p>
       )}
 
+      <label className="block space-y-2 rounded-lg border border-[#1e2633] bg-[#141820] p-5">
+        <span className="text-[11px] uppercase tracking-wider text-[#8b95a8]">
+          {t("settings.exclusions")}
+        </span>
+        <input
+          type="text"
+          value={exclusions}
+          onChange={(e) => setExclusions(e.target.value)}
+          onBlur={() => writeExclusionsRaw(exclusions)}
+          placeholder="xAI, OpenAI"
+          className="w-full rounded border border-[#1e2633] bg-[#0c0e12] px-3 py-2 text-sm outline-none focus:border-[#a78bfa66]"
+        />
+      </label>
+
+      <div className="space-y-3 rounded-lg border border-[#1e2633] bg-[#141820] p-5">
+        <Toggle
+          label={t("settings.buyDespiteIpo")}
+          checked={buyDespiteIpo}
+          onChange={setBuyDespiteIpo}
+        />
+        <Toggle
+          label={t("settings.deadlineInvalid")}
+          checked={deadlineInvalid}
+          onChange={setDeadlineInvalid}
+        />
+        <Toggle
+          label={t("settings.ipoPremium")}
+          checked={ipoPremium}
+          onChange={setIpoPremium}
+        />
+      </div>
+
       <div className="space-y-2 rounded-lg border border-[#1e2633] bg-[#141820] p-5">
         <label className="block space-y-2">
           <span className="text-[11px] uppercase tracking-wider text-[#8b95a8]">
@@ -268,38 +300,6 @@ export function SettingsView() {
           </div>
         </div>
       ) : null}
-
-      <label className="block space-y-2 rounded-lg border border-[#1e2633] bg-[#141820] p-5">
-        <span className="text-[11px] uppercase tracking-wider text-[#8b95a8]">
-          {t("settings.exclusions")}
-        </span>
-        <input
-          type="text"
-          value={exclusions}
-          onChange={(e) => setExclusions(e.target.value)}
-          onBlur={() => writeExclusionsRaw(exclusions)}
-          placeholder="xAI, OpenAI"
-          className="w-full rounded border border-[#1e2633] bg-[#0c0e12] px-3 py-2 text-sm outline-none focus:border-[#a78bfa66]"
-        />
-      </label>
-
-      <div className="space-y-3 rounded-lg border border-[#1e2633] bg-[#141820] p-5">
-        <Toggle
-          label={t("settings.buyDespiteIpo")}
-          checked={buyDespiteIpo}
-          onChange={setBuyDespiteIpo}
-        />
-        <Toggle
-          label={t("settings.deadlineInvalid")}
-          checked={deadlineInvalid}
-          onChange={setDeadlineInvalid}
-        />
-        <Toggle
-          label={t("settings.ipoPremium")}
-          checked={ipoPremium}
-          onChange={setIpoPremium}
-        />
-      </div>
 
       <section className="space-y-3 rounded-lg border border-[#2dd4bf33] bg-[#141820] p-5">
         <div className="flex items-center justify-between gap-2">
