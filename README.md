@@ -100,9 +100,9 @@ W **Ustawieniach** wklejasz własne klucze (nie konta autora apki). Zapis w **lo
 ## GitHub Pages (static / DEVNET)
 
 Static export deploys to:
-**https://krzysztofpazdyk.github.io/prestocks-dca-noir2.0/**
+**https://krzysztofpazdyk.github.io/prestocks-dca-noir/**
 
-- Build uses `output: 'export'` with `basePath` / `assetPrefix` `/prestocks-dca-noir2.0`.
+- Build uses `output: 'export'` with `basePath` / `assetPrefix` `/prestocks-dca-noir`.
 - Production env (`.env.production`) points at **Solana DEVNET** only — public `NEXT_PUBLIC_*` values, no private keys.
 - CI: `.github/workflows/pages.yml` builds on push to `main` and uploads `out/` to GitHub Pages.
 

@@ -197,7 +197,7 @@ export async function triggerDryRun(
 /** Load sample latest-run from static Pages asset. */
 export async function fetchSampleRun(): Promise<RankResult | null> {
   const base = (
-    process.env.NEXT_PUBLIC_BASE_PATH || "/prestocks-dca-noir2.0"
+    process.env.NEXT_PUBLIC_BASE_PATH || "/prestocks-dca-noir"
   ).replace(/\/$/, "");
   try {
     const resp = await fetch(`${base}/data/latest-run-sample.json`);

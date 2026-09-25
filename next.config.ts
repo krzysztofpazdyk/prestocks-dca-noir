@@ -8,8 +8,8 @@ const isDev = process.env.NODE_ENV !== "production";
 const nextConfig: NextConfig = {
   ...(!isDev ? { output: "export" as const } : {}),
   images: { unoptimized: true },
-  basePath: "/prestocks-dca-noir2.0",
-  assetPrefix: "/prestocks-dca-noir2.0",
+  basePath: "/prestocks-dca-noir",
+  assetPrefix: "/prestocks-dca-noir",
   trailingSlash: true,
   reactStrictMode: true,
   turbopack: {

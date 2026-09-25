@@ -26,7 +26,7 @@ export type ProductsFetchResult = {
 
 function assetUrl(path: string): string {
   const base = (
-    process.env.NEXT_PUBLIC_BASE_PATH || "/prestocks-dca-noir2.0"
+    process.env.NEXT_PUBLIC_BASE_PATH || "/prestocks-dca-noir"
   ).replace(/\/$/, "");
   const p = path.startsWith("/") ? path : `/${path}`;
   return `${base}${p}`;
@@ -258,7 +258,7 @@ async function fetchSnapshot(): Promise<{
 function localLiveProxyUrl(): string | null {
   if (typeof window === "undefined") return null;
   const base = (
-    process.env.NEXT_PUBLIC_BASE_PATH || "/prestocks-dca-noir2.0"
+    process.env.NEXT_PUBLIC_BASE_PATH || "/prestocks-dca-noir"
   ).replace(/\/$/, "");
   return `${window.location.origin}${base}/api/prestocks/live/`;
 }
