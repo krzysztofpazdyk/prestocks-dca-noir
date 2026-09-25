@@ -1,8 +1,8 @@
 /**
  * Weekly DCA ranking:
- * 1. Grok analysis (if XAI_API_KEY) → Jev top-3 (TYPESAFE_API_KEY, via /api/jev)
- * 2. Else hosted API /rank or /run/dry
- * 3. metrics_rank ONLY if Jev is down — clearly labeled
+ * 1. Grok analysis (if XAI_API_KEY) → Jev top-3 (client TYPESAFE BYOK, via /api/jev)
+ * 2. Else hosted API /rank or /run/dry — only when client TypeSafe BYOK is set
+ * 3. metrics_rank when no BYOK or Jev is down — clearly labeled (no free hosted Jev)
  * Equal ⅓ buy of the 3 names is a separate Predca step.
  */
 
@@ -80,8 +80,8 @@ export async function loadInitialRanking(): Promise<{
 }
 
 /**
- * Run ranking now: Grok→Jev when TYPESAFE_API_KEY is set, else hosted
- * /rank or /run/dry, else emergency metrics.
+ * Run ranking now: Grok→Jev / hosted /rank only when client TypeSafe BYOK
+ * is set (hasByokTypesafe). Without BYOK: emergency metrics — no hosted free Jev.
  */
 export async function runRankingNow(
   productsResult: ProductsFetchResult,
@@ -98,9 +98,11 @@ export async function runRankingNow(
     throw new Error("Za mało produktów PreStocks do rankingu (<3).");
   }
 
+  const byok = hasByokTypesafe();
   let byokFallback: RankResult | null = null;
+
   // GitHub Pages has no Route Handler — skip same-origin /api/jev (POST → 405).
-  if (hasByokTypesafe() && canUseSameOriginJevProxy()) {
+  if (byok && canUseSameOriginJevProxy()) {
     const result = await runByokAiRank({
       products,
       premiumsSource: productsResult.premiumsSource,
@@ -121,7 +123,9 @@ export async function runRankingNow(
     }
   }
 
-  if (dcaApiBase()) {
+  // Hosted /rank and /run/dry need client TypeSafe — never call without BYOK
+  // (API also rejects public requests without a client key; no free hosted Jev).
+  if (byok && dcaApiBase()) {
     try {
       const proxy = await postRank(prefs);
       if (proxy.top3.length >= 3) {
@@ -158,9 +162,12 @@ export async function runRankingNow(
     return byokFallback;
   }
 
+  const reason = byok
+    ? "Brak NEXT_PUBLIC_DCA_API_URL i brak same-origin /api/jev — Jev nie może wystartować. Awaryjny ranking metryczny."
+    : "Wymagany klucz TypeSafe (BYOK) do Jev — brak darmowego hosted Jev. Awaryjny ranking metryczny.";
   const fallback = emergencyFromProducts(
     products,
-    "Brak TYPESAFE (BYOK) i brak NEXT_PUBLIC_DCA_API_URL — Jev nie może wystartować. Awaryjny ranking metryczny.",
+    reason,
     prefs.exclusions,
     prefs,
   );
@@ -174,7 +181,6 @@ export function activeModeLabel(
 ): string {
   if (rank?.sourceLabel) return rank.sourceLabel;
   if (hasByok) return "Źródło: PreStocks + AI (BYOK) — czekam na ranking";
-  if (dcaApiBase())
-    return "Źródło: PreStocks + Jev (hosted) — czekam na ranking";
-  return "Źródło: PreStocks API — brak Jev (skonfiguruj API lub BYOK)";
+  // Without client TypeSafe BYOK we never call hosted Jev — do not claim hosted.
+  return "Źródło: PreStocks — brak TypeSafe BYOK (wymagany do Jev)";
 }

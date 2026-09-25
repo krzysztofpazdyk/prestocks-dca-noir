@@ -1,6 +1,7 @@
 /**
- * Client for hosted DCA API (Jev key stays on server).
- * Optional BYOK headers override hosted TYPESAFE / enable Grok.
+ * Client for hosted DCA API.
+ * Client TypeSafe BYOK is required for Jev (/rank, /run/dry); empty key must not
+ * spend server TYPESAFE. Optional XAI BYOK enables Grok.
  */
 
 import { dcaApiBase, readTypesafeKey, readXaiKey } from "@/lib/keys";
@@ -217,8 +218,9 @@ export type RankProxyResponse = {
 };
 
 /**
- * CORS-safe ranking via DCA API proxy (Jev runs server-side).
- * Sends Bearer from localStorage when present; empty = server key.
+ * CORS-safe ranking via DCA API proxy (Jev with client TypeSafe key).
+ * Sends Bearer / body.typesafe_key from localStorage when present.
+ * Client key is required for Jev — empty must not imply server spend.
  */
 export async function postRank(
   prefs?: RankPrefs,
