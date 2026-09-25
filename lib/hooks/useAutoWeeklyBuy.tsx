@@ -62,7 +62,7 @@ const AutoWeeklyBuyContext = createContext<AutoWeeklyBuyApi | null>(null);
 let cycleInFlight = false;
 
 function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
-  const { connected, publicKey } = useWallet();
+  const { connected, publicKey, signMessage } = useWallet();
   const predca = usePredca();
   const { locale, t } = useI18n();
   const [enabled, setEnabledState] = useState(DEFAULT_SETTINGS.autoWeeklyBuy);
@@ -82,6 +82,8 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
   connectedRef.current = connected;
   const ownerRef = useRef(publicKey?.toBase58() ?? null);
   ownerRef.current = publicKey?.toBase58() ?? null;
+  const signMessageRef = useRef(signMessage);
+  signMessageRef.current = signMessage;
   const enabledRef = useRef(enabled);
   enabledRef.current = enabled;
   const tRef = useRef(t);
@@ -103,29 +105,11 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
         (typeof st.owner === "string" && st.owner.trim()) || null;
       const sameOwner =
         !!owner && !!configuredOwner && owner === configuredOwner;
-      const hadCycle =
-        sameOwner &&
-        (Boolean(st.signature) ||
-          st.phase === "ok" ||
-          st.phase === "not_due" ||
-          st.phase === "daemon" ||
-          st.phase === "error");
-      // Matching wallet + keeper/file enabled wins over localStorage default false.
-      const on =
-        (sameOwner && keeperOn) ||
-        keeperOn ||
-        local === true ||
-        (local !== false && hadCycle);
-      setEnabledState(on);
-      if (on) {
-        writeAutoWeeklyBuy(true);
-        // Re-assert enable on live daemon (force=false = no buy) when file says ON.
-        if (owner && sameOwner && (st.source === "file" || !keeperOn)) {
-          void keeperEnable(owner, false);
-        } else if (!keeperOn && owner) {
-          void keeperEnable(owner, false);
-        }
-      }
+      // Prefer same-owner + keeper status; do not auto-sign enable on mount
+      // (wallet popup). Toggle / startCycle signs explicitly.
+      const showOn = (sameOwner && keeperOn) || (sameOwner && local === true);
+      setEnabledState(showOn);
+      if (showOn) writeAutoWeeklyBuy(true);
       setPrefsReady(true);
     })();
     return () => {
@@ -139,7 +123,21 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
     setEnabledState(value);
     writeAutoWeeklyBuy(value);
     if (!value) {
-      void keeperDisable();
+      const owner = ownerRef.current;
+      const sign = signMessageRef.current;
+      if (owner && sign) {
+        void (async () => {
+          const res = await keeperDisable(owner, sign);
+          if (!res.ok) {
+            setPhase("error");
+            setMessage(
+              res.error?.includes("signature") || res.error?.includes("sign_")
+                ? `Podpis odrzucony: ${res.error}`
+                : res.error || "Keeper disable failed",
+            );
+          }
+        })();
+      }
     }
   }, []);
 
@@ -160,6 +158,13 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
     if (cycleInFlight) return;
     cycleInFlight = true;
     try {
+      const sign = signMessageRef.current;
+      if (!sign) {
+        setPhase("blocked");
+        setBlockReason("need_wallet");
+        setMessage("Portfel musi obsługiwać signMessage (włącz auto-buy wymaga podpisu).");
+        return;
+      }
       const alive = await keeperHealth();
       if (!alive) {
         setPhase("error");
@@ -192,10 +197,31 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
       });
       setPhase("buying");
       setMessage(tRef.current("auto.status.buyingKeeper"));
-      await keeperPushPrefs(rankPrefsForApi(readRankPrefs()));
-      const ran = await keeperEnable(owner, true);
+      const prefsRes = await keeperPushPrefs(
+        rankPrefsForApi(readRankPrefs()),
+        owner,
+        sign,
+      );
+      if (!prefsRes.ok) {
+        throw new Error(
+          prefsRes.error?.includes("signature") || prefsRes.error?.includes("sign_")
+            ? `Podpis odrzucony (prefs): ${prefsRes.error}`
+            : prefsRes.error || "prefs failed",
+        );
+      }
+      const ran = await keeperEnable(owner, true, sign);
       if (!ran.ok) {
-        throw new Error(ran.error || tRef.current("auto.status.keeperDown"));
+        const err = ran.error || tRef.current("auto.status.keeperDown");
+        if (
+          String(err).includes("signature") ||
+          String(err).includes("sign_") ||
+          String(err).includes("Unauthorized") ||
+          String(err).includes("403") ||
+          String(err).includes("401")
+        ) {
+          throw new Error(`Podpis odrzucony: ${err}`);
+        }
+        throw new Error(err);
       }
       setEnabledState(true);
       writeAutoWeeklyBuy(true);
