@@ -145,7 +145,7 @@ const pl: Dict = {
   "auto.status.buyingKeeper":
     "Auto-zakup: keeper kupuje z vaulta (bez podpisu portfela).",
   "auto.status.keeperDown":
-    "Keeper nie działa. Uruchom: npm run weekly-buy:daemon — UI nie kupuje sam.",
+    "Keeper niedostępny (tunel lub usługa). UI nie kupuje sam — spróbuj później lub sprawdź połączenie.",
   "auto.status.ok":
     "Automatyczny zakup tygodniowy OK · ${amount} z vault → {tokens}",
   "auto.status.vaultLow":
@@ -355,7 +355,7 @@ const en: Dict = {
   "auto.status.buyingKeeper":
     "Auto-buy: keeper is purchasing from the vault (no wallet signature).",
   "auto.status.keeperDown":
-    "Keeper is not running. Start: npm run weekly-buy:daemon — this tab does not buy.",
+    "Keeper unavailable (tunnel or service). This tab does not buy on its own — try again later or check the connection.",
   "auto.status.ok":
     "Weekly auto-buy OK · ${amount} from vault → {tokens}",
   "auto.status.vaultLow":
