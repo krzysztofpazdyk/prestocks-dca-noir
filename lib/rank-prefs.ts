@@ -154,3 +154,41 @@ export function rankPrefsForApi(prefs?: RankPrefs): {
     buy_despite_ipo: p.buyDespiteIpo,
   };
 }
+
+/** Snake_case prefs as returned by keeper GET /prefs (inverse of rankPrefsForApi). */
+export type ApiRankPrefs = {
+  exclusions: string[];
+  deadlines_unimportant: boolean;
+  premiums_matter: boolean;
+  premiums_especially_near_ipo: boolean;
+  buy_despite_ipo: boolean;
+};
+
+/**
+ * Map keeper/API prefs into localStorage via existing writers.
+ * Partial payloads apply only defined fields. Returns refreshed RankPrefs.
+ */
+export function applyApiPrefsToLocal(
+  api: Partial<ApiRankPrefs> | null | undefined,
+): RankPrefs {
+  if (!api) return readRankPrefs();
+  if (Array.isArray(api.exclusions)) {
+    writeExclusionsRaw(api.exclusions.join(", "));
+  }
+  if (typeof api.deadlines_unimportant === "boolean") {
+    writeDeadlineInvalid(api.deadlines_unimportant);
+  }
+  const premiums =
+    typeof api.premiums_matter === "boolean"
+      ? api.premiums_matter
+      : typeof api.premiums_especially_near_ipo === "boolean"
+        ? api.premiums_especially_near_ipo
+        : undefined;
+  if (typeof premiums === "boolean") {
+    writeIpoPremiumMatters(premiums);
+  }
+  if (typeof api.buy_despite_ipo === "boolean") {
+    writeBuyDespiteIpo(api.buy_despite_ipo);
+  }
+  return readRankPrefs();
+}

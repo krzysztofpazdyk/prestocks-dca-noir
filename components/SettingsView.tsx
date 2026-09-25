@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useWallet } from "@solana/wallet-adapter-react";
 import { DEFAULT_SETTINGS } from "@/lib/mock-data";
 import { usePredca } from "@/lib/hooks/usePredca";
 import { useI18n } from "@/lib/i18n";
@@ -9,6 +10,7 @@ import {
   writeExclusionsRaw,
 } from "@/lib/exclusions";
 import {
+  applyApiPrefsToLocal,
   rankPrefsForApi,
   readBuyDespiteIpo,
   readDeadlineInvalid,
@@ -18,7 +20,12 @@ import {
   writeDeadlineInvalid,
   writeIpoPremiumMatters,
 } from "@/lib/rank-prefs";
-import { keeperHealth, keeperPushPrefs } from "@/lib/keeper-client";
+import {
+  keeperGetPrefs,
+  keeperHealth,
+  keeperPushPrefs,
+  keeperStatus,
+} from "@/lib/keeper-client";
 import {
   readWeeklyBudgetUsd,
   writeWeeklyBudgetUsd,
@@ -31,6 +38,7 @@ const LS_XAI = "prestocks.XAI_API_KEY";
 export function SettingsView() {
   const predca = usePredca();
   const autoBuy = useAutoWeeklyBuy();
+  const { publicKey } = useWallet();
   const { t } = useI18n();
   const [weekly, setWeekly] = useState(DEFAULT_SETTINGS.weeklyAmountUsd);
   const [exclusions, setExclusions] = useState(
@@ -52,20 +60,63 @@ export function SettingsView() {
   const [byokSaved, setByokSaved] = useState(false);
   const [prefsReady, setPrefsReady] = useState(false);
   const [autoConfirmOpen, setAutoConfirmOpen] = useState(false);
+  // Hydrate ranking toggles from keeper GET /prefs (authoritative for buys).
+  // prefsReady stays false until hydrate finishes so we never push stale local
+  // over keeper. Prefs file is global on the demo daemon; still skip apply when
+  // a connected wallet differs from the registered owner.
   useEffect(() => {
-    try {
-      setTypesafeKey(localStorage.getItem(LS_TYPESAFE) ?? "");
-      setXaiKey(localStorage.getItem(LS_XAI) ?? "");
-      setExclusions(readExclusionsRaw());
-      setDeadlineInvalid(readDeadlineInvalid());
-      setIpoPremium(readIpoPremiumMatters());
-      setBuyDespiteIpo(readBuyDespiteIpo());
-    } catch {
-      /* ignore */
-    } finally {
+    let cancelled = false;
+    setPrefsReady(false);
+    void (async () => {
+      try {
+        setTypesafeKey(localStorage.getItem(LS_TYPESAFE) ?? "");
+        setXaiKey(localStorage.getItem(LS_XAI) ?? "");
+      } catch {
+        /* ignore */
+      }
+
+      let exclusionsRaw = readExclusionsRaw();
+      let deadline = readDeadlineInvalid();
+      let ipo = readIpoPremiumMatters();
+      let buyDespite = readBuyDespiteIpo();
+
+      try {
+        const [status, prefsRes] = await Promise.all([
+          keeperStatus(),
+          keeperGetPrefs(),
+        ]);
+        if (cancelled) return;
+
+        const configuredOwner =
+          (typeof status.owner === "string" && status.owner.trim()) || null;
+        const wallet = publicKey?.toBase58() ?? null;
+        const ownerConflict =
+          !!configuredOwner && !!wallet && configuredOwner !== wallet;
+
+        // Daemon stores a single prefs.json (global). Apply when GET ok and
+        // there is no owner/wallet mismatch.
+        if (prefsRes.ok && prefsRes.prefs && !ownerConflict) {
+          const applied = applyApiPrefsToLocal(prefsRes.prefs);
+          exclusionsRaw = applied.exclusionsRaw;
+          deadline = applied.deadlineInvalid;
+          ipo = applied.ipoPremiumMatters;
+          buyDespite = applied.buyDespiteIpo;
+        }
+      } catch {
+        /* keeper down / empty → keep localStorage */
+      }
+
+      if (cancelled) return;
+      setExclusions(exclusionsRaw);
+      setDeadlineInvalid(deadline);
+      setIpoPremium(ipo);
+      setBuyDespiteIpo(buyDespite);
       setPrefsReady(true);
-    }
-  }, []);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [publicKey]);
 
   // Persist exclusions (debounced) so ranking reads localStorage mid-session.
   useEffect(() => {
@@ -91,7 +142,8 @@ export function SettingsView() {
     writeBuyDespiteIpo(buyDespiteIpo);
   }, [buyDespiteIpo, prefsReady]);
 
-  // UI → keeper prefs.json (IPO / deadline / premium + exclusions)
+  // UI → keeper prefs.json after hydrate only. Unsigned call is a no-op on the
+  // public API (needs signature) — intentional; sign-on-change deferred.
   useEffect(() => {
     if (!prefsReady) return;
     const id = window.setTimeout(() => {
