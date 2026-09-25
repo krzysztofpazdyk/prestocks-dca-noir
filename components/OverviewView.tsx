@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
+import { claimFaucetUsdc } from "@/lib/dca-api";
 import { HoldingsPie } from "./HoldingsPie";
 import {
   DEFAULT_SETTINGS,
@@ -57,7 +58,7 @@ function emptyPurchase(): Purchase {
 }
 
 export function OverviewView() {
-  const { connected } = useWallet();
+  const { connected, publicKey } = useWallet();
   const predca = usePredca();
   const { locale, t } = useI18n();
   const [balances, setBalances] = useState<PortfolioBalances>({ ...MOCK_BALANCES });
@@ -78,6 +79,34 @@ export function OverviewView() {
   const [rankBusy, setRankBusy] = useState(false);
   const [rankError, setRankError] = useState<string | null>(null);
   const [purchaseMsg, setPurchaseMsg] = useState<string | null>(null);
+  const [faucetBusy, setFaucetBusy] = useState(false);
+  const [faucetMsg, setFaucetMsg] = useState<string | null>(null);
+  const [faucetErr, setFaucetErr] = useState<string | null>(null);
+
+  async function onClaimFaucet() {
+    if (!publicKey) {
+      setFaucetErr(t("faucet.needWallet"));
+      return;
+    }
+    setFaucetBusy(true);
+    setFaucetMsg(null);
+    setFaucetErr(null);
+    try {
+      const res = await claimFaucetUsdc(publicKey.toBase58());
+      const sigShort =
+        res.signature.length > 16
+          ? `${res.signature.slice(0, 8)}…${res.signature.slice(-8)}`
+          : res.signature;
+      setFaucetMsg(t("faucet.success", { sig: sigShort }));
+      await predca.refresh();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setFaucetErr(t("faucet.error", { error: msg }));
+    } finally {
+      setFaucetBusy(false);
+    }
+  }
+
 
   useEffect(() => {
     // Offline / disconnected fallback only — localStorage mock portfolio.
@@ -310,15 +339,37 @@ export function OverviewView() {
               <span className="mono-num text-[#c5cedb]">{rpcHost()}</span>
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => void predca.refresh()}
-            disabled={!connected || predca.loading}
-            className="rounded border border-[#1e2633] px-2 py-1 text-[10px] uppercase tracking-wider text-[#8b95a8] hover:text-[#e8eef5] disabled:opacity-40"
-          >
-            {predca.loading ? t("predca.loading") : t("predca.refresh")}
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            {connected && publicKey && (
+              <button
+                type="button"
+                onClick={() => void onClaimFaucet()}
+                disabled={faucetBusy || predca.txPending}
+                className="rounded border border-[#fbbf2444] bg-[#0c0e12] px-2.5 py-1 text-[10px] uppercase tracking-wider text-[#fbbf24] hover:bg-[#fbbf2411] disabled:opacity-40"
+              >
+                {faucetBusy ? t("faucet.busy") : t("faucet.button")}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => void predca.refresh()}
+              disabled={!connected || predca.loading}
+              className="rounded border border-[#1e2633] px-2 py-1 text-[10px] uppercase tracking-wider text-[#8b95a8] hover:text-[#e8eef5] disabled:opacity-40"
+            >
+              {predca.loading ? t("predca.loading") : t("predca.refresh")}
+            </button>
+          </div>
         </div>
+        {(faucetMsg || faucetErr) && (
+          <div className="mb-3 space-y-1">
+            {faucetMsg && (
+              <p className="text-[10px] text-[#2dd4bf]">{faucetMsg}</p>
+            )}
+            {faucetErr && (
+              <p className="text-[10px] text-[#f87171]">{faucetErr}</p>
+            )}
+          </div>
+        )}
 
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Stat

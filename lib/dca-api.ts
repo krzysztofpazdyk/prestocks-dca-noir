@@ -316,3 +316,56 @@ export function emergencyFromProducts(
   const r = metricsRank(products, exclusions, prefs);
   return { ...r, error: reason };
 }
+
+export type FaucetUsdcResponse = {
+  ok: boolean;
+  signature: string;
+  amountUi: number;
+  mint: string;
+  wallet: string;
+  ata?: string;
+  error?: string;
+  detail?: string;
+};
+
+/** Devnet demo faucet: mint 1000 mock USDC to the connected wallet. */
+export async function claimFaucetUsdc(
+  wallet: string,
+): Promise<FaucetUsdcResponse> {
+  const base = dcaApiBase();
+  if (!base) {
+    throw new Error(
+      "Brak NEXT_PUBLIC_DCA_API_URL — nie można użyć faucet /faucet/usdc.",
+    );
+  }
+  const resp = await fetchWithTimeout(
+    `${base}/faucet/usdc`,
+    {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ wallet }),
+    },
+    90_000,
+  );
+  let data: FaucetUsdcResponse & { detail?: unknown };
+  try {
+    data = (await resp.json()) as FaucetUsdcResponse & { detail?: unknown };
+  } catch {
+    throw new Error(`API /faucet/usdc HTTP ${resp.status} (nie-JSON)`);
+  }
+  if (!resp.ok || !data.ok) {
+    const detail = data.detail ?? data.error;
+    const msg =
+      typeof detail === "string"
+        ? detail
+        : detail != null
+          ? JSON.stringify(detail)
+          : `API /faucet/usdc HTTP ${resp.status}`;
+    throw new Error(msg);
+  }
+  return data;
+}
+

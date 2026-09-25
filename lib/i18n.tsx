@@ -35,6 +35,12 @@ const pl: Dict = {
   "overview.clusterNotDevnet":
     "Uwaga: oczekiwano Devnet, genesis RPC = {genesis}. Sprawdź sieć / RPC.",
 
+  "faucet.button": "Weź 1000 USDC (demo)",
+  "faucet.busy": "Mintuję…",
+  "faucet.success": "Wysłano 1000 mock USDC · sig {sig}",
+  "faucet.error": "Faucet: {error}",
+  "faucet.needWallet": "Podłącz portfel, by wziąć demo USDC.",
+
   "predca.title": "Predca on-chain ({cluster})",
   "predca.rpc": "RPC:",
   "predca.refresh": "Odśwież",
@@ -224,6 +230,12 @@ const en: Dict = {
     "Warning: RPC looks like Mainnet — this app is Devnet-only. Check NEXT_PUBLIC_RPC_URL.",
   "overview.clusterNotDevnet":
     "Warning: expected Devnet, RPC genesis = {genesis}. Check network / RPC.",
+
+  "faucet.button": "Get 1000 USDC (demo)",
+  "faucet.busy": "Minting…",
+  "faucet.success": "Sent 1000 mock USDC · sig {sig}",
+  "faucet.error": "Faucet: {error}",
+  "faucet.needWallet": "Connect a wallet to claim demo USDC.",
 
   "predca.title": "Predca on-chain ({cluster})",
   "predca.rpc": "RPC:",
