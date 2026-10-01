@@ -111,7 +111,18 @@ export function readWeeklyBudgetUsd(
 ): number {
   try {
     if (typeof localStorage === "undefined") return fallback;
-    const raw = localStorage.getItem(scopedLsKey(LS_WEEKLY_BUDGET, owner));
+    const scopedKey = scopedLsKey(LS_WEEKLY_BUDGET, owner);
+    let raw = localStorage.getItem(scopedKey);
+    if (!raw && owner) {
+      const legacyRaw = localStorage.getItem(LS_WEEKLY_BUDGET);
+      if (legacyRaw) {
+        const legacyN = Number(legacyRaw.trim().replace(",", "."));
+        if (Number.isFinite(legacyN) && legacyN > 0) {
+          localStorage.setItem(scopedKey, String(legacyN));
+          raw = String(legacyN);
+        }
+      }
+    }
     if (!raw) return fallback;
     const n = Number(raw.trim().replace(",", "."));
     return Number.isFinite(n) && n > 0 ? n : fallback;
