@@ -25,6 +25,7 @@ import {
   MOCK_USDC_MINT,
   dollarsToRaw,
   ensureOwnerAtas,
+  estimateInitRentSol,
   fetchMockTokenBalances,
   fetchOwnerUsdcBalance,
   fetchRunRecords,
@@ -135,6 +136,7 @@ function usePredcaImpl() {
   const [txPending, setTxPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
+  const [initRentSol, setInitRentSol] = useState<number | null>(null);
 
   const provider = useMemo(() => {
     if (!wallet) return null;
@@ -160,6 +162,7 @@ function usePredcaImpl() {
       setSolBalance(null);
       setTokenBalances([]);
       setRuns([]);
+      setInitRentSol(null);
       return;
     }
     setLoading(true);
@@ -205,17 +208,20 @@ function usePredcaImpl() {
         setOwnerUsdc(ownerBal);
         setSolBalance(sol);
         setTokenBalances(tokens);
+        setInitRentSol(null);
       } else {
-        const [ownerBal, sol, tokens] = await Promise.all([
+        const [ownerBal, sol, tokens, rentSol] = await Promise.all([
           ownerBalPromise,
           solPromise,
           tokensPromise,
+          estimateInitRentSol(connection).catch(() => null),
         ]);
         setVaultUsdc(null);
         setRuns([]);
         setOwnerUsdc(ownerBal);
         setSolBalance(sol);
         setTokenBalances(tokens);
+        setInitRentSol(rentSol);
       }
     } catch (e) {
       setError(parseAnchorError(e));
@@ -312,18 +318,21 @@ function usePredcaImpl() {
     );
   }
 
-  async function depositUsdc(amountUsd: number) {
+  /**
+   * Deposit USDC to vault. On first deposit (no UserConfig PDA), packs
+   * initialize_user + deposit_usdc in one transaction (one wallet approve).
+   * Later deposits: deposit only — never re-init.
+   * @param weeklyBudgetForInitUsd budget used only when initializing (default 150).
+   */
+  async function depositUsdc(
+    amountUsd: number,
+    weeklyBudgetForInitUsd?: number,
+  ) {
     if (!program || !owner || !mint) {
       setError(
         !mint
           ? `Brak NEXT_PUBLIC_USDC_MINT. Ustaw mock mint (${MOCK_USDC_MINT}) na Devnet.`
           : "Podłącz portfel.",
-      );
-      return null;
-    }
-    if (!config) {
-      setError(
-        "Predca nie jest zainicjalizowane. Najpierw kliknij Initialize (u góry stripu Predca).",
       );
       return null;
     }
@@ -333,17 +342,72 @@ function usePredcaImpl() {
       return null;
     }
     const ownerUsdcAtaPk = ownerUsdcAta(owner, mint);
-    return withTx(
-      () =>
-        program.methods
+
+    // Fresh on-chain check — idempotent even if UI status is stale.
+    const latest = await fetchUserConfig(program, owner);
+
+    if (latest) {
+      return withTx(
+        () =>
+          program.methods
+            .depositUsdc(raw)
+            .accounts({
+              usdcMint: mint,
+              ownerUsdc: ownerUsdcAtaPk,
+            })
+            .rpc(),
+        `Wpłacono ${amountUsd} USDC do vault.`,
+      );
+    }
+
+    const budgetUsd =
+      weeklyBudgetForInitUsd != null &&
+      Number.isFinite(weeklyBudgetForInitUsd) &&
+      weeklyBudgetForInitUsd > 0
+        ? weeklyBudgetForInitUsd
+        : 150;
+    const budgetRaw = dollarsToRaw(budgetUsd);
+    if (budgetRaw.lte(new BN(0))) {
+      setError("Budżet tygodniowy przy pierwszej wpłacie musi być > 0.");
+      return null;
+    }
+
+    return withTx(async () => {
+      try {
+        const initIx = await program.methods
+          .initializeUser(budgetRaw)
+          .accounts({ usdcMint: mint })
+          .instruction();
+        const depIx = await program.methods
           .depositUsdc(raw)
           .accounts({
             usdcMint: mint,
             ownerUsdc: ownerUsdcAtaPk,
           })
-          .rpc(),
-      `Wpłacono ${amountUsd} USDC do vault.`,
-    );
+          .instruction();
+        const tx = new Transaction().add(initIx, depIx);
+        const sig = await program.provider.sendAndConfirm!(tx);
+        return sig;
+      } catch (e) {
+        // Race: account created between fetch and send — deposit only.
+        const msg = parseAnchorError(e);
+        if (
+          /już istnieje|already in use|AlreadyInUse|account already exists/i.test(
+            msg,
+          ) ||
+          /already in use|AlreadyInUse/i.test(String(e))
+        ) {
+          return program.methods
+            .depositUsdc(raw)
+            .accounts({
+              usdcMint: mint,
+              ownerUsdc: ownerUsdcAtaPk,
+            })
+            .rpc();
+        }
+        throw e;
+      }
+    }, `Zainicjalizowano konto i wpłacono ${amountUsd} USDC (budżet ${budgetUsd}).`);
   }
 
   async function withdrawUsdc(amountUsd: number) {
@@ -500,6 +564,10 @@ function usePredcaImpl() {
     error,
     okMsg,
     clearMessages,
+    /** True when wallet connected + mint set but UserConfig PDA missing. */
+    needsInit: status === "no_config",
+    /** Rent-exempt SOL for UserConfig + vault (null when already init / unknown). */
+    initRentSol,
     config,
     vaultUsdc,
     ownerUsdc,

@@ -20,6 +20,11 @@ export const DEFAULT_PROGRAM_ID =
 export const USDC_DECIMALS = 6;
 export const USDC_FACTOR = 1_000_000;
 
+/** UserConfig account data len (Anchor discriminator + fields). */
+export const USER_CONFIG_SPACE = 8 + 32 + 8 + 1 + 8 + 1 + 1; // 59
+/** SPL Token account size (vault ATA). */
+export const TOKEN_ACCOUNT_SPACE = 165;
+
 /** Devnet mock USDC mint used by Predca (see .env.production). */
 export const MOCK_USDC_MINT =
   "99UbouJx2ZTLThQkqxrQGLZkDAYAn9vv8n6qnQh5f4Sw";
@@ -352,9 +357,36 @@ export function parseAnchorError(err: unknown): string {
 function mapCommonSolanaError(msg: string): string | null {
   const mintHint = usdcMintOrNull()?.toBase58() ?? MOCK_USDC_MINT;
   if (
+    /already in use|AlreadyInUse|account already exists|custom program error: 0x0\b/i.test(
+      msg,
+    )
+  ) {
+    return (
+      "Konto Predca już istnieje — nie trzeba ponownie Initialize. " +
+      "Użyj samego Deposit."
+    );
+  }
+  if (
+    /insufficient funds for rent|insufficient lamports.*rent|rent.?exempt/i.test(
+      msg,
+    )
+  ) {
+    return (
+      "Za mało SOL na rent (opłata za utworzenie konta UserConfig + vault). " +
+      "Doładuj SOL w portfelu (Devnet faucet) i spróbuj ponownie."
+    );
+  }
+  if (
     /insufficient funds|insufficient lamports|Error: Insufficient/i.test(msg) ||
     /Transfer: insufficient/i.test(msg)
   ) {
+    // Prefer rent-specific message when creating accounts (lamports, not USDC)
+    if (/create account|Allocate:|lamports/i.test(msg) && !/token/i.test(msg)) {
+      return (
+        "Za mało SOL na rent / opłaty transakcji przy pierwszej wpłacie (init). " +
+        "Doładuj SOL w portfelu i spróbuj ponownie."
+      );
+    }
     return (
       `Niewystarczające środki (mock USDC). Potrzebujesz salda mock USDC ` +
       `(mint ${mintHint}) na Devnet w ATA portfela. ` +
@@ -371,7 +403,7 @@ function mapCommonSolanaError(msg: string): string | null {
       `Brak konta tokenowego (ATA) dla mock USDC. ` +
       `Na Devnet potrzebujesz ATA dla mint ${mintHint} ` +
       `(np. spl-token create-account ${mintHint} / mint tokenów do portfela). ` +
-      `Jeśli Predca nie jest zainicjalizowane — najpierw Initialize.`
+      `Jeśli Predca nie jest zainicjalizowane — pierwsza wpłata (Deposit) utworzy konto.`
     );
   }
   if (/Simulation failed/i.test(msg) && /custom program error: 0x1\b/i.test(msg)) {
@@ -438,6 +470,21 @@ export async function fetchMockTokenBalances(
   );
   out.sort((a, b) => b.amount - a.amount);
   return out;
+}
+
+
+/**
+ * Estimate SOL needed to create UserConfig PDA + vault token account (rent-exempt).
+ * Does not include tx fee (~0.000005 SOL) or deposit USDC amount.
+ */
+export async function estimateInitRentSol(
+  connection: Connection,
+): Promise<number> {
+  const [cfg, vault] = await Promise.all([
+    connection.getMinimumBalanceForRentExemption(USER_CONFIG_SPACE),
+    connection.getMinimumBalanceForRentExemption(TOKEN_ACCOUNT_SPACE),
+  ]);
+  return (cfg + vault) / 1_000_000_000;
 }
 
 /**
