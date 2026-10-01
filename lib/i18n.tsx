@@ -49,10 +49,6 @@ const pl: Dict = {
   "predca.budget": "Budżet tygodniowy",
   "predca.vault": "Vault",
   "predca.deposit": "Deposit",
-  "predca.depositFirst": "Pierwsza wpłata (init + deposit)",
-  "predca.depositAndInit": "Init + Deposit",
-  "predca.firstDepositHint":
-    "Pierwsza wpłata utworzy konto Predca (PDA + vault). Szacowany rent ≈ {rent} SOL + kwota USDC. Budżet tygodniowy przy init: {budget} USDC. Kolejne Deposit tylko doładowują vault.",
   "predca.withdraw": "Withdraw",
   "predca.hintNoAta":
     "Hint: brak ATA mock USDC — Deposit zwykle się nie uda, dopóki nie masz konta tokenowego dla mint {mint} na Devnet.",
@@ -61,13 +57,13 @@ const pl: Dict = {
   "predca.mintLabel": "Mint mock USDC:",
   "predca.mintNoAta":
     "· Brak ATA / saldo — utwórz konto tokenowe i zrób mint testowych USDC na Devnet przed Deposit.",
-  "predca.initBudget": "Budżet tygodniowy przy init",
+  "predca.initBudget": "Budżet przy init (USDC)",
   "predca.initialize": "Initialize",
   "predca.waiting": "Czekam…",
   "predca.initHint":
-    "Predca nie jest zainicjalizowane — pierwsza wpłata (Init + Deposit) utworzy konto i zasili vault (wymaga mock USDC w ATA + SOL na rent).",
+    "Predca nie jest zainicjalizowane — najpierw Initialize, potem Deposit (wymaga mock USDC w ATA portfela).",
   "predca.depositUnavailable":
-    "Deposit niedostępny ({reason}). Podłącz portfel / ustaw mint, aby wpłacić.",
+    "Deposit niedostępny ({reason}). Gdy status = ready, pojawi się formularz wpłaty/wypłaty.",
   "predca.status.loading": "ładowanie…",
   "predca.status.no_mint": "brak mint",
   "predca.status.disconnected": "brak portfela",
@@ -263,10 +259,6 @@ const en: Dict = {
   "predca.budget": "Weekly budget",
   "predca.vault": "Vault",
   "predca.deposit": "Deposit",
-  "predca.depositFirst": "First deposit (init + deposit)",
-  "predca.depositAndInit": "Init + Deposit",
-  "predca.firstDepositHint":
-    "First deposit creates your Predca account (PDA + vault). Est. rent ≈ {rent} SOL + USDC amount. Weekly budget at init: {budget} USDC. Later deposits only top up the vault.",
   "predca.withdraw": "Withdraw",
   "predca.hintNoAta":
     "Hint: no mock USDC ATA — Deposit usually fails until you have a token account for mint {mint} on Devnet.",
@@ -275,13 +267,13 @@ const en: Dict = {
   "predca.mintLabel": "Mock USDC mint:",
   "predca.mintNoAta":
     "· No ATA / balance — create a token account and mint test USDC on Devnet before Deposit.",
-  "predca.initBudget": "Weekly budget at init",
+  "predca.initBudget": "Budget at init (USDC)",
   "predca.initialize": "Initialize",
   "predca.waiting": "Waiting…",
   "predca.initHint":
-    "Predca is not initialized — first deposit (Init + Deposit) creates the account and funds the vault (needs mock USDC in ATA + SOL for rent).",
+    "Predca is not initialized — Initialize first, then Deposit (needs mock USDC in the wallet ATA).",
   "predca.depositUnavailable":
-    "Deposit unavailable ({reason}). Connect wallet / set mint to deposit.",
+    "Deposit unavailable ({reason}). When status = ready, the deposit/withdraw form appears.",
   "predca.status.loading": "loading…",
   "predca.status.no_mint": "no mint",
   "predca.status.disconnected": "no wallet",
