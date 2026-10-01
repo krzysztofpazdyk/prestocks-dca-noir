@@ -1,4 +1,4 @@
-> **PreStocks DCA Noir v4.0** — product UI on GitHub Pages (`basePath` `/prestocks-dca-noir`). Promoted from `prestocks-dca-noir2.0` @ a115722 (v3.47) with Render API wiring.
+> **PreStocks DCA Noir v4.01** — product UI on GitHub Pages (`basePath` `/prestocks-dca-noir`). Promoted from `prestocks-dca-noir2.0` @ a115722 (v3.47) with Render API wiring.
 
 # PreStocks UI — Noir
 
