@@ -20,6 +20,7 @@ import {
   savePortfolioState,
   type PortfolioBalances,
 } from "@/lib/portfolio-state";
+import { readWeeklyBudgetUsd } from "@/lib/auto-weekly-buy";
 import { usePredca } from "@/lib/hooks/usePredca";
 import {
   clusterShortPl,
@@ -50,19 +51,19 @@ function top3TitleFromRank(result: RankResult, locale: string): string {
   return locale === "en" ? "Top-3 · ranking" : "Top-3 · ranking";
 }
 
-function resolvePurchaseAmount(weeklyBudgetUsd: number | null): number {
-  if (weeklyBudgetUsd != null) return weeklyBudgetUsd;
+const BUDGET_EPS = 0.000001;
 
-  const savedBudget =
-    typeof window === "undefined"
-      ? null
-      : window.localStorage.getItem("predca_weekly_budget_usd");
-  const savedAmount = savedBudget
-    ? Number(savedBudget.trim().replace(",", "."))
-    : NaN;
-  return Number.isFinite(savedAmount) && savedAmount > 0
-    ? savedAmount
-    : DEFAULT_SETTINGS.weeklyAmountUsd;
+/** Intended buy amount: Settings LS is SoT; on-chain is synced before Manual Buy. */
+function resolvePurchaseAmount(onChainWeeklyUsd: number | null): number {
+  const ls = readWeeklyBudgetUsd(DEFAULT_SETTINGS.weeklyAmountUsd);
+  if (ls > 0) return ls;
+  if (onChainWeeklyUsd != null && onChainWeeklyUsd > 0) return onChainWeeklyUsd;
+  return DEFAULT_SETTINGS.weeklyAmountUsd;
+}
+
+function budgetsDiffer(ls: number, onChain: number | null): boolean {
+  if (onChain == null || !Number.isFinite(onChain)) return ls > 0;
+  return Math.abs(ls - onChain) > BUDGET_EPS;
 }
 
 function emptyPurchase(): Purchase {
@@ -89,8 +90,7 @@ export function OverviewView() {
     tokens: [...LAST_PURCHASE.tokens],
   }));
   const [portfolioRevision, setPortfolioRevision] = useState(0);
-  const [initBudget, setInitBudget] = useState(150);
-  const [depositAmt, setDepositAmt] = useState(50);
+  const [depositAmt, setDepositAmt] = useState(500);
   const [withdrawAmt, setWithdrawAmt] = useState(10);
   const [top3, setTop3] = useState<JevRank[]>([]);
   const [top3Title, setTop3Title] = useState<string | null>(null);
@@ -148,7 +148,9 @@ export function OverviewView() {
     setPortfolioRevision((r) => r + 1);
   }, [connected]);
 
+  const lsWeekly = readWeeklyBudgetUsd(DEFAULT_SETTINGS.weeklyAmountUsd);
   const purchaseAmount = resolvePurchaseAmount(predca.weeklyBudgetUsd);
+  const budgetDirty = budgetsDiffer(lsWeekly, predca.weeklyBudgetUsd);
   const onChainReady = predca.status === "ready";
   const onChainVaultUsdc =
     onChainReady && predca.vaultUsdc != null ? predca.vaultUsdc : null;
@@ -164,12 +166,8 @@ export function OverviewView() {
     connected && predca.portfolioUsd != null ? predca.portfolioUsd : null;
 
   // Connected: on-chain ATAs for ALL mints in devnet-mock-mints (via allMockMints).
-  // Disconnected: local mock HOLDINGS / portfolio-state only (never as connected primary).
-  const displayHoldings: Holding[] = connected
-    ? predca.holdingsOnChain
-    : holdings.length > 0
-      ? holdings
-      : HOLDINGS;
+  // Disconnected: holdings stay empty; never render the mock allocation pie.
+  const displayHoldings: Holding[] = connected ? predca.holdingsOnChain : [];
 
   const displayLastPurchase: Purchase | null = (() => {
     if (!connected || !onChainReady || !predca.lastPurchaseOnChain) {
@@ -220,34 +218,59 @@ export function OverviewView() {
     }
 
     const tokenNames = top3.slice(0, 3).map((r) => r.name);
+    // LS is SoT for intended amount (sync on-chain before simulate_buy when dirty).
+    const intendedAmount = resolvePurchaseAmount(predca.weeklyBudgetUsd);
 
     // Prefer on-chain simulate_buy when Predca is ready.
     if (onChainReady) {
       if (
         availableVaultUsdc == null ||
         !Number.isFinite(availableVaultUsdc) ||
-        availableVaultUsdc < purchaseAmount
+        availableVaultUsdc < intendedAmount
       ) {
         setPurchaseMsg(
           t("msg.vaultLowOnChain", {
             have: (availableVaultUsdc ?? 0).toFixed(2),
-            need: purchaseAmount.toFixed(2),
+            need: intendedAmount.toFixed(2),
           }),
         );
         return;
       }
+
+      // simulate_buy spends on-chain weeklyBudgetUsdc — sync LS → chain first.
+      const lsAmount = readWeeklyBudgetUsd(DEFAULT_SETTINGS.weeklyAmountUsd);
+      if (budgetsDiffer(lsAmount, predca.weeklyBudgetUsd)) {
+        setPurchaseMsg(t("msg.updatingBudget"));
+        const budgetSig = await predca.setWeeklyBudget(lsAmount);
+        if (!budgetSig) {
+          const err = predca.lastTxError();
+          setPurchaseMsg(
+            err
+              ? `${t("msg.budgetSyncFail")}: ${err}`
+              : t("msg.budgetSyncFail"),
+          );
+          return;
+        }
+        // setWeeklyBudget's withTx already refreshed; simulateBuy re-fetches budget.
+      }
+
       setPurchaseMsg(null);
       const sig = await predca.simulateBuy(tokenNames);
       if (sig) {
         setPurchaseMsg(
           t("msg.purchaseOk", {
             sig: sig.slice(0, 8),
-            amount: purchaseAmount.toFixed(2),
+            amount: intendedAmount.toFixed(2),
             tokens: tokenNames.join(" · "),
           }),
         );
       } else {
-        setPurchaseMsg(t("msg.purchaseFail"));
+        const err = predca.lastTxError();
+        setPurchaseMsg(
+          err
+            ? `${t("msg.purchaseFail")}: ${err}`
+            : t("msg.purchaseFail"),
+        );
       }
       return;
     }
@@ -298,7 +321,38 @@ export function OverviewView() {
     }
   }
 
-  const depositDisabled = predca.txPending || predca.status !== "ready";
+  const canDeposit =
+    connected &&
+    !!predca.mint &&
+    (predca.status === "ready" || predca.status === "no_config");
+  const ownerUsdcCap =
+    displayOwnerUsdc != null && Number.isFinite(displayOwnerUsdc)
+      ? displayOwnerUsdc
+      : null;
+  const vaultUsdcCap =
+    onChainVaultUsdc != null && Number.isFinite(onChainVaultUsdc)
+      ? onChainVaultUsdc
+      : null;
+  const depositOverCap =
+    ownerUsdcCap != null &&
+    Number.isFinite(depositAmt) &&
+    depositAmt > ownerUsdcCap;
+  const withdrawOverCap =
+    vaultUsdcCap != null &&
+    Number.isFinite(withdrawAmt) &&
+    withdrawAmt > vaultUsdcCap;
+  const depositDisabled =
+    predca.txPending ||
+    !canDeposit ||
+    !Number.isFinite(depositAmt) ||
+    depositAmt <= 0 ||
+    depositOverCap;
+  const withdrawDisabled =
+    predca.txPending ||
+    !Number.isFinite(withdrawAmt) ||
+    withdrawAmt <= 0 ||
+    withdrawOverCap;
+  const showWithdraw = onChainReady; // account exists; enablement same as before (txPending only)
   const vaultTooLow =
     availableVaultUsdc == null ||
     !Number.isFinite(availableVaultUsdc) ||
@@ -422,11 +476,19 @@ export function OverviewView() {
           <Stat
             label={t("predca.budget")}
             value={
-              predca.weeklyBudgetUsd != null
-                ? formatUsd(predca.weeklyBudgetUsd)
-                : "—"
+              budgetDirty
+                ? formatUsd(purchaseAmount)
+                : predca.weeklyBudgetUsd != null
+                  ? formatUsd(predca.weeklyBudgetUsd)
+                  : predca.status === "no_config"
+                    ? formatUsd(purchaseAmount)
+                    : "—"
             }
-            unit="USDC"
+            unit={
+              budgetDirty && predca.weeklyBudgetUsd != null
+                ? `USDC · chain ${formatUsd(predca.weeklyBudgetUsd)}`
+                : "USDC"
+            }
           />
           <Stat
             label={t("predca.vault")}
@@ -435,61 +497,102 @@ export function OverviewView() {
             }
             unit="USDC"
           />
-          {onChainReady && (
-            <>
-              <div className="rounded border border-[#1e2633] bg-[#0c0e12] p-3">
-                <p className="text-[10px] uppercase tracking-wider text-[#8b95a8]">
+          {canDeposit && (
+            <div className="rounded border border-[#1e2633] bg-[#0c0e12] p-3">
+              <p className="text-[10px] uppercase tracking-wider text-[#8b95a8]">
+                {t("predca.deposit")}
+              </p>
+              <div className="mt-2 flex items-end gap-2">
+                <input
+                  type="number"
+                  min={0.000001}
+                  step={1}
+                  max={ownerUsdcCap ?? undefined}
+                  value={depositAmt}
+                  onChange={(e) => {
+                    const n = Number(e.target.value);
+                    if (!Number.isFinite(n)) {
+                      setDepositAmt(n);
+                      return;
+                    }
+                    if (ownerUsdcCap != null && n > ownerUsdcCap) {
+                      setDepositAmt(ownerUsdcCap);
+                      return;
+                    }
+                    setDepositAmt(n);
+                  }}
+                  disabled={predca.txPending || !canDeposit}
+                  className="mono-num min-w-0 flex-1 rounded border border-[#1e2633] bg-[#0c0e12] px-2 py-1.5 text-sm text-[#2dd4bf] outline-none focus:border-[#2dd4bf66] disabled:opacity-40"
+                />
+                <button
+                  type="button"
+                  disabled={depositDisabled}
+                  onClick={() => {
+                    const amt =
+                      ownerUsdcCap != null
+                        ? Math.min(depositAmt, ownerUsdcCap)
+                        : depositAmt;
+                    void predca.depositUsdc(
+                      amt,
+                      predca.status === "no_config"
+                        ? purchaseAmount
+                        : undefined,
+                    );
+                  }}
+                  className="rounded border border-[#2dd4bf44] bg-[#0c0e12] px-3 py-1.5 text-[10px] uppercase tracking-wider text-[#2dd4bf] hover:bg-[#2dd4bf11] disabled:opacity-40"
+                >
                   {t("predca.deposit")}
-                </p>
-                <div className="mt-2 flex items-end gap-2">
-                  <input
-                    type="number"
-                    min={0.000001}
-                    step={1}
-                    value={depositAmt}
-                    onChange={(e) => setDepositAmt(Number(e.target.value))}
-                    disabled={depositDisabled}
-                    className="mono-num min-w-0 flex-1 rounded border border-[#1e2633] bg-[#0c0e12] px-2 py-1.5 text-sm text-[#2dd4bf] outline-none focus:border-[#2dd4bf66] disabled:opacity-40"
-                  />
-                  <button
-                    type="button"
-                    disabled={depositDisabled}
-                    onClick={() => void predca.depositUsdc(depositAmt)}
-                    className="rounded border border-[#2dd4bf44] bg-[#0c0e12] px-3 py-1.5 text-[10px] uppercase tracking-wider text-[#2dd4bf] hover:bg-[#2dd4bf11] disabled:opacity-40"
-                  >
-                    {t("predca.deposit")}
-                  </button>
-                </div>
+                </button>
               </div>
-              <div className="rounded border border-[#1e2633] bg-[#0c0e12] p-3">
-                <p className="text-[10px] uppercase tracking-wider text-[#8b95a8]">
+            </div>
+          )}
+          {showWithdraw && (
+            <div className="rounded border border-[#1e2633] bg-[#0c0e12] p-3">
+              <p className="text-[10px] uppercase tracking-wider text-[#8b95a8]">
+                {t("predca.withdraw")}
+              </p>
+              <div className="mt-2 flex items-end gap-2">
+                <input
+                  type="number"
+                  min={0.000001}
+                  step={1}
+                  max={vaultUsdcCap ?? undefined}
+                  value={withdrawAmt}
+                  onChange={(e) => {
+                    const n = Number(e.target.value);
+                    if (!Number.isFinite(n)) {
+                      setWithdrawAmt(n);
+                      return;
+                    }
+                    if (vaultUsdcCap != null && n > vaultUsdcCap) {
+                      setWithdrawAmt(vaultUsdcCap);
+                      return;
+                    }
+                    setWithdrawAmt(n);
+                  }}
+                  disabled={predca.txPending}
+                  className="mono-num min-w-0 flex-1 rounded border border-[#1e2633] bg-[#0c0e12] px-2 py-1.5 text-sm text-[#a78bfa] outline-none focus:border-[#a78bfa66] disabled:opacity-40"
+                />
+                <button
+                  type="button"
+                  disabled={withdrawDisabled}
+                  onClick={() => {
+                    const amt =
+                      vaultUsdcCap != null
+                        ? Math.min(withdrawAmt, vaultUsdcCap)
+                        : withdrawAmt;
+                    void predca.withdrawUsdc(amt);
+                  }}
+                  className="rounded border border-[#a78bfa44] bg-[#0c0e12] px-3 py-1.5 text-[10px] uppercase tracking-wider text-[#a78bfa] hover:bg-[#a78bfa11] disabled:opacity-40"
+                >
                   {t("predca.withdraw")}
-                </p>
-                <div className="mt-2 flex items-end gap-2">
-                  <input
-                    type="number"
-                    min={0.000001}
-                    step={1}
-                    value={withdrawAmt}
-                    onChange={(e) => setWithdrawAmt(Number(e.target.value))}
-                    disabled={predca.txPending}
-                    className="mono-num min-w-0 flex-1 rounded border border-[#1e2633] bg-[#0c0e12] px-2 py-1.5 text-sm text-[#a78bfa] outline-none focus:border-[#a78bfa66] disabled:opacity-40"
-                  />
-                  <button
-                    type="button"
-                    disabled={predca.txPending}
-                    onClick={() => void predca.withdrawUsdc(withdrawAmt)}
-                    className="rounded border border-[#a78bfa44] bg-[#0c0e12] px-3 py-1.5 text-[10px] uppercase tracking-wider text-[#a78bfa] hover:bg-[#a78bfa11] disabled:opacity-40"
-                  >
-                    {t("predca.withdraw")}
-                  </button>
-                </div>
+                </button>
               </div>
-            </>
+            </div>
           )}
         </div>
 
-        {onChainReady && (
+        {canDeposit && (
           <div className="mt-2 space-y-1">
             {predca.ownerUsdc == null && (
               <p className="text-[10px] text-[#fbbf24]">
@@ -499,6 +602,16 @@ export function OverviewView() {
             {predca.ownerUsdc != null && predca.ownerUsdc <= 0 && (
               <p className="text-[10px] text-[#fbbf24]">
                 {t("predca.hintZeroUsdc", { mint: predca.mintHint })}
+              </p>
+            )}
+            {depositOverCap && ownerUsdcCap != null && (
+              <p className="text-[10px] text-[#fbbf24]">
+                Max deposit: {formatUsd(ownerUsdcCap)} USDC (wallet balance)
+              </p>
+            )}
+            {withdrawOverCap && vaultUsdcCap != null && (
+              <p className="text-[10px] text-[#fbbf24]">
+                Max withdraw: {formatUsd(vaultUsdcCap)} USDC (vault balance)
               </p>
             )}
           </div>
@@ -527,36 +640,32 @@ export function OverviewView() {
           </p>
         )}
 
-        {connected && predca.status === "no_config" && (
+        {connected && predca.status === "no_config" && canDeposit && (
           <div className="mt-4 flex flex-wrap items-end gap-3 border-t border-[#1e2633] pt-4">
-            <label className="space-y-1">
+            <div className="space-y-1">
               <span className="text-[10px] uppercase tracking-wider text-[#8b95a8]">
                 {t("predca.initBudget")}
               </span>
-              <input
-                type="number"
-                min={1}
-                step={10}
-                value={initBudget}
-                onChange={(e) => setInitBudget(Number(e.target.value))}
-                className="mono-num block w-36 rounded border border-[#1e2633] bg-[#0c0e12] px-3 py-2 text-sm text-[#2dd4bf] outline-none focus:border-[#2dd4bf66]"
-              />
-            </label>
-            <button
-              type="button"
-              disabled={predca.txPending || !predca.mint}
-              onClick={() => void predca.initializeUser(initBudget)}
-              className="rounded border border-[#2dd4bf44] bg-[#0c0e12] px-4 py-2 text-xs uppercase tracking-wider text-[#2dd4bf] hover:bg-[#2dd4bf11] disabled:opacity-40"
-            >
-              {predca.txPending ? t("predca.waiting") : t("predca.initialize")}
-            </button>
+              <p className="mono-num text-sm text-[#2dd4bf]">
+                {formatUsd(purchaseAmount)}{" "}
+                <span className="text-[10px] uppercase tracking-wider text-[#8b95a8]">
+                  USDC
+                </span>
+              </p>
+            </div>
             <p className="w-full text-[10px] text-[#fbbf24]">
               {t("predca.initHint")}
+            </p>
+            <p className="w-full text-[10px] text-[#8b95a8]">
+              {t("predca.rentHint")}
             </p>
           </div>
         )}
 
-        {connected && predca.status !== "ready" && predca.status !== "no_config" && (
+        {connected &&
+          predca.status !== "ready" &&
+          predca.status !== "no_config" &&
+          !canDeposit && (
           <p className="mt-4 border-t border-[#1e2633] pt-4 text-[10px] text-[#8b95a8]">
             {t("predca.depositUnavailable", { reason: statusReason })}
           </p>
@@ -702,7 +811,13 @@ export function OverviewView() {
               </p>
             )}
             {purchaseMsg && (
-              <p className="mt-3 rounded border border-[#2dd4bf33] bg-[#2dd4bf11] px-3 py-2 text-xs text-[#2dd4bf]">
+              <p
+                className={`mt-3 rounded border px-3 py-2 text-xs ${
+                  /nieudany|failed|Could not|Nie udało/i.test(purchaseMsg)
+                    ? "border-[#f8717133] bg-[#f8717111] text-[#fca5a5]"
+                    : "border-[#2dd4bf33] bg-[#2dd4bf11] text-[#2dd4bf]"
+                }`}
+              >
                 {purchaseMsg}
               </p>
             )}

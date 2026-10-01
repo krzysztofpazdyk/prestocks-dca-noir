@@ -57,13 +57,15 @@ const pl: Dict = {
   "predca.mintLabel": "Mint mock USDC:",
   "predca.mintNoAta":
     "· Brak ATA / saldo — utwórz konto tokenowe i zrób mint testowych USDC na Devnet przed Deposit.",
-  "predca.initBudget": "Budżet przy init (USDC)",
+  "predca.initBudget": "Budżet tygodniowy (USDC)",
   "predca.initialize": "Initialize",
   "predca.waiting": "Czekam…",
   "predca.initHint":
-    "Predca nie jest zainicjalizowane — najpierw Initialize, potem Deposit (wymaga mock USDC w ATA portfela).",
+    "Pierwsza wpłata = initialize_user + deposit w jednej tx. Budżet tygodniowy bierze się z Ustawień (ta sama kwota). Zmień go w Ustawieniach, potem wpłać USDC z ATA portfela.",
+  "predca.rentHint":
+    "Hint: init tworzy UserConfig + vault ATA — potrzebujesz ~0.002–0.003 SOL na rent (opłata konta).",
   "predca.depositUnavailable":
-    "Deposit niedostępny ({reason}). Gdy status = ready, pojawi się formularz wpłaty/wypłaty.",
+    "Deposit niedostępny ({reason}). Podłącz portfel z mintem USDC, by wpłacić.",
   "predca.status.loading": "ładowanie…",
   "predca.status.no_mint": "brak mint",
   "predca.status.disconnected": "brak portfela",
@@ -124,6 +126,9 @@ const pl: Dict = {
     "Zakup on-chain OK · sig {sig}… · ${amount} z vault → {tokens}",
   "msg.purchaseFail":
     "Zakup nieudany — szczegóły w sekcji Predca powyżej (czerwony komunikat).",
+  "msg.updatingBudget": "Aktualizuję budżet on-chain…",
+  "msg.budgetSyncFail":
+    "Nie udało się zaktualizować budżetu on-chain przed zakupem.",
   "msg.predcaNotReady":
     "Predca nie jest ready — Initialize + Deposit, potem zakup on-chain.",
   "msg.vaultLowMock":
@@ -148,6 +153,8 @@ const pl: Dict = {
     "Keeper niedostępny (tunel lub usługa). UI nie kupuje sam — spróbuj później lub sprawdź połączenie.",
   "auto.status.ok":
     "Automatyczny zakup tygodniowy OK · ${amount} z vault → {tokens}",
+  "auto.status.okWithNext":
+    "Automatyczny zakup tygodniowy OK · ${amount} z vault → {tokens} · następny zakup: {nextBuy}",
   "auto.status.vaultLow":
     "Auto-zakup wstrzymany — za mało USDC w vault ({have} < {need}).",
   "auto.status.needWallet":
@@ -164,10 +171,10 @@ const pl: Dict = {
   "settings.kicker": "Konfiguracja DCA",
   "settings.title": "Ustawienia",
   "settings.intro":
-    "Tygodniowa kwota zostaje zapisana przy włączeniu cotygodniowych zakupów. BYOK pozostaje w localStorage.",
+    "Tygodniowa kwota zapisuje się lokalnie od razu; on-chain przez „Zapisz budżet on-chain”, Manual Buy (auto-sync) lub włączenie cotygodniowych zakupów. BYOK pozostaje w localStorage.",
   "settings.weeklyAmount": "Tygodniowa kwota (USDC)",
   "settings.weeklyAtEnable":
-    "Zapisze się przy włączeniu cotygodniowych zakupów (nie trzeba osobno na chain).",
+    "Zapis lokalny od razu (init/deposit). On-chain: przycisk poniżej, Manual Buy albo włączenie auto-zakupu.",
   "settings.autoWeekly": "Automatyczny cotygodniowy zakup z vaulta",
   "settings.autoWeeklyHint":
     "Domyślnie wyłączone. Włączenie bierze kwotę z pola powyżej i od razu kupuje 3 PreStock. Ta transakcja uruchamia cotygodniowy harmonogram. Późniejszych zakupów nie musisz już potwierdzać.",
@@ -176,6 +183,9 @@ const pl: Dict = {
     "Kontynuacja podzieli ${amount} USDC z vaulta po równo na 3 spółki PreStock. Dostaniesz różną liczbę akcji, zależnie od ceny każdej. Ta transakcja uruchamia cotygodniowy harmonogram. Późniejszych zakupów nie musisz już potwierdzać.",
   "settings.autoWeeklyConfirmOk": "Kontynuuj",
   "settings.autoWeeklyConfirmCancel": "Anuluj",
+  "settings.keeperModeLive": "Tryb: Live (prawdziwe zakupy)",
+  "settings.keeperModeDryRun": "Tryb: Dry-run (bez transakcji)",
+  "settings.keeperModeUnknown": "Tryb keepersa: nieznany",
   "settings.weeklySplit":
     "Po równo na 3 spółki z top-3 (~${amount} USDC na każdą; liczba akcji zależy od ceny)",
   "settings.onChainBudget": "· on-chain:",
@@ -192,8 +202,8 @@ const pl: Dict = {
   "settings.cleared": "· wyczyszczono ✓",
   "settings.exclusions": "Wykluczenia (np. xAI, OpenAI) — stosowane w rankingu",
   "settings.buyDespiteIpo": "Kup PreStock mimo odbytego IPO",
-  "settings.deadlineInvalid": "Termin bez znaczenia",
-  "settings.ipoPremium": "Premia IPO ma znaczenie",
+  "settings.deadlineInvalid": "Uwzględniaj tokeny z terminem ważności (po dacie końcowej stają się bezwartościowe).",
+  "settings.ipoPremium": "Premia IPO ma znaczenie (uwzględniaj różnicę wyceny tokenu względem rynku, np. −20% / +34%).",
   "settings.prefsDirtyHint":
     "Zmieniono ustawienia. Aby zapisać je u keepersa, trzeba podpisać wiadomość w portfelu.",
   "settings.prefsSignSave": "Podpisz i zapisz",
@@ -267,13 +277,15 @@ const en: Dict = {
   "predca.mintLabel": "Mock USDC mint:",
   "predca.mintNoAta":
     "· No ATA / balance — create a token account and mint test USDC on Devnet before Deposit.",
-  "predca.initBudget": "Budget at init (USDC)",
+  "predca.initBudget": "Weekly budget (USDC)",
   "predca.initialize": "Initialize",
   "predca.waiting": "Waiting…",
   "predca.initHint":
-    "Predca is not initialized — Initialize first, then Deposit (needs mock USDC in the wallet ATA).",
+    "First deposit = initialize_user + deposit in one tx. Weekly budget comes from Settings (same amount). Change it in Settings, then deposit USDC from the wallet ATA.",
+  "predca.rentHint":
+    "Hint: init creates UserConfig + vault ATA — you need ~0.002–0.003 SOL for rent (account fee).",
   "predca.depositUnavailable":
-    "Deposit unavailable ({reason}). When status = ready, the deposit/withdraw form appears.",
+    "Deposit unavailable ({reason}). Connect a wallet with the USDC mint configured to deposit.",
   "predca.status.loading": "loading…",
   "predca.status.no_mint": "no mint",
   "predca.status.disconnected": "no wallet",
@@ -334,6 +346,9 @@ const en: Dict = {
     "On-chain purchase OK · sig {sig}… · ${amount} from vault → {tokens}",
   "msg.purchaseFail":
     "Purchase failed — see details in the Predca section above (red message).",
+  "msg.updatingBudget": "Updating budget on-chain…",
+  "msg.budgetSyncFail":
+    "Could not update on-chain budget before purchase.",
   "msg.predcaNotReady":
     "Predca is not ready — Initialize + Deposit, then purchase on-chain.",
   "msg.vaultLowMock":
@@ -358,6 +373,8 @@ const en: Dict = {
     "Keeper unavailable (tunnel or service). This tab does not buy on its own — try again later or check the connection.",
   "auto.status.ok":
     "Weekly auto-buy OK · ${amount} from vault → {tokens}",
+  "auto.status.okWithNext":
+    "Weekly auto-buy OK · ${amount} from vault → {tokens} · next buy: {nextBuy}",
   "auto.status.vaultLow":
     "Auto-buy paused — not enough USDC in vault ({have} < {need}).",
   "auto.status.needWallet":
@@ -374,10 +391,10 @@ const en: Dict = {
   "settings.kicker": "DCA configuration",
   "settings.title": "Settings",
   "settings.intro":
-    "The weekly amount is saved when you turn on weekly purchases. BYOK stays in localStorage.",
+    "Weekly amount saves locally right away; on-chain via “Save budget on-chain”, Manual Buy (auto-sync), or enabling weekly purchases. BYOK stays in localStorage.",
   "settings.weeklyAmount": "Weekly amount (USDC)",
   "settings.weeklyAtEnable":
-    "Saved when you enable weekly purchases (no separate on-chain save).",
+    "Saved locally right away (init/deposit). On-chain: button below, Manual Buy, or enable auto-buy.",
   "settings.autoWeekly": "Automatic weekly purchase from the vault",
   "settings.autoWeeklyHint":
     "Off by default. Enabling takes the amount above and immediately buys 3 PreStocks. That transaction starts the weekly schedule. You will not need to confirm later purchases.",
@@ -386,6 +403,9 @@ const en: Dict = {
     "Continuing will split ${amount} USDC from the vault equally across 3 PreStock companies. You will receive a different number of shares depending on each price. This transaction starts the weekly schedule. You will not need to confirm later purchases.",
   "settings.autoWeeklyConfirmOk": "Continue",
   "settings.autoWeeklyConfirmCancel": "Cancel",
+  "settings.keeperModeLive": "Mode: Live (real buys)",
+  "settings.keeperModeDryRun": "Mode: Dry-run (no transactions)",
+  "settings.keeperModeUnknown": "Keeper mode: unknown",
   "settings.weeklySplit":
     "Split equally across 3 top-3 companies (~${amount} USDC each; share count depends on price)",
   "settings.onChainBudget": "· on-chain:",
@@ -402,8 +422,8 @@ const en: Dict = {
   "settings.cleared": "· cleared ✓",
   "settings.exclusions": "Exclusions (e.g. xAI, OpenAI) — applied to ranking",
   "settings.buyDespiteIpo": "Buy PreStock even after IPO",
-  "settings.deadlineInvalid": "Deadline irrelevant",
-  "settings.ipoPremium": "IPO premium matters",
+  "settings.deadlineInvalid": "Include tokens with an expiry date (they become worthless after the end date).",
+  "settings.ipoPremium": "IPO premium matters (factor in token vs market pricing gap, e.g. −20% / +34%).",
   "settings.prefsDirtyHint":
     "Settings changed. Sign a wallet message to save them to the keeper.",
   "settings.prefsSignSave": "Sign & save",

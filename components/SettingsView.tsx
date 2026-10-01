@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { DEFAULT_SETTINGS } from "@/lib/mock-data";
 import { usePredca } from "@/lib/hooks/usePredca";
+import { formatUsd } from "@/lib/predca";
 import { useI18n } from "@/lib/i18n";
 import {
   parseExclusions,
@@ -22,11 +23,12 @@ import {
   writeIpoPremiumMatters,
 } from "@/lib/rank-prefs";
 import {
-  keeperGetPrefs,
   keeperPushPrefs,
   keeperStatus,
+  type KeeperPrefsPayload,
 } from "@/lib/keeper-client";
 import {
+  readWeeklyBudgetUsd,
   writeWeeklyBudgetUsd,
 } from "@/lib/auto-weekly-buy";
 import { useAutoWeeklyBuy } from "@/lib/hooks/useAutoWeeklyBuy";
@@ -77,7 +79,9 @@ function baselinesEqual(a: PrefsBaseline | null, b: PrefsBaseline): boolean {
 export function SettingsView() {
   const predca = usePredca();
   const autoBuy = useAutoWeeklyBuy();
-  const { publicKey, signMessage } = useWallet();
+  const { connected, publicKey, signMessage } = useWallet();
+  const signMessageRef = useRef(signMessage);
+  signMessageRef.current = signMessage;
   const { t } = useI18n();
   const [weekly, setWeekly] = useState(DEFAULT_SETTINGS.weeklyAmountUsd);
   const [exclusions, setExclusions] = useState(
@@ -106,6 +110,14 @@ export function SettingsView() {
   const [prefsSaveMsg, setPrefsSaveMsg] = useState<string | null>(null);
   const prevAutoPhase = useRef(autoBuy.phase);
 
+  // Settings weekly amount is SoT for init-on-deposit (Overview reads same LS key).
+  // Hydrate once from LS; do not keep syncing from on-chain (that stomped LS saves).
+  const [weeklyReady, setWeeklyReady] = useState(false);
+  useEffect(() => {
+    setWeekly(readWeeklyBudgetUsd(DEFAULT_SETTINGS.weeklyAmountUsd));
+    setWeeklyReady(true);
+  }, []);
+
   // Hydrate ranking toggles from keeper GET /prefs (authoritative for buys).
   // prefsReady stays false until hydrate finishes so we never push stale local
   // over keeper. Prefs file is global on the demo daemon; still skip apply when
@@ -130,10 +142,11 @@ export function SettingsView() {
 
       try {
         const wallet = publicKey?.toBase58() ?? null;
-        const [status, prefsRes] = await Promise.all([
-          keeperStatus(wallet ?? undefined),
-          keeperGetPrefs(wallet ?? undefined),
-        ]);
+        const sign = signMessageRef.current ?? undefined;
+        // Without wallet/sign: keep localStorage; do not call detailed status.
+        // signMessage identity changes often — use ref so we do not re-hydrate
+        // (and re-hit status) on every adapter render.
+        const status = await keeperStatus(wallet ?? undefined, sign);
         if (cancelled) return;
 
         const configuredOwner =
@@ -141,9 +154,10 @@ export function SettingsView() {
         const ownerConflict =
           !!configuredOwner && !!wallet && configuredOwner !== wallet;
 
+        const statusPrefs = (status as typeof status & { prefs?: KeeperPrefsPayload }).prefs;
         // Per-owner prefs when wallet known. Skip apply on owner mismatch.
-        if (prefsRes.ok && prefsRes.prefs && !ownerConflict) {
-          const applied = applyApiPrefsToLocal(prefsRes.prefs);
+        if (status.ok && statusPrefs && !ownerConflict) {
+          const applied = applyApiPrefsToLocal(statusPrefs);
           exclusionsRaw = applied.exclusionsRaw;
           deadline = applied.deadlineInvalid;
           ipo = applied.ipoPremiumMatters;
@@ -213,19 +227,15 @@ export function SettingsView() {
     buyDespiteIpo,
   ]);
 
+  // Persist weekly to localStorage as the user edits (not gated on ranking prefsReady).
+  // On-chain budget still updates only when enabling weekly auto-buy (startCycle).
   useEffect(() => {
-    if (!prefsReady) return;
+    if (!weeklyReady) return;
     const id = window.setTimeout(() => {
       writeWeeklyBudgetUsd(weekly);
     }, 300);
     return () => window.clearTimeout(id);
-  }, [weekly, prefsReady]);
-
-  useEffect(() => {
-    if (predca.weeklyBudgetUsd != null && predca.weeklyBudgetUsd > 0) {
-      setWeekly(predca.weeklyBudgetUsd);
-    }
-  }, [predca.weeklyBudgetUsd]);
+  }, [weekly, weeklyReady]);
 
   useEffect(() => {
     if (!autoConfirmOpen) return;
@@ -246,6 +256,35 @@ export function SettingsView() {
     prefsReady &&
     syncedBaseline != null &&
     !baselinesEqual(syncedBaseline, currentBaseline);
+
+  const BUDGET_EPS = 0.000001;
+  const onChainWeekly = predca.weeklyBudgetUsd;
+  const budgetDirtyOnChain =
+    onChainWeekly == null
+      ? weekly > 0
+      : Math.abs(weekly - onChainWeekly) > BUDGET_EPS;
+
+  async function saveWeeklyBudgetOnChain() {
+    writeWeeklyBudgetUsd(weekly);
+    predca.clearMessages();
+    if (!connected || !predca.mint) return;
+    await predca.setWeeklyBudget(weekly);
+  }
+
+  let budgetBtnLabel: string;
+  if (!connected) {
+    budgetBtnLabel = t("settings.connectForBudget");
+  } else if (!predca.mint) {
+    budgetBtnLabel = t("settings.noMint");
+  } else if (predca.status === "no_config") {
+    budgetBtnLabel = predca.txPending
+      ? t("settings.initPending")
+      : t("settings.initBudget");
+  } else {
+    budgetBtnLabel = predca.txPending
+      ? t("settings.savingOnChain")
+      : t("settings.saveOnChain");
+  }
 
   async function signAndSavePrefs() {
     setPrefsSaveMsg(null);
@@ -407,14 +446,45 @@ export function SettingsView() {
               setWeekly(Number.isFinite(n) ? Math.max(1, n) : 1);
               predca.clearMessages();
             }}
+            onBlur={() => writeWeeklyBudgetUsd(weekly)}
             className="mono-num w-full rounded border border-[#1e2633] bg-[#0c0e12] px-3 py-2.5 text-base text-[#2dd4bf] outline-none focus:border-[#2dd4bf66]"
           />
           <p className="text-xs text-[#8b95a8]">
             {t("settings.weeklySplit", { amount: (weekly / 3).toFixed(2) })}
             {" "}
             {t("settings.weeklyAtEnable")}
+            {onChainWeekly != null && (
+              <>
+                {" "}
+                {t("settings.onChainBudget")}{" "}
+                <span className="mono-num text-[#2dd4bf]">
+                  {formatUsd(onChainWeekly)} USDC
+                </span>
+              </>
+            )}
           </p>
         </label>
+        {budgetDirtyOnChain && connected && predca.mint ? (
+          <button
+            type="button"
+            disabled={predca.txPending}
+            onClick={() => void saveWeeklyBudgetOnChain()}
+            className="w-full rounded border border-[#2dd4bf44] bg-[#0c0e12] py-2 text-xs uppercase tracking-wider text-[#2dd4bf] hover:bg-[#2dd4bf11] disabled:opacity-40"
+          >
+            {budgetBtnLabel}
+          </button>
+        ) : null}
+        {!connected ? (
+          <p className="text-[10px] text-[#8b95a8]">
+            {t("settings.connectForBudget")}
+          </p>
+        ) : null}
+        {predca.error && (
+          <p className="text-[10px] text-[#fca5a5]">{predca.error}</p>
+        )}
+        {predca.okMsg && (
+          <p className="text-[10px] text-[#2dd4bf]">{predca.okMsg}</p>
+        )}
         <div className="border-t border-[#1e2633] pt-4">
           <Toggle
             label={t("settings.autoWeekly")}
@@ -430,6 +500,19 @@ export function SettingsView() {
           <p className="mt-2 text-xs leading-relaxed text-[#8b95a8] text-justify">
             {t("settings.autoWeeklyHint")}
           </p>
+          {autoBuy.keeperMode ? (
+            <p
+              className={`mt-2 text-[10px] font-medium ${
+                autoBuy.keeperMode === "live"
+                  ? "text-[#2dd4bf]"
+                  : "text-[#fbbf24]"
+              }`}
+            >
+              {autoBuy.keeperMode === "live"
+                ? t("settings.keeperModeLive")
+                : t("settings.keeperModeDryRun")}
+            </p>
+          ) : null}
           {autoBuy.nextLabel && autoBuy.enabled ? (
             <p className="mt-2 text-[10px] text-[#2dd4bf]">
               {t("auto.status.next", { when: autoBuy.nextLabel })}
@@ -589,19 +672,21 @@ function Toggle({
       type="button"
       aria-pressed={checked}
       onClick={() => onChange(!checked)}
-      className="flex w-full items-center justify-between text-left font-sans text-sm font-medium tracking-normal text-[#e8eef5]"
+      className="grid w-full grid-cols-[minmax(0,1fr)_2.75rem] items-start gap-x-4 text-left font-sans text-sm font-medium tracking-normal text-[#e8eef5]"
     >
-      <span className="font-sans text-sm font-medium tracking-normal">{label}</span>
+      <span className="min-w-0 whitespace-normal break-words font-sans text-sm font-medium leading-snug tracking-normal">
+        {label}
+      </span>
       <span
-          className={`relative h-6 w-11 rounded-full transition ${
-            checked ? "bg-[#2dd4bf]" : "bg-[#1e2633]"
+        className={`relative mt-0.5 h-6 w-11 shrink-0 justify-self-end rounded-full transition ${
+          checked ? "bg-[#2dd4bf]" : "bg-[#1e2633]"
+        }`}
+      >
+        <span
+          className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition ${
+            checked ? "left-5" : "left-0.5"
           }`}
-        >
-          <span
-            className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition ${
-              checked ? "left-5" : "left-0.5"
-            }`}
-          />
+        />
       </span>
     </button>
   );

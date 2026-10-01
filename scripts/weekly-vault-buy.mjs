@@ -148,8 +148,18 @@ const LEGACY_OWNER_PATH = join(CONFIG_DIR, "owner.txt");
 const LEGACY_ENABLED_PATH = join(CONFIG_DIR, "enabled");
 const LEGACY_PREFS_PATH = join(CONFIG_DIR, "prefs.json");
 const SPEND_LIMITS_PATH = join(CONFIG_DIR, "spend-limits.json");
-const LOCK_PATH = join(CONFIG_DIR, "buy.lock");
-const KEEPER_PORT = Number(process.env.KEEPER_PORT || 8791);
+const LOCK_PATH = join(CONFIG_DIR, "buy.lock"); // legacy global; prefer per-owner
+const KEEPER_PORT = Number(process.env.KEEPER_PORT || 8792);
+
+/**
+ * Trade mode exposed on /health + /status.
+ * Must match whether executeBuy actually sends txs.
+ * No dry-run path today — buys always live.
+ */
+function keeperMode() {
+  return "live";
+}
+
 const LOCK_STALE_MS = 5 * 60 * 1000;
 const TOKEN_PATH = join(CONFIG_DIR, "keeper.token");
 const TOKEN_PATH_LEGACY = join(CONFIG_DIR, "http_token");
@@ -375,19 +385,31 @@ function writeOwnerState(owner, partial) {
   }
 }
 
-async function withBuyLock(fn) {
-  mkdirSync(dirname(LOCK_PATH), { recursive: true });
-  if (existsSync(LOCK_PATH)) {
+function buyLockPath(owner) {
+  if (owner) {
     try {
-      const st = statSync(LOCK_PATH);
-      if (Date.now() - st.mtimeMs > LOCK_STALE_MS) unlinkSync(LOCK_PATH);
+      return join(ownerDir(owner), "buy.lock");
+    } catch {
+      /* fall through to legacy global */
+    }
+  }
+  return LOCK_PATH;
+}
+
+async function withBuyLock(fn, owner) {
+  const lockPath = buyLockPath(owner);
+  mkdirSync(dirname(lockPath), { recursive: true });
+  if (existsSync(lockPath)) {
+    try {
+      const st = statSync(lockPath);
+      if (Date.now() - st.mtimeMs > LOCK_STALE_MS) unlinkSync(lockPath);
     } catch {
       /* ignore */
     }
   }
   let fd;
   try {
-    fd = openSync(LOCK_PATH, "wx");
+    fd = openSync(lockPath, "wx");
   } catch (e) {
     if (e && e.code === "EEXIST") {
       return { ok: true, skipped: true, reason: "busy" };
@@ -404,7 +426,7 @@ async function withBuyLock(fn) {
       /* ignore */
     }
     try {
-      unlinkSync(LOCK_PATH);
+      unlinkSync(lockPath);
     } catch {
       /* ignore */
     }
@@ -971,7 +993,8 @@ async function runOnce(opts) {
     const nextAt = new Date(lastMs2 + WEEK_MS).toISOString();
     log("not due after rank; next", nextAt);
     writeStatus({ phase: "not_due", lastRunTs: lastTs2, nextAt });
-    return { skipped: true, reason: "not_due", nextAt, enabled: true };
+    writeOwnerState(ownerStr, { phase: "not_due", nextAt, lastRunTs: lastTs2, error: null });
+    return { skipped: true, reason: "not_due", nextAt, lastRunTs: lastTs2, enabled: true, owner: ownerStr };
   }
   const budgetUsd2 = bnToNumber(cfg.weeklyBudgetUsdc) / 1e6;
   const amountEach2 = Math.floor(bnToNumber(cfg.weeklyBudgetUsdc) / 3) / 1e6;
@@ -1004,12 +1027,16 @@ async function runOnce(opts) {
     .rpc();
 
   log("execute_buy OK", sig, `$${totalDebit.toFixed(2)} → ${names.join(" · ")}`);
+  const lastRunTs = Math.floor(Date.now() / 1000);
+  const nextAt = new Date(Date.now() + WEEK_MS).toISOString();
   writeStatus({
     phase: "ok",
     signature: sig,
     names,
     amountUsd: totalDebit,
     runIndex,
+    lastRunTs,
+    nextAt,
     error: null,
   });
   writeOwnerState(ownerStr, {
@@ -1018,10 +1045,22 @@ async function runOnce(opts) {
     names,
     amountUsd: totalDebit,
     runIndex,
+    lastRunTs,
+    nextAt,
     enabled: true,
     error: null,
   });
-  return { skipped: false, signature: sig, names, amountUsd: totalDebit, runIndex, owner: ownerStr, enabled: true };
+  return {
+    skipped: false,
+    signature: sig,
+    names,
+    amountUsd: totalDebit,
+    runIndex,
+    lastRunTs,
+    nextAt,
+    owner: ownerStr,
+    enabled: true,
+  };
 }
 
 function parseArgs(argv) {
@@ -1085,9 +1124,9 @@ function startKeeperHttp() {
           enabledCount: enabledOwners.length,
           daemon: true,
           multiUser: true,
+          mode: keeperMode(),
           port: KEEPER_PORT,
           program: programId().toBase58(),
-          spendLimits: loadSpendLimits(),
         });
         return;
       }
@@ -1102,6 +1141,10 @@ function startKeeperHttp() {
         const spendPublic = { start_usd: spend.start_usd, max_usd: spend.max_usd };
         const qOwner = (query.owner || "").trim();
         if (qOwner) {
+          if (!authorizeMutating(req)) {
+            json(res, req, 401, { ok: false, error: "unauthorized" });
+            return;
+          }
           let owner;
           try {
             owner = assertOwnerPubkey(qOwner);
@@ -1123,6 +1166,7 @@ function startKeeperHttp() {
             enabled: readEnabled(owner),
             daemon: true,
             multiUser: true,
+            mode: keeperMode(),
             port: KEEPER_PORT,
             program: programId().toBase58(),
             rpc: rpcRedacted,
@@ -1131,24 +1175,12 @@ function startKeeperHttp() {
           });
           return;
         }
-        // Summary only — no other users' prefs/secrets
-        const owners = listOwnerPubkeys().map((o) => ({
-          owner: o,
-          enabled: readEnabled(o),
-          phase: readOwnerState(o).phase || null,
-        }));
-        const enabledOwners = owners.filter((o) => o.enabled);
+        // Public alive summary only — no owners/prefs/spendLimits (proxy also gates)
         json(res, req, 200, {
           ok: true,
           daemon: true,
           multiUser: true,
-          enabled: enabledOwners.length > 0,
-          enabledCount: enabledOwners.length,
-          owners,
-          port: KEEPER_PORT,
-          program: programId().toBase58(),
-          rpc: rpcRedacted,
-          spendLimits: spendPublic,
+          mode: keeperMode(),
         });
         return;
       }
@@ -1200,12 +1232,14 @@ function startKeeperHttp() {
         log("enable attempt for", owner, "force", body.force !== false);
         let result;
         try {
-          result = await withBuyLock(() =>
-            runOnce({
-              force: body.force !== false,
-              requireEnabled: false,
-              owner,
-            }),
+          result = await withBuyLock(
+            () =>
+              runOnce({
+                force: body.force !== false,
+                requireEnabled: false,
+                owner,
+              }),
+            owner,
           );
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
@@ -1271,6 +1305,8 @@ function startKeeperHttp() {
           signature: result.signature,
           names: result.names,
           amountUsd: result.amountUsd,
+          lastRunTs: result.lastRunTs,
+          nextAt: result.nextAt,
         });
         writeStatus({
           phase: "ok",
@@ -1280,6 +1316,8 @@ function startKeeperHttp() {
           signature: result.signature,
           names: result.names,
           amountUsd: result.amountUsd,
+          lastRunTs: result.lastRunTs,
+          nextAt: result.nextAt,
         });
         json(res, req, 200, {
           ok: true,
@@ -1323,13 +1361,19 @@ function startKeeperHttp() {
           json(res, req, 200, { ok: true, skipped: true, reason: "off", enabled: false, owner });
           return;
         }
-        const result = await withBuyLock(() =>
-          runOnce({ force: Boolean(body.force), owner }),
+        // POST /run never forces cooldown skip (enable may still force).
+        const result = await withBuyLock(
+          () => runOnce({ force: false, owner }),
+          owner,
         );
         json(res, req, 200, { ok: true, enabled: true, owner, ...result });
         return;
       }
       if (req.method === "GET" && url === "/prefs") {
+        if (!authorizeMutating(req)) {
+          json(res, req, 401, { ok: false, error: "unauthorized" });
+          return;
+        }
         const qOwner = (query.owner || "").trim();
         if (qOwner) {
           let owner;
@@ -1392,6 +1436,7 @@ async function main() {
       pid: process.pid,
       daemon: true,
       multiUser: true,
+      mode: keeperMode(),
       port: KEEPER_PORT,
       program: programId().toBase58(),
       rpc: /devnet/i.test(rpcUrl()) ? "devnet" : "redacted",
@@ -1407,7 +1452,7 @@ async function main() {
       }
       for (const owner of enabled) {
         try {
-          await withBuyLock(() => runOnce({ force, owner }));
+          await withBuyLock(() => runOnce({ force, owner }), owner);
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
           log("tick error", owner, msg);

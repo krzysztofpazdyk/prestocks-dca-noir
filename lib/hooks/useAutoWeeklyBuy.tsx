@@ -15,7 +15,10 @@ import {
   keeperDisable,
   keeperEnable,
   keeperHealth,
+  keeperHealthInfo,
+  keeperNextBuyAtMs,
   keeperStatus,
+  type KeeperMode,
 } from "@/lib/keeper-client";
 import { rankPrefsForApi, readRankPrefs } from "@/lib/rank-prefs";
 import { DEFAULT_SETTINGS, type JevRank } from "@/lib/mock-data";
@@ -53,6 +56,8 @@ export type AutoWeeklyBuyApi = {
   nextLabel: string | null;
   lastTop3: JevRank[];
   due: boolean;
+  /** From daemon /health|/status — same flag that gates real txs. */
+  keeperMode: KeeperMode | null;
 };
 
 const AutoWeeklyBuyContext = createContext<AutoWeeklyBuyApi | null>(null);
@@ -74,6 +79,7 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
   const [nextAt, setNextAt] = useState<number | null>(null);
   const [lastTop3, setLastTop3] = useState<JevRank[]>([]);
   const [due, setDue] = useState(false);
+  const [keeperMode, setKeeperMode] = useState<KeeperMode | null>(null);
 
   const predcaRef = useRef(predca);
   predcaRef.current = predca;
@@ -87,6 +93,10 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
   enabledRef.current = enabled;
   const tRef = useRef(t);
   tRef.current = t;
+  const localeRef = useRef(locale);
+  localeRef.current = locale;
+  const nextAtRef = useRef<number | null>(null);
+  nextAtRef.current = nextAt;
   const ignoreOffUntilRef = useRef(0);
 
   useEffect(() => {
@@ -94,9 +104,16 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
     let cancelled = false;
     void (async () => {
       const owner = ownerRef.current;
-      const st = await keeperStatus(owner ?? undefined);
+      const sign = signMessageRef.current;
+      const [st, health] = await Promise.all([
+        keeperStatus(owner ?? undefined, sign ?? undefined),
+        keeperHealthInfo(),
+      ]);
       const local = readAutoWeeklyBuyPref();
       if (cancelled) return;
+      const modeFromStatus =
+        st.mode === "live" || st.mode === "dry-run" ? st.mode : null;
+      setKeeperMode(modeFromStatus ?? health.mode);
       const keeperOn = st.enabled === true;
       const configuredOwner =
         (typeof st.owner === "string" && st.owner.trim()) || null;
@@ -127,7 +144,7 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
           const res = await keeperDisable(owner, sign);
           if (!res.ok) {
             // Idempotent off: keeper already off → success (no scary mismatch error).
-            const st = await keeperStatus(owner);
+            const st = await keeperStatus(owner, sign);
             if (st.enabled === false) {
               setPhase("idle");
               setMessage(tRef.current("auto.status.off"));
@@ -268,11 +285,17 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
       });
       setPhase("ok");
       setDue(false);
-      setNextAt(Date.now() + WEEK_MS);
+      // A just-completed enable buy is the anchor; do not reuse a stale
+      // pre-enable on-chain RunRecord while the keeper status catches up.
+      const nextBuyMs = keeperNextBuyAtMs(ran) ?? Date.now() + WEEK_MS;
+      setNextAt(nextBuyMs);
+      const amountLabel = (ran.amountUsd ?? amount).toFixed(2);
+      const tokensLabel = (ran.names ?? []).join(" · ");
       setMessage(
-        tRef.current("auto.status.ok", {
-          amount: (ran.amountUsd ?? amount).toFixed(2),
-          tokens: (ran.names ?? []).join(" · "),
+        tRef.current("auto.status.okWithNext", {
+          amount: amountLabel,
+          tokens: tokensLabel,
+          nextBuy: formatWarsawWhen(nextBuyMs, localeRef.current),
         }),
       );
     } catch (e) {
@@ -304,7 +327,11 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
   const tick = useCallback(async () => {
     if (!prefsReady) return;
     const wallet = ownerRef.current;
-    const st = await keeperStatus(wallet ?? undefined);
+    const sign = signMessageRef.current;
+    const st = await keeperStatus(wallet ?? undefined, sign ?? undefined);
+    if (st.mode === "live" || st.mode === "dry-run") {
+      setKeeperMode(st.mode);
+    }
     const configuredOwner =
       (typeof st.owner === "string" && st.owner.trim()) || null;
     const sameOwner =
@@ -337,22 +364,45 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
       setMessage(tRef.current("auto.status.keeperDown"));
       return;
     }
-    if (st.nextAt) {
-      const next = Date.parse(st.nextAt);
-      if (Number.isFinite(next)) setNextAt(next);
+    const keeperNextBuyMs = keeperNextBuyAtMs(st);
+    const nextBuyMs =
+      keeperNextBuyMs ??
+      (nextAtRef.current == null
+        ? keeperNextBuyAtMs(st, predcaRef.current.lastPurchaseOnChain?.ts ?? null)
+        : null);
+    if (nextBuyMs != null) {
+      setNextAt(nextBuyMs);
       setDue(false);
     }
-    if (st.phase === "ok" && st.signature) {
+    // Keeper settles on not_due after a successful buy while keeping
+    // signature/names/amountUsd/nextAt. Gating only on phase===ok hid the
+    // OK status line in Settings + banner (fell through to local idle).
+    const purchaseComplete =
+      (st.phase === "ok" || st.phase === "not_due") &&
+      !!st.signature &&
+      st.amountUsd != null &&
+      Array.isArray(st.names) &&
+      st.names.length > 0;
+    if (purchaseComplete || (st.phase === "ok" && st.signature)) {
       setPhase("ok");
       if (st.names && st.names.length >= 3) {
         setLastTop3(st.names.map((name) => ({ name, score: 0 })));
       }
       if (st.amountUsd != null && st.names) {
+        const nextBuy = nextBuyMs ?? nextAtRef.current;
+        const amountLabel = st.amountUsd.toFixed(2);
+        const tokensLabel = st.names.join(" · ");
         setMessage(
-          tRef.current("auto.status.ok", {
-            amount: st.amountUsd.toFixed(2),
-            tokens: st.names.join(" · "),
-          }),
+          nextBuy != null
+            ? tRef.current("auto.status.okWithNext", {
+                amount: amountLabel,
+                tokens: tokensLabel,
+                nextBuy: formatWarsawWhen(nextBuy, localeRef.current),
+              })
+            : tRef.current("auto.status.ok", {
+                amount: amountLabel,
+                tokens: tokensLabel,
+              }),
         );
       }
       return;
@@ -402,6 +452,7 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
       nextLabel,
       lastTop3,
       due,
+      keeperMode,
     }),
     [
       enabled,
@@ -414,6 +465,7 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
       nextLabel,
       lastTop3,
       due,
+      keeperMode,
     ],
   );
 }

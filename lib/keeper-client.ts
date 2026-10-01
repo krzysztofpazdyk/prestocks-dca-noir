@@ -10,6 +10,8 @@ function keeperUrl(): string {
   return DEFAULT_KEEPER;
 }
 
+export type KeeperMode = "live" | "dry-run";
+
 export type KeeperRunResult = {
   ok: boolean;
   skipped?: boolean;
@@ -18,12 +20,23 @@ export type KeeperRunResult = {
   names?: string[];
   amountUsd?: number;
   error?: string;
-  nextAt?: string;
+  nextAt?: string | number;
+  /** Keeper/on-chain schedule aliases used by older status payloads. */
+  next_buy_at?: string | number;
+  lastRunTs?: string | number;
+  last_run_ts?: string | number;
+  lastBuy?: string | number;
+  last_buy?: string | number;
+  interval?: string | number;
+  intervalSec?: string | number;
+  interval_sec?: string | number;
   enabled?: boolean;
   owner?: string;
   phase?: string;
   source?: "daemon" | "file" | string;
   daemon?: boolean;
+  /** live = real execute_buy; dry-run = no txs (must match daemon gate). */
+  mode?: KeeperMode | string;
   detail?: string;
 };
 
@@ -80,6 +93,168 @@ export async function signKeeperAuth(
   };
 }
 
+type StatusAuthCached = {
+  wallet: string;
+  message: string;
+  signature: string;
+  owner: string;
+  expiresAt: number;
+};
+
+type SessionCached = {
+  token: string;
+  expiresAt: number;
+  owner: string;
+};
+
+/** Module-level cache: reuse status sig until expires-30s (SIG_TTL_S=300). */
+const statusAuthCache = new Map<string, StatusAuthCached>();
+/** Short-lived server session (Bearer) — avoids Phantom re-prompt every ~5 min. */
+const sessionCache = new Map<string, SessionCached>();
+/** Dedupe concurrent sign prompts (status + prefs hydrate in parallel). */
+const statusAuthInflight = new Map<
+  string,
+  Promise<{ wallet: string; message: string; signature: string; owner: string }>
+>();
+const sessionInflight = new Map<
+  string,
+  Promise<{ session: SessionCached | null; result: KeeperRunResult | null }>
+>();
+
+function parseExpiresFromMessage(message: string): number {
+  const m = /expires:(\d+)/i.exec(message);
+  return m ? Number(m[1]) : 0;
+}
+
+function sessionStorageKey(owner: string): string {
+  return `predca.keeper.session.${owner.trim()}`;
+}
+
+function readStoredSession(owner: string): SessionCached | null {
+  const key = owner.trim();
+  if (typeof localStorage === "undefined") return null;
+  try {
+    const sk = sessionStorageKey(key);
+    let raw = localStorage.getItem(sk);
+    // Migrate v3.38–3.43 sessionStorage → localStorage (12h TTL survives tab close).
+    if (!raw && typeof sessionStorage !== "undefined") {
+      try {
+        raw = sessionStorage.getItem(sk);
+        if (raw) {
+          localStorage.setItem(sk, raw);
+          sessionStorage.removeItem(sk);
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as SessionCached;
+    if (
+      !parsed ||
+      typeof parsed.token !== "string" ||
+      typeof parsed.expiresAt !== "number" ||
+      parsed.owner !== key
+    ) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredSession(session: SessionCached): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(sessionStorageKey(session.owner), JSON.stringify(session));
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
+
+function removeStoredSession(owner?: string): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    if (owner) localStorage.removeItem(sessionStorageKey(owner));
+    else {
+      const prefix = "predca.keeper.session.";
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith(prefix)) localStorage.removeItem(k);
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function getCachedSession(owner: string): SessionCached | null {
+  const key = owner.trim();
+  const now = Math.floor(Date.now() / 1000);
+  const mem = sessionCache.get(key);
+  if (mem && mem.expiresAt - 60 > now) return mem;
+  const stored = readStoredSession(key);
+  if (stored && stored.expiresAt - 60 > now) {
+    sessionCache.set(key, stored);
+    return stored;
+  }
+  if (mem) sessionCache.delete(key);
+  if (stored) removeStoredSession(key);
+  return null;
+}
+
+function setCachedSession(owner: string, token: string, expiresAt: number): void {
+  const key = owner.trim();
+  const session: SessionCached = { token, expiresAt, owner: key };
+  sessionCache.set(key, session);
+  writeStoredSession(session);
+}
+
+/** Sign action:status once; pollers reuse until near expiry (fallback before session). */
+export async function getStatusAuth(
+  owner: string,
+  signMessage: KeeperSignFn,
+): Promise<{ wallet: string; message: string; signature: string; owner: string }> {
+  const key = owner.trim();
+  const now = Math.floor(Date.now() / 1000);
+  const cached = statusAuthCache.get(key);
+  if (cached && cached.expiresAt - 30 > now) {
+    return {
+      wallet: cached.wallet,
+      message: cached.message,
+      signature: cached.signature,
+      owner: cached.owner,
+    };
+  }
+  const pending = statusAuthInflight.get(key);
+  if (pending) return pending;
+  const promise = (async () => {
+    const auth = await signKeeperAuth(signMessage, "status", key);
+    const expiresAt = parseExpiresFromMessage(auth.message);
+    statusAuthCache.set(key, { ...auth, expiresAt });
+    return auth;
+  })().finally(() => {
+    statusAuthInflight.delete(key);
+  });
+  statusAuthInflight.set(key, promise);
+  return promise;
+}
+
+/** Drop cached status auth + session (e.g. after wallet disconnect / 401). */
+export function clearStatusAuthCache(owner?: string): void {
+  if (owner) {
+    const key = owner.trim();
+    statusAuthCache.delete(key);
+    sessionCache.delete(key);
+    removeStoredSession(key);
+  } else {
+    statusAuthCache.clear();
+    sessionCache.clear();
+    removeStoredSession();
+  }
+}
+
 async function keeperFetch(
   path: string,
   init?: RequestInit,
@@ -120,9 +295,25 @@ async function keeperFetch(
   }
 }
 
-export async function keeperHealth(): Promise<boolean> {
+function parseKeeperMode(raw: unknown): KeeperMode | null {
+  if (raw === "live" || raw === "dry-run") return raw;
+  return null;
+}
+
+/** Public keeper /health — ok + trade mode (same flag as buy path). */
+export async function keeperHealthInfo(): Promise<{
+  ok: boolean;
+  mode: KeeperMode | null;
+}> {
   const r = await keeperFetch("/health", { method: "GET" }, 5000);
-  return r.ok;
+  if (!r.ok) return { ok: false, mode: null };
+  const mode = parseKeeperMode(r.data?.mode) ?? "live";
+  return { ok: true, mode };
+}
+
+export async function keeperHealth(): Promise<boolean> {
+  const info = await keeperHealthInfo();
+  return info.ok;
 }
 
 export async function keeperRegister(
@@ -252,15 +443,229 @@ export async function keeperDisable(
 /**
  * Live keeper `/status` (public, redacted). Pass owner for per-wallet status.
  */
-export async function keeperStatus(owner?: string): Promise<KeeperRunResult> {
-  const q =
-    owner && owner.trim()
-      ? `?owner=${encodeURIComponent(owner.trim())}`
-      : "";
-  const r = await keeperFetch(`/status${q}`, { method: "GET" }, 8000);
-  if (r.data && r.status !== 0) {
-    return { ...r.data, source: r.data.source ?? "daemon" };
+function timestampMs(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    return value < 1e12 ? value * 1000 : value;
   }
+  if (typeof value !== "string" || !value.trim()) return null;
+  const numeric = Number(value.trim());
+  if (Number.isFinite(numeric) && numeric > 0) {
+    return numeric < 1e12 ? numeric * 1000 : numeric;
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function intervalMs(value: unknown): number | null {
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds <= 0) return null;
+  // Keeper intervals are normally seconds; accept milliseconds for API variants.
+  return seconds < 1e10 ? seconds * 1000 : seconds;
+}
+
+/**
+ * Resolve the next purchase from keeper status, tolerating current and legacy
+ * snake_case payloads, then fall back to the on-chain RunRecord timestamp.
+ */
+export function keeperNextBuyAtMs(
+  status: KeeperRunResult,
+  fallbackLastBuyTs?: number | null,
+): number | null {
+  const direct = [status.nextAt, status.next_buy_at]
+    .map(timestampMs)
+    .find((value): value is number => value != null);
+  if (direct != null) return direct;
+
+  const lastBuy = [
+    status.lastRunTs,
+    status.last_run_ts,
+    status.lastBuy,
+    status.last_buy,
+  ]
+    .map(timestampMs)
+    .find((value): value is number => value != null)
+    ?? timestampMs(fallbackLastBuyTs);
+  if (lastBuy == null) return null;
+
+  const interval = [status.intervalSec, status.interval_sec, status.interval]
+    .map(intervalMs)
+    .find((value): value is number => value != null);
+  return lastBuy + (interval ?? 7 * 24 * 60 * 60 * 1000);
+}
+
+type StatusWithSession = KeeperRunResult & {
+  sessionToken?: string;
+  sessionExpiresAt?: number;
+  detail?: string;
+};
+
+type StatusMintResult = {
+  session: SessionCached | null;
+  result: KeeperRunResult | null;
+};
+
+function ingestSessionFromPayload(owner: string, data: StatusWithSession | null): void {
+  if (!data) return;
+  const raw = data as StatusWithSession & {
+    session_token?: string;
+    session_expires_at?: number | string;
+  };
+  const token =
+    (typeof raw.sessionToken === "string" && raw.sessionToken) ||
+    (typeof raw.session_token === "string" && raw.session_token) ||
+    "";
+  const expRaw = raw.sessionExpiresAt ?? raw.session_expires_at;
+  const exp =
+    typeof expRaw === "number"
+      ? expRaw
+      : typeof expRaw === "string" && expRaw.trim()
+        ? Number(expRaw)
+        : NaN;
+  if (token && Number.isFinite(exp) && exp > 0) {
+    // Accept ms timestamps defensively.
+    const expSec = exp > 1e12 ? Math.floor(exp / 1000) : Math.floor(exp);
+    setCachedSession(owner, token, expSec);
+  }
+}
+
+/** Drop session only — keep statusAuthCache so a 401 remint can stay silent. */
+function clearSessionOnly(owner: string): void {
+  const key = owner.trim();
+  sessionCache.delete(key);
+  removeStoredSession(key);
+}
+
+function statusErrorFrom(
+  data: StatusWithSession,
+  status: number,
+): KeeperRunResult {
+  return {
+    ...data,
+    ok: false,
+    error:
+      data.error ||
+      data.detail ||
+      (status === 401 || status === 403 ? "signature_rejected" : `http_${status}`),
+    source: data.source ?? "daemon",
+  };
+}
+
+/**
+ * Per-owner keeper status — one wallet sign mints a server session; polls use Bearer.
+ * Without owner/signMessage returns wallet_required (use keeperHealth for alive).
+ * On Bearer 401 soft-clears session (keeps status sig cache) and remints once.
+ */
+export async function keeperStatus(
+  owner?: string,
+  signMessage?: KeeperSignFn,
+): Promise<KeeperRunResult> {
+  if (!owner?.trim() || !signMessage) {
+    return { ok: false, error: "wallet_required" };
+  }
+  const key = owner.trim();
+
+  const fetchWithBearer = async (token: string) =>
+    keeperFetch(
+      `/status?owner=${encodeURIComponent(key)}`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "X-Keeper-Session": token,
+        },
+      },
+      8000,
+    );
+
+  const signAndMint = async (): Promise<StatusMintResult> => {
+    // Another poll may have minted while we waited on inflight/401.
+    const raced = getCachedSession(key);
+    if (raced) {
+      const br = await fetchWithBearer(raced.token);
+      if (
+        br.data &&
+        br.status !== 0 &&
+        br.ok &&
+        br.status !== 401 &&
+        br.status !== 403
+      ) {
+        ingestSessionFromPayload(key, br.data as StatusWithSession);
+        return {
+          session: getCachedSession(key),
+          result: { ...br.data, source: br.data.source ?? "daemon" },
+        };
+      }
+    }
+    let auth;
+    try {
+      auth = await getStatusAuth(key, signMessage);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return {
+        session: null,
+        result: { ok: false, error: `sign_rejected: ${msg}` },
+      };
+    }
+    const r = await keeperFetch(
+      "/status",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(auth),
+      },
+      8000,
+    );
+    const data = r.data as StatusWithSession | null;
+    if (data && r.status !== 0 && r.ok && r.status !== 401 && r.status !== 403) {
+      ingestSessionFromPayload(key, data);
+      return {
+        session: getCachedSession(key),
+        result: { ...data, source: data.source ?? "daemon" },
+      };
+    }
+    if (r.status === 401 || r.status === 403) {
+      // Signed POST rejected — drop sig cache so next attempt re-prompts.
+      clearStatusAuthCache(key);
+    }
+    if (data && r.status !== 0) {
+      return { session: null, result: statusErrorFrom(data, r.status) };
+    }
+    return { session: null, result: { ok: false, error: "keeper_unreachable" } };
+  };
+
+  // 1) Try existing session (memory + localStorage) — no wallet prompt
+  const existing = getCachedSession(key);
+  if (existing) {
+    const r = await fetchWithBearer(existing.token);
+    if (r.data && r.status !== 0 && r.ok && r.status !== 401 && r.status !== 403) {
+      ingestSessionFromPayload(key, r.data as StatusWithSession);
+      return { ...r.data, source: r.data.source ?? "daemon" };
+    }
+    if (r.status === 401 || r.status === 403) {
+      // Soft-clear: keep statusAuthCache so remint can reuse ~5min sig silently.
+      clearSessionOnly(key);
+      // fall through — remint below (Phantom only if status auth also expired)
+    } else if (r.data && r.status !== 0) {
+      return statusErrorFrom(r.data as StatusWithSession, r.status);
+    } else {
+      return { ok: false, error: "keeper_unreachable" };
+    }
+  }
+
+  // 2) Dedupe concurrent sign+mint (status + prefs hydrate in parallel)
+  const pending = sessionInflight.get(key);
+  if (pending) {
+    const shared = await pending;
+    if (shared.result) return shared.result;
+  }
+
+  const mintPromise = signAndMint().finally(() => {
+    sessionInflight.delete(key);
+  });
+  sessionInflight.set(key, mintPromise);
+  const minted = await mintPromise;
+  if (minted.result) return minted.result;
   return { ok: false, error: "keeper_unreachable" };
 }
 
@@ -314,17 +719,23 @@ export async function keeperPushPrefs(
   return { ok: true, prefs: data.prefs };
 }
 
-export async function keeperGetPrefs(owner?: string): Promise<{
+/** Prefs via signed status (GET /prefs is 401). Reuses status auth cache. */
+export async function keeperGetPrefs(
+  owner?: string,
+  signMessage?: KeeperSignFn,
+): Promise<{
   ok: boolean;
   prefs?: KeeperPrefsPayload;
+  error?: string;
 }> {
-  const q =
-    owner && owner.trim()
-      ? `?owner=${encodeURIComponent(owner.trim())}`
-      : "";
-  const r = await keeperFetch(`/prefs${q}`, { method: "GET" }, 8000);
-  if (!r.ok || !r.data) return { ok: false };
-  const data = r.data as KeeperRunResult & { prefs?: KeeperPrefsPayload };
+  if (!owner?.trim() || !signMessage) {
+    return { ok: false, error: "wallet_required" };
+  }
+  const st = await keeperStatus(owner, signMessage);
+  if (!st.ok) {
+    return { ok: false, error: st.error };
+  }
+  const data = st as KeeperRunResult & { prefs?: KeeperPrefsPayload };
   return { ok: true, prefs: data.prefs };
 }
 
