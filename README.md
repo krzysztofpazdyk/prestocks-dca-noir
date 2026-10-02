@@ -1,114 +1,46 @@
-> **PreStocks DCA Noir v4.02** — product UI on GitHub Pages (`basePath` `/prestocks-dca-noir`). Promoted from `prestocks-dca-noir2.0` @ a115722 (v3.47) with Render API wiring.
+# PreStocks DCA Noir v4.02
 
-# PreStocks UI — Noir
+Tygodniowy desk DCA na PreStocks (Solana **Devnet**). Równy podział budżetu na top-3. Zakup idzie z vaulta USDC programu **predca**, po podpisie portfela. Klucze BYOK zostają w `localStorage`.
 
-Interfejs **PreStocks Weekly DCA** w stylu trading desk: głęboki charcoal, neonowy teal/violet, liczby monospace.
+**Live:** https://krzysztofpazdyk.github.io/prestocks-dca-noir/  
+`basePath` `/prestocks-dca-noir`
 
-Podłączony do programu Anchor **predca** (custody USDC + config + RunRecord). Sieć: **Solana localnet lub devnet** (wybierana przez `NEXT_PUBLIC_RPC_URL`) — bez seedów / kluczy prywatnych w repo.
+## Skąd jest v4.02
 
-## Wymagania
+Produkt wjechał z [`prestocks-dca-noir2.0`](https://github.com/krzysztofpazdyk/prestocks-dca-noir2.0) @ `a115722` (v3.47) jako v4.0.
 
-- Node.js 20+
-- npm
-- `solana-test-validator` (CLI Solana) — do transakcji on-chain
-- Program **predca** wdrożony na localnet (`HajLzgcp6fyHVgVLFtwujnU53re47PSMJcQZZes8ZvbU`)
+- **v4.01** — baner auto-zakupu i budżet w `localStorage` są przypisane do pubkeya portfela.
+- **v4.02** — domyślny budżet tygodniowy to **$150**, gdy portfel nie ma własnego zapisu.
 
-## Instalacja
+## Co widać w UI
 
-```bash
-cd /workspace/prestocks-ui-noir
-cp .env.example .env.local   # uzupełnij NEXT_PUBLIC_USDC_MINT po utworzeniu mintu
-npm install
-```
+- **Pierwsza wpłata** wysyła `initialize_user` i `deposit_usdc` w jednej transakcji. Osobnego kroku Initialize nie ma.
+- **Portfel odłączony:** alokacja holdings jest pusta, bez wykresu. Salda on-chain pokazują się po połączeniu.
+- **Phantom (albo inny wallet):** sieć **Devnet**. Build Pages używa `https://api.devnet.solana.com`.
+- **Ranking:** klucz TypeSafe w Ustawieniach jest wymagany do Jev. Klucz xAI jest opcjonalny (komentarz Groka).
 
-## Localnet + Predca
+## API
 
-1. Uruchom validator:
+Keeper i ranking: https://predca-api.onrender.com  
+Status keepra: https://predca-api.onrender.com/keeper
 
-```bash
-solana-test-validator
-```
+Program Devnet: `HajLzgcp6fyHVgVLFtwujnU53re47PSMJcQZZes8ZvbU`  
+Mint USDC i adresy RPC są w `.env.production`.
 
-2. Ustaw CLI na localnet i upewnij się, że **predca** jest zdeployowany (z katalogu `/workspace/predca`):
+## Lokalnie
 
-```bash
-solana config set --url http://127.0.0.1:8899
-anchor deploy   # lub równoważny deploy programu predca
-```
-
-3. Utwórz lokalny mock mint USDC (6 decimals) i wpisz pubkey do env:
+Node.js 22, katalog repozytorium `prestocks-dca-noir`.
 
 ```bash
-spl-token create-token --decimals 6
-# skopiuj mint → NEXT_PUBLIC_USDC_MINT w .env.local
-```
-
-Mint **nie jest zahardcodowany** w programie — to konto w instrukcjach. Bez `NEXT_PUBLIC_USDC_MINT` UI pokaże ostrzeżenie i zablokuje init/deposit/withdraw.
-
-4. Dev UI:
-
-```bash
-cd /workspace/prestocks-ui-noir
+cp .env.example .env.local
+npm i
 npm run dev
 ```
 
-Aplikacja: [http://localhost:3000](http://localhost:3000).
+Dev: http://localhost:3000/prestocks-dca-noir/
 
-Zmienne (patrz `.env.example`):
+`.env.local` powstaje z `.env.example` (localnet, pusty mint, pusty keeper). Build Pages czyta `.env.production`: publiczny Devnet RPC, program, mint USDC i URL-e Rendera. Sekretów w repo nie ma.
 
-| Zmienna | Domyślnie |
-|---------|-----------|
-| `NEXT_PUBLIC_RPC_URL` | `http://127.0.0.1:8899` |
-| `NEXT_PUBLIC_PREDCA_PROGRAM_ID` | `HajLzgcp6fyHVgVLFtwujnU53re47PSMJcQZZes8ZvbU` |
-| `NEXT_PUBLIC_USDC_MINT` | *(puste — ustaw po create-token)* |
+## Deploy
 
-IDL jest skopiowane do `idl/predca.json` (aplikacja self-contained — bez runtime importu z `/workspace/predca`).
-
-## Build
-
-```bash
-npm run build
-npm start
-```
-
-Build **nie wymaga** żywego validatora (tylko typy + IDL).
-
-## Ekrany
-
-1. **Overview** — salda Predca on-chain (budżet, vault USDC, ostatni RunRecord), Initialize / Deposit / Withdraw, mock holdings pie (off-chain), connect wallet
-2. **Ustawienia** — budżet → `set_weekly_budget` / `initialize_user` gdy portfel + mint; BYOK w localStorage
-3. **Historia** — RunRecord on-chain (skan `run_index` 0…), inaczej mock z adnotacją
-
-`record_run` **nie** jest akcją użytkownika w UI — zapisuje go job off-chain; UI tylko czyta RunRecord.
-
-## Portfel podłączony vs odłączony
-
-| Stan | Zachowanie |
-|------|------------|
-| Odłączony | Mock salda/holdings/historia; brak tx Predca |
-| Podłączony, brak mint | Ostrzeżenie o `NEXT_PUBLIC_USDC_MINT` |
-| Podłączony, brak UserConfig | Przycisk **Initialize** |
-| Podłączony + config | Deposit / Withdraw / zapis budżetu; Historia z chain jeśli są RunRecord |
-
-## BYOK (Bring Your Own Key)
-
-W **Ustawieniach** wklejasz własne klucze (nie konta autora apki). Zapis w **localStorage** — off-chain, nie wysyłamy na serwer:
-
-| Klucz | Opis |
-|-------|------|
-| `TYPESAFE_API_KEY` | Jev — **wymagany** do rankingu (`prestocks.TYPESAFE_API_KEY`) |
-| `XAI_API_KEY` | Grok — **opcjonalny**; pusty = metrics→Jev bez LLM (`prestocks.XAI_API_KEY`) |
-
-## GitHub Pages (static / DEVNET)
-
-Static export deploys to:
-**https://krzysztofpazdyk.github.io/prestocks-dca-noir/**
-
-- Build uses `output: 'export'` with `basePath` / `assetPrefix` `/prestocks-dca-noir`.
-- Production env (`.env.production`) points at **Solana DEVNET** only — public `NEXT_PUBLIC_*` values, no private keys.
-- CI: `.github/workflows/pages.yml` builds on push to `main` and uploads `out/` to GitHub Pages.
-
-### Phantom / wallet
-
-W Phantom (lub innym walletcie) ustaw sieć na **Devnet** przed łączeniem. UI jest zahardcodowane na `https://api.devnet.solana.com` w buildzie Pages — Mainnet nie zadziała z tym deployem.
-
+Push do `main` uruchamia GitHub Actions [`.github/workflows/pages.yml`](.github/workflows/pages.yml) (`workflow_dispatch` też). Job robi `npm ci`, `npm run build` (static export do `out/`) i wgrywa artefakt na GitHub Pages.
