@@ -1,16 +1,20 @@
-# PreStocks DCA Noir v4.02
+# PreStocks DCA Noir v4.08
 
 Tygodniowy desk DCA na PreStocks (Solana **Devnet**). Równy podział budżetu na top-3. Zakup idzie z vaulta USDC programu **predca**, po podpisie portfela. Klucze BYOK zostają w `localStorage`.
 
 **Live:** https://krzysztofpazdyk.github.io/prestocks-dca-noir/  
 `basePath` `/prestocks-dca-noir`
 
-## Skąd jest v4.02
+## Skąd jest v4.08
 
-Produkt wjechał z [`prestocks-dca-noir2.0`](https://github.com/krzysztofpazdyk/prestocks-dca-noir2.0) @ `a115722` (v3.47) jako v4.0.
+Promocja z [`prestocks-dca-noir2.0`](https://github.com/krzysztofpazdyk/prestocks-dca-noir2.0) @ `91a6f86` (tag `v4.08`). Poprzedni stabilny noir: tag `v4.02` (`4f52ec3`).
 
-- **v4.01** — baner auto-zakupu i budżet w `localStorage` są przypisane do pubkeya portfela.
-- **v4.02** — domyślny budżet tygodniowy to **$150**, gdy portfel nie ma własnego zapisu.
+- **v4.03** — tygodniowy budżet nie przecieka między portfelami.
+- **v4.04** — Manual Buy bierze wolny `runIndex` on-chain.
+- **v4.05** — konto Predca tylko przy pierwszej wpłacie (bez samotnego init).
+- **v4.06** — baner auto-buy zostaje przez kolejny tick statusu.
+- **v4.07** — błąd `startCycle` wyłącza właściwy portfel po switchu.
+- **v4.08** — Settings typography jak Overview.
 
 ## Co widać w UI
 

@@ -32,11 +32,14 @@ import {
   fetchSolBalance,
   fetchUserConfig,
   fetchVaultBalance,
+  findNextRunIndex,
   formatTs,
   getProgram,
+  isRunAlreadyExists,
   ownerUsdcAta,
   parseAnchorError,
   rawToDollars,
+  RUN_INDEX_TAKEN_MSG,
   usdcMintOrNull,
   type MockTokenBalance,
   type RunRecordData,
@@ -295,30 +298,6 @@ function usePredcaImpl() {
     }
   }
 
-  async function initializeUser(weeklyBudgetUsd: number) {
-    if (!program || !owner || !mint) {
-      reportError(
-        !mint
-          ? `Ustaw NEXT_PUBLIC_USDC_MINT (mock mint na Devnet, np. ${MOCK_USDC_MINT}).`
-          : "Podłącz portfel.",
-      );
-      return null;
-    }
-    const raw = dollarsToRaw(weeklyBudgetUsd);
-    if (raw.lte(new BN(0))) {
-      reportError("Budżet tygodniowy musi być > 0.");
-      return null;
-    }
-    return withTx(
-      () =>
-        program.methods
-          .initializeUser(raw)
-          .accounts({ usdcMint: mint })
-          .rpc(),
-      "Konto Predca zainicjalizowane.",
-    );
-  }
-
   /**
    * Deposit USDC into vault.
    * If UserConfig is missing: initialize_user + deposit_usdc in one transaction
@@ -427,8 +406,13 @@ function usePredcaImpl() {
       reportError("Podłącz portfel.");
       return null;
     }
+    // Lone initialize_user is not a Settings/auto-buy path. The account is
+    // created only by the first deposit (initialize_user + deposit_usdc).
     if (!config) {
-      return initializeUser(weeklyBudgetUsd);
+      reportError(
+        "Najpierw wpłać USDC na Overview — konto Predca powstaje razem z pierwszą wpłatą.",
+      );
+      return null;
     }
     const raw = dollarsToRaw(weeklyBudgetUsd);
     if (raw.lte(new BN(0))) {
@@ -496,18 +480,22 @@ function usePredcaImpl() {
       return null;
     }
 
-    const runIndex =
-      runs.length === 0
-        ? 0
-        : Math.max(
-            ...runs.map((r) => {
-              const idx = r.runIndex;
-              return typeof idx === "object" && idx !== null && "toNumber" in idx
-                ? (idx as BN).toNumber()
-                : Number(idx ?? 0);
-            }),
-          ) + 1;
-    return withTx(async () => {
+    // Fresh on-chain index. `runs` is stale after a keeper buy until refresh.
+    let nextIndex: number | null;
+    try {
+      nextIndex = await findNextRunIndex(program, owner);
+    } catch (e) {
+      reportError(parseAnchorError(e));
+      return null;
+    }
+    if (nextIndex == null) {
+      reportError(
+        "Brak wolnego indeksu RunRecord (limit skanu). Odśwież i spróbuj ponownie.",
+      );
+      return null;
+    }
+
+    const submitAt = async (runIndex: number) => {
       // Pre-create owner ATAs (idempotent) — program requires them to exist.
       await ensureOwnerAtas(
         connection,
@@ -537,6 +525,24 @@ function usePredcaImpl() {
           mintC: mints[2],
         })
         .rpc();
+    };
+
+    return withTx(async () => {
+      try {
+        return await submitAt(nextIndex);
+      } catch (e) {
+        if (!isRunAlreadyExists(e)) throw e;
+        const retryIndex = await findNextRunIndex(program, owner);
+        if (retryIndex == null || retryIndex === nextIndex) {
+          throw new Error(RUN_INDEX_TAKEN_MSG);
+        }
+        try {
+          return await submitAt(retryIndex);
+        } catch (e2) {
+          if (isRunAlreadyExists(e2)) throw new Error(RUN_INDEX_TAKEN_MSG);
+          throw e2;
+        }
+      }
     }, `Zakup on-chain (simulate_buy): $${totalDebit.toFixed(2)} z vault → ⅓ na ${names.join(" · ")}`);
   }
 
@@ -569,7 +575,6 @@ function usePredcaImpl() {
     lastRun,
     lastPurchaseOnChain,
     refresh,
-    initializeUser,
     depositUsdc,
     withdrawUsdc,
     setWeeklyBudget,
