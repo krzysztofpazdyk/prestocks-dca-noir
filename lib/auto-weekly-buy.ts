@@ -11,10 +11,38 @@ import { DEFAULT_SETTINGS } from "@/lib/mock-data";
 export const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 export const AUTO_BUY_RETRY_MS = 15 * 60 * 1000;
 export const AUTO_BUY_TICK_MS = 60 * 1000;
+/**
+ * After startCycle sets ok / error / blocked, tick must not replace that
+ * banner until this elapses. The enable effect calls tick immediately, while
+ * keeper status can still say off. Wallet change clears the hold separately.
+ */
+export const BANNER_HOLD_MS = 10 * 1000;
+
+/** True while a startCycle banner should survive keeper-status ticks. */
+export function isBannerHoldActive(holdUntilMs: number, nowMs: number): boolean {
+  return Number.isFinite(holdUntilMs) && holdUntilMs > 0 && nowMs < holdUntilMs;
+}
+
+/**
+ * Wallet to turn off after a failed startCycle.
+ * Null once the wallet epoch moved — the live owner ref may already be the
+ * next pubkey, and a disable must not follow it.
+ */
+export function cleanupOwnerForFailedCycle(
+  cycleOwner: string | null,
+  epochAtStart: number,
+  epochNow: number,
+): string | null {
+  if (!cycleOwner) return null;
+  if (epochNow !== epochAtStart) return null;
+  return cycleOwner;
+}
 
 export const LS_AUTO_WEEKLY_BUY = "prestocks.autoWeeklyBuy";
 export const LS_AUTO_WEEKLY_META = "prestocks.autoWeeklyBuy.meta";
 export const LS_WEEKLY_BUDGET = "predca_weekly_budget_usd";
+/** Set once when the unscoped budget key is discarded. Later wallets must not read it. */
+const LS_WEEKLY_BUDGET_MIGRATED = "predca_weekly_budget_usd.__migrated";
 
 export type AutoBuyMeta = {
   lastAttemptMs: number;
@@ -76,8 +104,32 @@ function writeBool(key: string, value: boolean): void {
   }
 }
 
+function hasOwner(owner?: string | null): owner is string {
+  return typeof owner === "string" && owner.length > 0;
+}
+
+/**
+ * Drop the unscoped budget key once. Do not copy it onto a pubkey:
+ * a wallet with no scoped key must fall back to the default, and a later
+ * wallet must not inherit the same global number.
+ */
+function discardLegacyWeeklyBudget(): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    if (localStorage.getItem(LS_WEEKLY_BUDGET_MIGRATED) === "1") {
+      localStorage.removeItem(LS_WEEKLY_BUDGET);
+      return;
+    }
+    localStorage.removeItem(LS_WEEKLY_BUDGET);
+    localStorage.setItem(LS_WEEKLY_BUDGET_MIGRATED, "1");
+  } catch {
+    /* ignore */
+  }
+}
+
 /** Default OFF — enabling is an explicit opt-in that starts the weekly cycle. */
 export function readAutoWeeklyBuy(owner?: string | null): boolean {
+  if (!hasOwner(owner)) return DEFAULT_SETTINGS.autoWeeklyBuy;
   return readBool(
     scopedLsKey(LS_AUTO_WEEKLY_BUY, owner),
     DEFAULT_SETTINGS.autoWeeklyBuy,
@@ -87,7 +139,7 @@ export function readAutoWeeklyBuy(owner?: string | null): boolean {
 /** `null` = never set for this wallet (do not treat as explicit off). */
 export function readAutoWeeklyBuyPref(owner?: string | null): boolean | null {
   try {
-    if (typeof localStorage === "undefined") return null;
+    if (typeof localStorage === "undefined" || !hasOwner(owner)) return null;
     const v = localStorage.getItem(scopedLsKey(LS_AUTO_WEEKLY_BUY, owner));
     if (v == null) return null;
     if (v === "true" || v === "1") return true;
@@ -102,6 +154,7 @@ export function writeAutoWeeklyBuy(
   value: boolean,
   owner?: string | null,
 ): void {
+  if (!hasOwner(owner)) return;
   writeBool(scopedLsKey(LS_AUTO_WEEKLY_BUY, owner), value);
 }
 
@@ -111,18 +164,10 @@ export function readWeeklyBudgetUsd(
 ): number {
   try {
     if (typeof localStorage === "undefined") return fallback;
-    const scopedKey = scopedLsKey(LS_WEEKLY_BUDGET, owner);
-    let raw = localStorage.getItem(scopedKey);
-    if (!raw && owner) {
-      const legacyRaw = localStorage.getItem(LS_WEEKLY_BUDGET);
-      if (legacyRaw) {
-        const legacyN = Number(legacyRaw.trim().replace(",", "."));
-        if (Number.isFinite(legacyN) && legacyN > 0) {
-          localStorage.setItem(scopedKey, String(legacyN));
-          raw = String(legacyN);
-        }
-      }
-    }
+    // Disconnected: do not read or create the global key. Caller keeps React state.
+    if (!hasOwner(owner)) return fallback;
+    discardLegacyWeeklyBudget();
+    const raw = localStorage.getItem(scopedLsKey(LS_WEEKLY_BUDGET, owner));
     if (!raw) return fallback;
     const n = Number(raw.trim().replace(",", "."));
     return Number.isFinite(n) && n > 0 ? n : fallback;
@@ -135,6 +180,7 @@ export function writeWeeklyBudgetUsd(
   amount: number,
   owner?: string | null,
 ): void {
+  if (!hasOwner(owner)) return;
   try {
     if (
       typeof localStorage !== "undefined" &&
@@ -153,7 +199,9 @@ export function writeWeeklyBudgetUsd(
 
 export function readAutoBuyMeta(owner?: string | null): AutoBuyMeta {
   try {
-    if (typeof localStorage === "undefined") return { ...EMPTY_META };
+    if (typeof localStorage === "undefined" || !hasOwner(owner)) {
+      return { ...EMPTY_META };
+    }
     const raw = localStorage.getItem(scopedLsKey(LS_AUTO_WEEKLY_META, owner));
     if (!raw) return { ...EMPTY_META };
     const parsed = JSON.parse(raw) as Partial<AutoBuyMeta>;
@@ -190,6 +238,7 @@ export function writeAutoBuyMeta(
   meta: AutoBuyMeta,
   owner?: string | null,
 ): void {
+  if (!hasOwner(owner)) return;
   try {
     if (typeof localStorage !== "undefined") {
       localStorage.setItem(
