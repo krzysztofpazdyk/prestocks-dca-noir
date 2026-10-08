@@ -32,6 +32,11 @@ jobs:
 
       - name: Build static export
         run: npm run build
+        env:
+          # Public Privy App ID (not a secret). Same app as noir2.0; origin https://krzysztofpazdyk.github.io.
+          NEXT_PUBLIC_PRIVY_APP_ID: cmuf3rgpj01rb0cjpl6ked6f4
+          # Demo TypeSafe key (M5): inlined into the client bundle on purpose until mainnet.
+          NEXT_PUBLIC_TYPESAFE_DEFAULT_KEY: ${{ secrets.NEXT_PUBLIC_TYPESAFE_DEFAULT_KEY }}
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

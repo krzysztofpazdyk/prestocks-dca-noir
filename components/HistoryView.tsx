@@ -3,6 +3,7 @@
 import { useWallet } from "@solana/wallet-adapter-react";
 import { nameByMint } from "@/lib/devnet-mock-mints";
 import { usePredca } from "@/lib/hooks/usePredca";
+import { TxNotice } from "@/components/TxNotice";
 import {
   clusterShortPl,
   formatTs,
@@ -45,6 +46,8 @@ export function HistoryView() {
     intro = t("history.noRuns");
   } else if (predca.status === "no_config" || predca.status === "no_mint") {
     intro = t("history.notReady");
+  } else if (predca.status === "error") {
+    intro = t("history.fetchError");
   } else {
     intro = t("history.connectHint");
   }
@@ -59,11 +62,10 @@ export function HistoryView() {
         <p className="mt-1 text-xs text-[#8b95a8]">{intro}</p>
       </div>
 
-      {predca.error && (
-        <p className="rounded border border-[#f8717133] bg-[#f8717111] px-3 py-2 text-xs text-[#fca5a5]">
-          {predca.error}
-        </p>
-      )}
+      {predca.error && <TxNotice message={predca.error} tone="error" />}
+      {predca.status === "error" && predca.rpcError ? (
+        <TxNotice message={predca.rpcError} tone="error" />
+      ) : null}
 
       {!connected && (
         <p className="rounded border border-dashed border-[#1e2633] px-3 py-6 text-center text-xs text-[#8b95a8]">
@@ -75,7 +77,9 @@ export function HistoryView() {
         <p className="rounded border border-dashed border-[#1e2633] px-3 py-6 text-center text-xs text-[#8b95a8]">
           {predca.status === "loading"
             ? t("history.loading")
-            : t("history.notReady")}
+            : predca.status === "error"
+              ? t("history.fetchError")
+              : t("history.notReady")}
         </p>
       )}
 

@@ -2,9 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
+import { useKeeperSignMessage } from "@/components/PrivyWalletBridge";
 import { DEFAULT_SETTINGS } from "@/lib/mock-data";
 import { usePredca } from "@/lib/hooks/usePredca";
-import { formatUsd } from "@/lib/predca";
+import { TxNotice } from "@/components/TxNotice";
+import { explorerTxUrl, formatUsd } from "@/lib/predca";
+import { UNRESOLVED_MSG } from "@/lib/pending-tx";
+import { autoToggleBlocked } from "@/lib/auto-weekly-buy";
 import { useI18n } from "@/lib/i18n";
 import {
   parseExclusions,
@@ -32,9 +36,7 @@ import {
   writeWeeklyBudgetUsd,
 } from "@/lib/auto-weekly-buy";
 import { useAutoWeeklyBuy } from "@/lib/hooks/useAutoWeeklyBuy";
-
-const LS_TYPESAFE = "prestocks.TYPESAFE_API_KEY";
-const LS_XAI = "prestocks.XAI_API_KEY";
+import { LS_TYPESAFE, LS_XAI, readTypesafeKey } from "@/lib/keys";
 
 /** Keeper-synced ranking prefs snapshot for dirty detection. */
 type PrefsBaseline = {
@@ -79,7 +81,8 @@ function baselinesEqual(a: PrefsBaseline | null, b: PrefsBaseline): boolean {
 export function SettingsView() {
   const predca = usePredca();
   const autoBuy = useAutoWeeklyBuy();
-  const { connected, publicKey, signMessage } = useWallet();
+  const { connected, publicKey } = useWallet();
+  const signMessage = useKeeperSignMessage();
   const signMessageRef = useRef(signMessage);
   signMessageRef.current = signMessage;
   const { t } = useI18n();
@@ -97,6 +100,8 @@ export function SettingsView() {
     DEFAULT_SETTINGS.buyDespiteIpo,
   );
   const [typesafeKey, setTypesafeKey] = useState("");
+  /** LS/seed only. Starts false so SSR does not claim a demo key is present. */
+  const [typesafeFilled, setTypesafeFilled] = useState(false);
   const [xaiKey, setXaiKey] = useState("");
   const [showTypesafe, setShowTypesafe] = useState(false);
   const [showXai, setShowXai] = useState(false);
@@ -132,7 +137,9 @@ export function SettingsView() {
     setPrefsSaveMsg(null);
     void (async () => {
       try {
-        setTypesafeKey(localStorage.getItem(LS_TYPESAFE) ?? "");
+        const seeded = readTypesafeKey();
+        setTypesafeKey(seeded);
+        setTypesafeFilled(seeded.length > 0);
         setXaiKey(localStorage.getItem(LS_XAI) ?? "");
       } catch {
         /* ignore */
@@ -269,6 +276,8 @@ export function SettingsView() {
     Math.abs(weekly - onChainWeekly) > BUDGET_EPS;
 
   async function saveWeeklyBudgetOnChain() {
+    if (predca.pendingSignature != null || predca.pendingSignatureNow()) return;
+    if (predca.status === "error") return;
     writeWeeklyBudgetUsd(weekly, ownerBase58);
     predca.clearMessages();
     if (!connected || !predca.mint || !predca.config) return;
@@ -278,6 +287,7 @@ export function SettingsView() {
   const budgetBtnLabel = predca.txPending
     ? t("settings.savingOnChain")
     : t("settings.saveOnChain");
+  const chainBusy = predca.txPending || predca.pendingSignature != null;
 
   async function signAndSavePrefs() {
     setPrefsSaveMsg(null);
@@ -318,7 +328,9 @@ export function SettingsView() {
 
   function saveByok() {
     try {
-      localStorage.setItem(LS_TYPESAFE, typesafeKey.trim());
+      const nextTypesafe = typesafeKey.trim();
+      localStorage.setItem(LS_TYPESAFE, nextTypesafe);
+      setTypesafeFilled(nextTypesafe.length > 0);
       localStorage.setItem(LS_XAI, xaiKey.trim());
       writeExclusionsRaw(exclusions);
       writeDeadlineInvalid(deadlineInvalid);
@@ -343,10 +355,31 @@ export function SettingsView() {
         <p className="mt-1 text-xs text-[#8b95a8]">{t("settings.intro")}</p>
       </div>
 
+      {predca.sessionCheckMsg ? (
+        <TxNotice message={predca.sessionCheckMsg} tone="pending" />
+      ) : null}
+      {predca.visibleUnresolvedTxs.slice(0, 2).map((rec) => (
+        <TxNotice
+          key={rec.signature}
+          tone="pending"
+          message={`${UNRESOLVED_MSG} ${rec.signature} ${explorerTxUrl(rec.signature)}`}
+          action={{
+            label: predca.rechecking ? t("tx.rechecking") : t("tx.recheck"),
+            disabled: predca.rechecking,
+            onClick: () => {
+              void predca.recheckUnresolved(rec.signature);
+            },
+          }}
+        />
+      ))}
+      {predca.visibleUnresolvedTxs.length > 2 ? (
+        <p className="text-[10px] text-[#fbbf24]">+{predca.visibleUnresolvedTxs.length - 2}</p>
+      ) : null}
+      {predca.pendingMsg && (
+        <TxNotice message={predca.pendingMsg} tone="pending" />
+      )}
       {predca.error && (
-        <p className="rounded border border-[#f8717133] bg-[#f8717111] px-3 py-2 text-xs text-[#fca5a5]">
-          {predca.error}
-        </p>
+        <TxNotice message={predca.error} tone="error" />
       )}
       {predca.okMsg && (
         <p className="rounded border border-[#2dd4bf33] bg-[#2dd4bf11] px-3 py-2 text-xs text-[#2dd4bf]">
@@ -437,7 +470,7 @@ export function SettingsView() {
             onChange={(e) => {
               const n = Number(e.target.value);
               setWeekly(Number.isFinite(n) ? Math.max(1, n) : 1);
-              predca.clearMessages();
+              predca.clearToasts();
             }}
             onBlur={() => {
               if (ownerBase58) writeWeeklyBudgetUsd(weekly, ownerBase58);
@@ -467,7 +500,7 @@ export function SettingsView() {
         {budgetDirtyOnChain && connected && predca.mint ? (
           <button
             type="button"
-            disabled={predca.txPending}
+            disabled={chainBusy || predca.status === "error"}
             onClick={() => void saveWeeklyBudgetOnChain()}
             className="w-full rounded border border-[#2dd4bf44] bg-[#0c0e12] py-2 text-[10px] uppercase tracking-wider text-[#2dd4bf] hover:bg-[#2dd4bf11] disabled:opacity-40"
           >
@@ -479,8 +512,11 @@ export function SettingsView() {
             {t("settings.connectForBudget")}
           </p>
         ) : null}
+        {predca.pendingMsg && (
+          <TxNotice message={predca.pendingMsg} tone="pending" />
+        )}
         {predca.error && (
-          <p className="text-[10px] text-[#fca5a5]">{predca.error}</p>
+          <TxNotice message={predca.error} tone="error" />
         )}
         {predca.okMsg && (
           <p className="text-[10px] text-[#2dd4bf]">{predca.okMsg}</p>
@@ -489,7 +525,16 @@ export function SettingsView() {
           <Toggle
             label={t("settings.autoWeekly")}
             checked={autoBuy.enabled}
+            disabled={chainBusy && !autoBuy.enabled}
             onChange={(v) => {
+              if (
+                autoToggleBlocked(
+                  v,
+                  chainBusy || predca.pendingSignatureNow() != null,
+                )
+              ) {
+                return;
+              }
               if (v) {
                 setAutoConfirmOpen(true);
                 return;
@@ -523,7 +568,9 @@ export function SettingsView() {
               className={`mt-2 text-[10px] ${
                 autoBuy.phase === "error"
                   ? "text-[#fca5a5]"
-                  : "text-[#8b95a8]"
+                  : autoBuy.phase === "pending"
+                    ? "text-[#fbbf24]"
+                    : "text-[#8b95a8]"
               }`}
             >
               {autoBuy.message}
@@ -566,11 +613,19 @@ export function SettingsView() {
               </button>
               <button
                 type="button"
+                disabled={chainBusy}
                 onClick={() => {
+                  if (
+                    predca.txPending ||
+                    predca.pendingSignature != null ||
+                    predca.pendingSignatureNow()
+                  ) {
+                    return;
+                  }
                   setAutoConfirmOpen(false);
                   void autoBuy.startCycle(weekly);
                 }}
-                className="rounded border border-[#2dd4bf66] bg-[#0c0e12] px-4 py-2 text-[10px] uppercase tracking-wider text-[#2dd4bf] hover:bg-[#2dd4bf11]"
+                className="rounded border border-[#2dd4bf66] bg-[#0c0e12] px-4 py-2 text-[10px] uppercase tracking-wider text-[#2dd4bf] hover:bg-[#2dd4bf11] disabled:opacity-40"
               >
                 {t("settings.autoWeeklyConfirmOk")}
               </button>
@@ -588,12 +643,18 @@ export function SettingsView() {
             localStorage
           </span>
         </div>
-        <p className="text-xs text-[#8b95a8]">{t("settings.byokIntro")}</p>
+        <p className="text-xs text-[#8b95a8]">
+          {t(typesafeFilled ? "settings.byokIntro" : "settings.byokIntroEmpty")}
+        </p>
 
         <label className="block space-y-1.5">
           <span className="text-[11px] text-[#c5cedb]">
             <span className="mono-num text-[#2dd4bf]">TYPESAFE_API_KEY</span>{" "}
-            {t("settings.typesafeLabel")}
+            {t(
+              typesafeFilled
+                ? "settings.typesafeLabel"
+                : "settings.typesafeLabelEmpty",
+            )}
           </span>
           <div className="flex gap-2">
             <input
@@ -662,17 +723,23 @@ function Toggle({
   label,
   checked,
   onChange,
+  disabled = false,
 }: {
   label: string;
   checked: boolean;
   onChange: (v: boolean) => void;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       aria-pressed={checked}
-      onClick={() => onChange(!checked)}
-      className="grid w-full grid-cols-[minmax(0,1fr)_2.75rem] items-start gap-x-4 text-left font-sans text-sm tracking-normal text-[#e8eef5]"
+      disabled={disabled}
+      onClick={() => {
+        if (disabled) return;
+        onChange(!checked);
+      }}
+      className="grid w-full grid-cols-[minmax(0,1fr)_2.75rem] items-start gap-x-4 text-left font-sans text-sm tracking-normal text-[#e8eef5] disabled:opacity-40"
     >
       <span className="min-w-0 whitespace-normal break-words font-sans text-sm leading-snug tracking-normal">
         {label}
