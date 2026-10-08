@@ -3,9 +3,9 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
-import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { clusterLabel } from "@/lib/predca";
 import { useI18n, type Locale } from "@/lib/i18n";
+import { ConnectWalletButton } from "@/components/ConnectWalletButton";
 
 export function Nav() {
   const pathname = usePathname();
@@ -44,17 +44,19 @@ export function Nav() {
 
   return (
     <header className="border-b border-[#1e2633] bg-[#0c0e12]/90 backdrop-blur sticky top-0 z-40">
-      <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
-        <div className="flex items-center gap-6">
+      <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
           <Link href="/" className="flex items-center gap-2">
             <span className="inline-block h-2 w-2 rounded-full bg-[#2dd4bf] shadow-[0_0_10px_#2dd4bf]" />
             <span className="text-sm font-semibold tracking-widest text-[#e8eef5] uppercase">
               PreStocks<span className="text-[#a78bfa]">·</span>DCA
             </span>
           </Link>
-          <nav className="flex gap-1">
+          <nav className="flex flex-wrap gap-1">
             {links.map((l) => {
-              const active = pathname === l.href;
+              const norm = (p: string) =>
+                p.length > 1 && p.endsWith("/") ? p.slice(0, -1) : p;
+              const active = norm(pathname) === norm(l.href);
               return (
                 <Link
                   key={l.href}
@@ -71,7 +73,7 @@ export function Nav() {
             })}
           </nav>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
           <div className="hidden sm:flex items-center gap-2">
             <span className="mono-num text-[10px] text-[#8b95a8] tracking-wider">
               {clusterLabel()}
@@ -95,7 +97,7 @@ export function Nav() {
             <LocaleBtn code="en" />
           </div>
           {walletReady ? (
-            <WalletMultiButton />
+            <ConnectWalletButton />
           ) : (
             <div
               className="wallet-adapter-button wallet-adapter-button-trigger"

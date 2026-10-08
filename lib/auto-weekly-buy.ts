@@ -4,6 +4,9 @@
  * GitHub Pages is static and simulate_buy still needs a wallet signature, so
  * this runs in the open tab: one purchase per 7 days from the last successful
  * on-chain buy (RunRecord ts / lastRunTs).
+ *
+ * Keeper ranking is chosen by the keeper. Manual Buy on Overview uses the
+ * metrics list in the UI. Those paths are intentionally separate.
  */
 
 import { DEFAULT_SETTINGS } from "@/lib/mock-data";
@@ -17,6 +20,143 @@ export const AUTO_BUY_TICK_MS = 60 * 1000;
  * keeper status can still say off. Wallet change clears the hold separately.
  */
 export const BANNER_HOLD_MS = 10 * 1000;
+
+/** Re-read keeper status while /enable may still be running on the daemon. */
+export const ENABLE_PENDING_POLL_MS = 5_000;
+/** Stop the poll here. The amber note stays; tick may still see a later result. */
+export const ENABLE_PENDING_MAX_MS = 5 * 60 * 1000;
+
+export type PendingEnableVerdict = "on" | "off" | "pending" | "deadline";
+
+export type EnableStatusSnapshot = {
+  ok?: boolean;
+  enabled?: boolean;
+  skipped?: boolean;
+  signature?: string | null;
+  names?: readonly string[] | null;
+  amountUsd?: number | null;
+  phase?: string | null;
+  error?: string | null;
+  owner?: string | null;
+};
+
+/** Status observed before /enable, so a stale error is not a new failure. */
+export type EnableStatusBaseline = {
+  error?: string | null;
+  phase?: string | null;
+};
+
+/** A second Confirm while the first enable is unresolved must not POST /enable. */
+export function shouldSendEnable(cycleInFlight: boolean): boolean {
+  return !cycleInFlight;
+}
+
+/** Off stays available while a transaction is in flight. On does not. */
+export function autoToggleBlocked(next: boolean, chainBusy: boolean): boolean {
+  return chainBusy && next === true;
+}
+
+/** Pending poll belongs to one pubkey. A wallet switch must not write the next one. */
+export function pendingEnableStillFor(
+  pendingOwner: string | null,
+  wallet: string | null,
+): boolean {
+  return !!pendingOwner && pendingOwner === wallet;
+}
+
+function ownerMatches(st: EnableStatusSnapshot, owner: string): boolean {
+  const configured =
+    typeof st.owner === "string" && st.owner.trim() ? st.owner.trim() : null;
+  if (!configured) return false;
+  return configured === owner;
+}
+
+/** Keeper already On and the purchase finished. Commit from status; do not /enable. */
+export function canCommitEnabledFromStatus(
+  st: EnableStatusSnapshot,
+  owner: string,
+): boolean {
+  if (st.enabled !== true || !ownerMatches(st, owner)) return false;
+  const fromStatus =
+    (st.phase === "ok" || st.phase === "not_due") &&
+    typeof st.signature === "string" &&
+    st.signature.length > 0 &&
+    st.amountUsd != null &&
+    Array.isArray(st.names) &&
+    st.names.length >= 3;
+  if (fromStatus) return true;
+  return shouldCommitAutoBuyEnabled(st);
+}
+
+const IN_PROGRESS_ENABLE_PHASES = new Set([
+  "buying",
+  "checking",
+  "ranking",
+  "enabling",
+  "confirming",
+]);
+
+/**
+ * Keeper is already On and still inside this week's buy. Do not POST /enable.
+ * Poll status until the purchase commits or the daemon reports a new failure.
+ */
+export function shouldPollInProgressEnable(
+  st: EnableStatusSnapshot,
+  owner: string,
+): boolean {
+  if (st.enabled !== true || !ownerMatches(st, owner)) return false;
+  return typeof st.phase === "string" && IN_PROGRESS_ENABLE_PHASES.has(st.phase);
+}
+
+function isNewDaemonFailure(
+  st: EnableStatusSnapshot,
+  baseline: EnableStatusBaseline | undefined,
+): boolean {
+  if (
+    st.phase === "buying" ||
+    st.phase === "ranking" ||
+    st.phase === "checking" ||
+    st.phase === "enabling" ||
+    st.phase === "confirming"
+  ) {
+    return false;
+  }
+  const err = typeof st.error === "string" ? st.error.trim() : "";
+  if (
+    !err ||
+    err === "keeper_unreachable" ||
+    err === "enable_timeout" ||
+    err === "wallet_required" ||
+    err === "signature_rejected" ||
+    err.startsWith("sign_rejected")
+  ) {
+    return false;
+  }
+  const baseErr = (baseline?.error ?? "").trim();
+  const changed =
+    err !== baseErr || (st.phase === "error" && baseline?.phase !== "error");
+  if (!changed) return false;
+  if (st.phase === "error") return true;
+  return st.enabled === false;
+}
+
+/**
+ * After the client times out, decide whether the daemon has finished.
+ * `on` commits enabled. `off` is a settled failure (no second disable).
+ * `deadline` means we still do not know.
+ */
+export function resolvePendingEnable(
+  st: EnableStatusSnapshot,
+  owner: string,
+  elapsedMs: number,
+  baseline?: EnableStatusBaseline,
+  maxMs = ENABLE_PENDING_MAX_MS,
+): PendingEnableVerdict {
+  if (canCommitEnabledFromStatus(st, owner)) return "on";
+  if (isNewDaemonFailure(st, baseline)) return "off";
+  if (elapsedMs >= maxMs) return "deadline";
+  return "pending";
+}
 
 /** True while a startCycle banner should survive keeper-status ticks. */
 export function isBannerHoldActive(holdUntilMs: number, nowMs: number): boolean {
@@ -36,6 +176,21 @@ export function cleanupOwnerForFailedCycle(
   if (!cycleOwner) return null;
   if (epochNow !== epochAtStart) return null;
   return cycleOwner;
+}
+
+/**
+ * Local On (toggle + localStorage) is committed only after a real purchase.
+ * ok + skipped, including reason "busy", must stay Off.
+ */
+export function shouldCommitAutoBuyEnabled(ran: {
+  ok?: boolean;
+  skipped?: boolean;
+  signature?: string | null;
+  names?: readonly string[] | null;
+}): boolean {
+  if (!ran.ok || ran.skipped) return false;
+  if (!ran.signature) return false;
+  return Boolean(ran.names && ran.names.length >= 3);
 }
 
 export const LS_AUTO_WEEKLY_BUY = "prestocks.autoWeeklyBuy";

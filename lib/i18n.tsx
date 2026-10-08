@@ -21,15 +21,34 @@ const pl: Dict = {
   "nav.overview": "Overview",
   "nav.settings": "Ustawienia",
   "nav.history": "Historia",
-  "nav.selectWallet": "Select Wallet",
+  "nav.selectWallet": "Zaloguj",
+  "connect.title": "Połącz portfel",
+  "connect.close": "Zamknij",
+  "connect.privy": "Privy",
+  "connect.privyHint": "E-mail / Google · osobny adres",
+  "connect.disconnect": "Rozłącz",
+  "connect.change": "Zmień portfel",
+  "connect.busy": "Łączenie…",
+  "connect.detected": "Wykryty",
+  "connect.notDetected": "Nie wykryto",
+  "connect.notReady": "Ten portfel nie jest wykryty w tej przeglądarce.",
+  "connect.failed": "Nie udało się połączyć.",
+  "connect.timeout": "Połączenie trwało zbyt długo. Spróbuj ponownie.",
+  "privy.login": "Zaloguj e-mail / Google (Privy)",
+  "privy.connect": "Połącz portfel Privy",
+  "privy.connected": "Privy {address}",
+  "privy.busy": "Privy…",
 
   "overview.kicker": "Trading desk · PreStocks Weekly DCA",
   "overview.title": "Overview",
+  "overview.maxDepositHint": "Maks. wpłata: {amount} USDC (saldo portfela)",
+  "overview.maxWithdrawHint": "Maks. wypłata: {amount} USDC (saldo vaulta)",
   "overview.disconnectedHint":
     "Portfel odłączony — podłącz wallet, by zobaczyć salda on-chain. {cluster}.",
   "overview.noMintHint":
     "Ustaw NEXT_PUBLIC_USDC_MINT na lokalny mock mint.",
   "overview.onChainHint": "On-chain · {cluster} · wartości z RPC",
+  "overview.rpcStale": "ostatni odczyt",
   "overview.clusterMainnet":
     "Uwaga: RPC wygląda na Mainnet — ta aplikacja jest Devnet-only. Sprawdź NEXT_PUBLIC_RPC_URL.",
   "overview.clusterNotDevnet":
@@ -38,7 +57,7 @@ const pl: Dict = {
   "faucet.button": "Weź 1000 USDC + 0.1 SOL (demo)",
   "faucet.busy": "Wysyłam USDC + SOL…",
   "faucet.success": "Wysłano 1000 USDC + 0.1 SOL do portfela (demo) · sig {sig}.",
-  "faucet.nextSteps": "Następnie: Deposit do vaulta (≥ budżet tygodniowy) + Wygeneruj rekomendacje — wtedy Dokonaj zakupu się odblokuje.",
+  "faucet.nextSteps": "Następnie: Wpłać do vaulta (≥ budżet tygodniowy) + Wygeneruj rekomendacje — wtedy Dokonaj zakupu się odblokuje.",
   "faucet.error": "Faucet: {error}",
   "faucet.needWallet": "Podłącz portfel, by wziąć demo USDC + SOL.",
 
@@ -48,15 +67,18 @@ const pl: Dict = {
   "predca.loading": "Ładowanie…",
   "predca.budget": "Budżet tygodniowy",
   "predca.vault": "Vault",
-  "predca.deposit": "Deposit",
-  "predca.withdraw": "Withdraw",
+  "predca.depositTitle": "Wpłata",
+  "predca.withdrawTitle": "Wypłata",
+  "predca.deposit": "Wpłać",
+  "predca.withdraw": "Wypłać",
+  "predca.rpcActionHint": "Nieaktywne — brak połączenia z RPC Devnet. Kliknij Odśwież.",
   "predca.hintNoAta":
-    "Hint: brak ATA mock USDC — Deposit zwykle się nie uda, dopóki nie masz konta tokenowego dla mint {mint} na Devnet.",
+    "Wskazówka: brak ATA mock USDC — Wpłata zwykle się nie uda, dopóki nie masz konta tokenowego dla mint {mint} na Devnet.",
   "predca.hintZeroUsdc":
-    "Hint: saldo mock USDC = 0 — doładuj ATA (mint {mint}) przed Deposit.",
+    "Wskazówka: saldo mock USDC = 0 — doładuj ATA (mint {mint}) przed wpłatą.",
   "predca.mintLabel": "Mint mock USDC:",
   "predca.mintNoAta":
-    "· Brak ATA / saldo — utwórz konto tokenowe i zrób mint testowych USDC na Devnet przed Deposit.",
+    "· Brak ATA / saldo — utwórz konto tokenowe i zrób mint testowych USDC na Devnet przed wpłatą.",
   "predca.initBudget": "Budżet tygodniowy (USDC)",
   "predca.initialize": "Initialize",
   "predca.waiting": "Czekam…",
@@ -65,7 +87,7 @@ const pl: Dict = {
   "predca.rentHint":
     "Hint: init tworzy UserConfig + vault ATA — potrzebujesz ~0.002–0.003 SOL na rent (opłata konta).",
   "predca.depositUnavailable":
-    "Deposit niedostępny ({reason}). Podłącz portfel z mintem USDC, by wpłacić.",
+    "Wpłata niedostępna ({reason}). Podłącz portfel z mintem USDC, by wpłacić.",
   "predca.status.loading": "ładowanie…",
   "predca.status.no_mint": "brak mint",
   "predca.status.disconnected": "brak portfela",
@@ -93,6 +115,8 @@ const pl: Dict = {
   "btn.generate": "Wygeneruj rekomendacje",
   "btn.generating": "Generuję…",
   "btn.purchase": "Dokonaj zakupu",
+  "btn.buying": "Kupuję…",
+  "btn.waiting": "Czekam na potwierdzenie…",
   "btn.txPending": "Transakcja…",
   "empty.generateTips": "Kliknij Wygeneruj rekomendacje.",
   "empty.connectWallet": "Podłącz portfel, potem wygeneruj rekomendacje.",
@@ -117,8 +141,16 @@ const pl: Dict = {
   "purchase.disabled.tx": "Transakcja w toku…",
   "purchase.disabled.noRecs": "Zakup nieaktywny — najpierw kliknij Wygeneruj rekomendacje (top-3).",
   "purchase.disabled.notReady": "Zakup nieaktywny — najpierw wpłać USDC na Overview (konto powstaje z wpłatą).",
-  "purchase.disabled.vaultLow": "Zakup nieaktywny — vault ma {have} USDC, potrzeba ≥ {need}. Zrób Deposit z portfela (faucet zasila portfel, nie vault).",
+  "purchase.disabled.rpcError": "Zakup nieaktywny — brak połączenia z RPC Devnet. Kliknij Odśwież.",
+  "purchase.disabled.vaultLow": "Zakup nieaktywny — vault ma {have} USDC, potrzeba ≥ {need}. Wpłać z portfela (faucet zasila portfel, nie vault).",
   "purchase.disabled.generic": "Zakup nieaktywny — sprawdź vault, ranking i status Predca.",
+  "tx.recheck": "Sprawdź ponownie",
+  "tx.rechecking": "Sprawdzam…",
+  "dup.warn": "Poprzednia {action} ({amount} USDC) jest jeszcze niepotwierdzona i może wejść. Wysłać drugą?",
+  "dup.sendAnyway": "Wyślij mimo to",
+  "dup.action.deposit": "wpłata",
+  "dup.action.withdraw": "wypłata",
+  "dup.action.buy": "zakup",
   "msg.noRecs": "Brak rekomendacji do zakupu.",
   "msg.vaultLowOnChain":
     "Za mało USDC w vault (on-chain): {have} < {need}.",
@@ -126,6 +158,8 @@ const pl: Dict = {
     "Zakup on-chain OK · sig {sig}… · ${amount} z vault → {tokens}",
   "msg.purchaseFail":
     "Zakup nieudany — szczegóły w sekcji Predca powyżej (czerwony komunikat).",
+  "msg.purchasePending":
+    "Zakup wysłany, Devnet jeszcze nie potwierdził · {sig} {url}. Nie wysyłaj drugi raz.",
   "msg.updatingBudget": "Aktualizuję budżet on-chain…",
   "msg.budgetSyncFail":
     "Nie udało się zaktualizować budżetu on-chain przed zakupem.",
@@ -166,11 +200,17 @@ const pl: Dict = {
   "auto.status.needVault":
     "Najpierw wpłać USDC do vaulta na Overview. Auto-zakup startuje, gdy vault ma środki.",
   "auto.status.error": "Auto-zakup nieudany: {reason}",
+  "auto.status.enablePending":
+    "Keeper jeszcze kończy włączanie. Zaczekaj — nie wysyłaj drugiego włączenia.",
+  "auto.status.enableUnknown":
+    "Nie wiadomo, czy keeper skończył włączanie. Sprawdź status auto-zakupu.",
   "auto.status.backoff":
     "Auto-zakup: ponowna próba za chwilę (ostatnia nieudana).",
   "auto.banner.ranking": "Cotygodniowy zakup z vaulta: ranking…",
   "auto.banner.buying":
     "Cotygodniowy zakup z vaulta: keeper (bez podpisu w karcie).",
+  "auto.banner.confirming":
+    "Cotygodniowy zakup z vaulta: czekam na potwierdzenie transakcji.",
 
   "settings.kicker": "Konfiguracja DCA",
   "settings.title": "Ustawienia",
@@ -218,10 +258,13 @@ const pl: Dict = {
   "settings.prefsSignOk": "Zapisano u keepersa ✓",
   "settings.byokTitle": "BYOK — własne klucze API (Bring Your Own)",
   "settings.byokIntro":
-    "Wklej własne klucze.",
-  "settings.typesafeLabel": "(Jev) — wymagany do rankingu",
+    "Klucz demo Jev jest wpisany. Wklej własny, żeby go zastąpić.",
+  "settings.byokIntroEmpty": "Wklej klucz TypeSafe (Jev).",
+  "settings.typesafeLabel":
+    "(Jev) — klucz demo jest wpisany; wklej własny, żeby go zastąpić",
+  "settings.typesafeLabelEmpty": "(Jev) — wklej klucz TypeSafe",
   "settings.xaiLabel":
-    "/ Grok — opcjonalny klucz klienta do analizy Grok (wysyłany do API rankingu); pusty = Jev/metryki bez Grok. TypeSafe nadal wymagany do Jev.",
+    "/ Grok — opcjonalny klucz klienta do analizy Grok (wysyłany do API rankingu); pusty = Jev/metryki bez Grok. Jev bierze klucz TypeSafe z pola powyżej.",
   "settings.show": "Pokaż",
   "settings.hide": "Ukryj",
   "settings.saveKeys": "Zapisz klucze w localStorage",
@@ -237,6 +280,7 @@ const pl: Dict = {
     "Brak RunRecord on-chain — wykonaj pierwszy zakup (simulate_buy) lub poczekaj na record_run.",
   "history.notReady":
     "Predca nie jest gotowe — wpłać USDC na Overview, potem pojawią się przebiegi.",
+  "history.fetchError": "Nie udało się pobrać historii",
   "history.loading": "Ładowanie historii on-chain…",
   "history.runMeta": "Run #{index} · budżet ~${budget} · slot {slot}",
 };
@@ -246,14 +290,33 @@ const en: Dict = {
   "nav.settings": "Settings",
   "nav.history": "History",
   "nav.selectWallet": "Select Wallet",
+  "connect.title": "Connect Wallet",
+  "connect.close": "Close",
+  "connect.privy": "Privy",
+  "connect.privyHint": "Email / Google · separate address",
+  "connect.disconnect": "Disconnect",
+  "connect.change": "Change wallet",
+  "connect.busy": "Connecting…",
+  "connect.detected": "Detected",
+  "connect.notDetected": "Not detected",
+  "connect.notReady": "This wallet is not detected in this browser.",
+  "connect.failed": "Could not connect.",
+  "connect.timeout": "Connection timed out. Try again.",
+  "privy.login": "Login with email / Google (Privy)",
+  "privy.connect": "Connect Privy wallet",
+  "privy.connected": "Privy {address}",
+  "privy.busy": "Privy…",
 
   "overview.kicker": "Trading desk · PreStocks Weekly DCA",
   "overview.title": "Overview",
+  "overview.maxDepositHint": "Max deposit: {amount} USDC (wallet balance)",
+  "overview.maxWithdrawHint": "Max withdraw: {amount} USDC (vault balance)",
   "overview.disconnectedHint":
     "Wallet disconnected — connect to see on-chain balances. {cluster}.",
   "overview.noMintHint":
     "Set NEXT_PUBLIC_USDC_MINT to a local mock mint.",
   "overview.onChainHint": "On-chain · {cluster} · values from RPC",
+  "overview.rpcStale": "last read",
   "overview.clusterMainnet":
     "Warning: RPC looks like Mainnet — this app is Devnet-only. Check NEXT_PUBLIC_RPC_URL.",
   "overview.clusterNotDevnet":
@@ -272,8 +335,11 @@ const en: Dict = {
   "predca.loading": "Loading…",
   "predca.budget": "Weekly budget",
   "predca.vault": "Vault",
+  "predca.depositTitle": "Deposit",
+  "predca.withdrawTitle": "Withdraw",
   "predca.deposit": "Deposit",
   "predca.withdraw": "Withdraw",
+  "predca.rpcActionHint": "Inactive — no Devnet RPC connection. Click Refresh.",
   "predca.hintNoAta":
     "Hint: no mock USDC ATA — Deposit usually fails until you have a token account for mint {mint} on Devnet.",
   "predca.hintZeroUsdc":
@@ -317,6 +383,8 @@ const en: Dict = {
   "btn.generate": "Generate recommendations",
   "btn.generating": "Generating…",
   "btn.purchase": "Purchase",
+  "btn.buying": "Buying…",
+  "btn.waiting": "Waiting for confirmation…",
   "btn.txPending": "Transaction…",
   "empty.generateTips": "Click Generate recommendations.",
   "empty.connectWallet": "Connect wallet, then generate recommendations.",
@@ -341,8 +409,16 @@ const en: Dict = {
   "purchase.disabled.tx": "Transaction in progress…",
   "purchase.disabled.noRecs": "Purchase disabled — click Generate recommendations first (top-3).",
   "purchase.disabled.notReady": "Purchase disabled — deposit USDC on Overview first (the account is created with that deposit).",
+  "purchase.disabled.rpcError": "Purchase disabled — no Devnet RPC connection. Click Refresh.",
   "purchase.disabled.vaultLow": "Purchase disabled — vault has {have} USDC, need ≥ {need}. Deposit from wallet (faucet fills wallet, not vault).",
   "purchase.disabled.generic": "Purchase disabled — check vault, ranking, and Predca status.",
+  "tx.recheck": "Check again",
+  "tx.rechecking": "Checking…",
+  "dup.warn": "The previous {action} ({amount} USDC) is still unconfirmed and may land. Send another?",
+  "dup.sendAnyway": "Send anyway",
+  "dup.action.deposit": "deposit",
+  "dup.action.withdraw": "withdrawal",
+  "dup.action.buy": "purchase",
   "msg.noRecs": "No recommendations to purchase.",
   "msg.vaultLowOnChain":
     "Not enough USDC in vault (on-chain): {have} < {need}.",
@@ -350,6 +426,8 @@ const en: Dict = {
     "On-chain purchase OK · sig {sig}… · ${amount} from vault → {tokens}",
   "msg.purchaseFail":
     "Purchase failed — see details in the Predca section above (red message).",
+  "msg.purchasePending":
+    "Purchase sent, Devnet has not confirmed yet · {sig} {url}. Don't send it again.",
   "msg.updatingBudget": "Updating budget on-chain…",
   "msg.budgetSyncFail":
     "Could not update on-chain budget before purchase.",
@@ -390,11 +468,17 @@ const en: Dict = {
   "auto.status.needVault":
     "Deposit USDC into the vault on Overview first. Auto-buy starts once the vault holds funds.",
   "auto.status.error": "Auto-buy failed: {reason}",
+  "auto.status.enablePending":
+    "The keeper is still finishing enable. Wait — don't send a second enable.",
+  "auto.status.enableUnknown":
+    "It is unknown whether the keeper finished enabling. Check the auto-buy status.",
   "auto.status.backoff":
     "Auto-buy: retrying shortly (last attempt failed).",
   "auto.banner.ranking": "Weekly vault purchase: ranking…",
   "auto.banner.buying":
     "Weekly vault purchase: keeper (no in-tab signature).",
+  "auto.banner.confirming":
+    "Weekly vault purchase: waiting for the transaction to confirm.",
 
   "settings.kicker": "DCA configuration",
   "settings.title": "Settings",
@@ -442,10 +526,13 @@ const en: Dict = {
   "settings.prefsSignOk": "Saved to keeper ✓",
   "settings.byokTitle": "BYOK — Bring Your Own API Keys",
   "settings.byokIntro":
-    "Paste your own keys.",
-  "settings.typesafeLabel": "(Jev) — required for ranking",
+    "The Jev demo key is filled in. Paste your own to override.",
+  "settings.byokIntroEmpty": "Paste your TypeSafe (Jev) key.",
+  "settings.typesafeLabel":
+    "(Jev) — demo key is filled in; paste your own to override",
+  "settings.typesafeLabelEmpty": "(Jev) — paste your TypeSafe key",
   "settings.xaiLabel":
-    "/ Grok — optional client key for Grok analysis (sent to the ranking API); empty = Jev/metrics without Grok. TypeSafe still required for Jev.",
+    "/ Grok — optional client key for Grok analysis (sent to the ranking API); empty = Jev/metrics without Grok. Jev uses the TypeSafe key from the field above.",
   "settings.show": "Show",
   "settings.hide": "Hide",
   "settings.saveKeys": "Save keys to localStorage",
@@ -461,6 +548,7 @@ const en: Dict = {
     "No on-chain RunRecord yet — make a purchase (simulate_buy) or wait for record_run.",
   "history.notReady":
     "Predca is not ready — deposit USDC on Overview, then runs will appear.",
+  "history.fetchError": "Couldn't load history",
   "history.loading": "Loading on-chain history…",
   "history.runMeta": "Run #{index} · budget ~${budget} · slot {slot}",
 };

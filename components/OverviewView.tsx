@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { claimFaucetUsdc } from "@/lib/dca-api";
 import { HoldingsPie } from "./HoldingsPie";
@@ -22,8 +22,20 @@ import {
 } from "@/lib/portfolio-state";
 import { readWeeklyBudgetUsd } from "@/lib/auto-weekly-buy";
 import { usePredca } from "@/lib/hooks/usePredca";
+import { leaveManualBuy, tryEnterManualBuy } from "@/lib/manual-buy-guard";
+import { isOnChainSignatureReject } from "@/lib/vault-follow-up";
+import { depositUi, withdrawUi } from "@/lib/predca-status";
+import {
+  FAILED_EXPIRED_MSG,
+  UNRESOLVED_MSG,
+  leaveDupCheck,
+  nextDuplicateStep,
+  tryEnterDupCheck,
+} from "@/lib/pending-tx";
+import { TxNotice, txMessageWithLink } from "@/components/TxNotice";
 import {
   clusterShortPl,
+  explorerTxUrl,
   formatUsd,
   rawToDollars,
   rpcHost,
@@ -102,11 +114,48 @@ export function OverviewView() {
   const [rankBusy, setRankBusy] = useState(false);
   const [rankError, setRankError] = useState<string | null>(null);
   const [purchaseMsg, setPurchaseMsg] = useState<string | null>(null);
+  const [purchaseTone, setPurchaseTone] = useState<"ok" | "fail" | "pending">("ok");
+  /** Sync lock across setWeeklyBudget and simulateBuy. A second Kup returns immediately. */
+  const buyInFlightRef = useRef(false);
+  const [buyInFlight, setBuyInFlight] = useState(false);
+  const sawPendingSig = useRef(false);
+  const dupCheckRef = useRef(false);
+  const [dupChecking, setDupChecking] = useState(false);
+  const [dupWarn, setDupWarn] = useState<{
+    kind: "deposit" | "withdraw" | "buy";
+    amount: number;
+  } | null>(null);
+  const sigUnresolved = predca.pendingSignature != null;
+
+  useEffect(() => {
+    if (predca.pendingSignature) {
+      sawPendingSig.current = true;
+      return;
+    }
+    if (!sawPendingSig.current || purchaseTone !== "pending") return;
+    sawPendingSig.current = false;
+    const verdict = predca.lastVerdict;
+    if (verdict?.verdict === "failed_expired" || verdict?.verdict === "unresolved") {
+      const text =
+        verdict.verdict === "failed_expired" ? FAILED_EXPIRED_MSG : UNRESOLVED_MSG;
+      setPurchaseMsg(`${text} ${verdict.signature} ${explorerTxUrl(verdict.signature)}`);
+      setPurchaseTone(verdict.verdict === "failed_expired" ? "fail" : "pending");
+      return;
+    }
+    if (predca.error && isOnChainSignatureReject(predca.error)) {
+      setPurchaseMsg(`${t("msg.purchaseFail")}: ${predca.error}`);
+      setPurchaseTone("fail");
+    } else {
+      setPurchaseMsg(null);
+      setPurchaseTone("ok");
+    }
+  }, [predca.pendingSignature, predca.error, predca.lastVerdict, purchaseTone, t]);
   const [faucetBusy, setFaucetBusy] = useState(false);
   const [faucetMsg, setFaucetMsg] = useState<string | null>(null);
   const [faucetErr, setFaucetErr] = useState<string | null>(null);
 
   async function onClaimFaucet() {
+    if (predca.pendingSignatureNow()) return;
     if (!publicKey) {
       setFaucetErr(t("faucet.needWallet"));
       return;
@@ -215,120 +264,254 @@ export function OverviewView() {
     }
   }
 
-  async function handlePurchase() {
-    if (top3.length === 0) {
-      setPurchaseMsg(t("msg.noRecs"));
+  function markPendingPurchase(): boolean {
+    const sig = predca.pendingSignatureNow();
+    if (!sig) return false;
+    setPurchaseMsg(
+      t("msg.purchasePending", { sig, url: explorerTxUrl(sig) }),
+    );
+    setPurchaseTone("pending");
+    return true;
+  }
+
+  async function allowDuplicate(
+    kind: "deposit" | "withdraw" | "buy",
+    amount: number,
+    acknowledged: boolean,
+  ): Promise<boolean> {
+    const rec = predca.unresolvedFor(kind);
+    if (!rec) {
+      if (dupWarn?.kind === kind) setDupWarn(null);
+      return true;
+    }
+    const step = nextDuplicateStep({
+      unresolvedSameFamily: true,
+      recheckedVerdict: acknowledged ? "unresolved" : null,
+      acknowledged,
+    });
+    if (step === "proceed") {
+      setDupWarn(null);
+      return true;
+    }
+    if (step === "warn") {
+      setDupWarn({ kind, amount });
+      return false;
+    }
+    const verdict = await predca.recheckUnresolved(rec.signature);
+    if (verdict === "confirmed") return false;
+    if (verdict === "unresolved") {
+      setDupWarn({ kind, amount });
+      return false;
+    }
+    setDupWarn(null);
+    return true;
+  }
+
+  async function submitDeposit(acknowledged = false) {
+    if (depositPresentation !== "enabled") return;
+    if (predca.pendingSignatureNow()) return;
+    if (!tryEnterDupCheck(dupCheckRef)) return;
+    setDupChecking(true);
+    try {
+      const amt =
+        ownerUsdcCap != null ? Math.min(depositAmt, ownerUsdcCap) : depositAmt;
+      if (!(await allowDuplicate("deposit", amt, acknowledged))) return;
+      await predca.depositUsdc(
+        amt,
+        predca.status === "no_config" ? purchaseAmount : undefined,
+      );
+    } finally {
+      leaveDupCheck(dupCheckRef);
+      setDupChecking(false);
+    }
+  }
+
+  async function submitWithdraw(acknowledged = false) {
+    if (withdrawPresentation !== "enabled") return;
+    if (predca.pendingSignatureNow()) return;
+    if (!tryEnterDupCheck(dupCheckRef)) return;
+    setDupChecking(true);
+    try {
+      const amt =
+        vaultUsdcCap != null ? Math.min(withdrawAmt, vaultUsdcCap) : withdrawAmt;
+      if (!(await allowDuplicate("withdraw", amt, acknowledged))) return;
+      await predca.withdrawUsdc(amt);
+    } finally {
+      leaveDupCheck(dupCheckRef);
+      setDupChecking(false);
+    }
+  }
+
+  function dupNotice(kind: "deposit" | "withdraw" | "buy", amount: number) {
+    if (kind === "deposit" && depositPresentation === "disabled") return null;
+    if (kind === "withdraw" && withdrawPresentation === "disabled") return null;
+    if (dupWarn?.kind !== kind || dupWarn.amount !== amount) return null;
+    if (!predca.unresolvedFor(kind)) return null;
+    const action =
+      kind === "withdraw"
+        ? t("dup.action.withdraw")
+        : kind === "buy"
+          ? t("dup.action.buy")
+          : t("dup.action.deposit");
+    return (
+      <div className="mt-2 rounded border border-[#fbbf2433] bg-[#fbbf2411] px-3 py-2 text-xs text-[#fbbf24]">
+        <p>{t("dup.warn", { action, amount })}</p>
+        <button
+          type="button"
+          disabled={dupChecking || predca.rechecking}
+          onClick={() => {
+            if (kind === "buy") void handlePurchase(true);
+            else if (kind === "withdraw") void submitWithdraw(true);
+            else void submitDeposit(true);
+          }}
+          className="mt-2 rounded border border-current px-2 py-1 text-[10px] uppercase tracking-wider disabled:opacity-40"
+        >
+          {t("dup.sendAnyway")}
+        </button>
+      </div>
+    );
+  }
+
+  async function handlePurchase(acknowledged = false) {
+    if (!tryEnterDupCheck(dupCheckRef)) return;
+    setDupChecking(true);
+    let allowed = false;
+    try {
+      const intendedPreview = resolvePurchaseAmount(predca.weeklyBudgetUsd, ownerBase58);
+      allowed = await allowDuplicate("buy", intendedPreview, acknowledged);
+    } finally {
+      leaveDupCheck(dupCheckRef);
+      setDupChecking(false);
+    }
+    if (!allowed) return;
+    if (
+      !tryEnterManualBuy(
+        buyInFlightRef,
+        predca.txPending || predca.pendingSignatureNow() != null,
+      )
+    ) {
       return;
     }
+    setBuyInFlight(true);
+    try {
+      setPurchaseTone("ok");
+      if (top3.length === 0) {
+        setPurchaseMsg(t("msg.noRecs"));
+        return;
+      }
 
-    const tokenNames = top3.slice(0, 3).map((r) => r.name);
-    // LS is SoT for intended amount (sync on-chain before simulate_buy when dirty).
-    const intendedAmount = resolvePurchaseAmount(predca.weeklyBudgetUsd, ownerBase58);
+      const tokenNames = top3.slice(0, 3).map((r) => r.name);
+      // LS is SoT for intended amount (sync on-chain before simulate_buy when dirty).
+      const intendedAmount = resolvePurchaseAmount(predca.weeklyBudgetUsd, ownerBase58);
 
-    // Prefer on-chain simulate_buy when Predca is ready.
-    if (onChainReady) {
+      // Prefer on-chain simulate_buy when Predca is ready.
+      if (onChainReady) {
+        if (
+          availableVaultUsdc == null ||
+          !Number.isFinite(availableVaultUsdc) ||
+          availableVaultUsdc < intendedAmount
+        ) {
+          setPurchaseMsg(
+            t("msg.vaultLowOnChain", {
+              have: (availableVaultUsdc ?? 0).toFixed(2),
+              need: intendedAmount.toFixed(2),
+            }),
+          );
+          return;
+        }
+
+        // simulate_buy spends on-chain weeklyBudgetUsdc — sync LS → chain first.
+        const lsAmount = readWeeklyBudgetUsd(DEFAULT_SETTINGS.weeklyAmountUsd, ownerBase58);
+        if (budgetsDiffer(lsAmount, predca.weeklyBudgetUsd)) {
+          setPurchaseMsg(t("msg.updatingBudget"));
+          const budgetSig = await predca.setWeeklyBudget(lsAmount);
+          if (!budgetSig) {
+            if (markPendingPurchase()) return;
+            const err = predca.lastTxError();
+            if (err) {
+              setPurchaseMsg(`${t("msg.budgetSyncFail")}: ${err}`);
+              setPurchaseTone("fail");
+            } else {
+              setPurchaseMsg(null);
+            }
+            return;
+          }
+          // setWeeklyBudget's withTx already refreshed; simulateBuy re-fetches budget.
+        }
+
+        setPurchaseMsg(null);
+        const sig = await predca.simulateBuy(tokenNames);
+        if (sig) {
+          setPurchaseTone("ok");
+          setPurchaseMsg(
+            t("msg.purchaseOk", {
+              sig: sig.slice(0, 8),
+              amount: intendedAmount.toFixed(2),
+              tokens: tokenNames.join(" · "),
+            }),
+          );
+        } else if (!markPendingPurchase()) {
+          const err = predca.lastTxError();
+          if (err) {
+            setPurchaseMsg(`${t("msg.purchaseFail")}: ${err}`);
+            setPurchaseTone("fail");
+          }
+        }
+        return;
+      }
+
+      // Offline / disconnected mock path (localStorage).
       if (
         availableVaultUsdc == null ||
         !Number.isFinite(availableVaultUsdc) ||
-        availableVaultUsdc < intendedAmount
+        availableVaultUsdc < purchaseAmount
       ) {
         setPurchaseMsg(
-          t("msg.vaultLowOnChain", {
-            have: (availableVaultUsdc ?? 0).toFixed(2),
-            need: intendedAmount.toFixed(2),
-          }),
+          connected
+            ? t("msg.predcaNotReady")
+            : t("msg.vaultLowMock", {
+                have: (availableVaultUsdc ?? 0).toFixed(2),
+                need: purchaseAmount.toFixed(2),
+              }),
         );
         return;
       }
 
-      // simulate_buy spends on-chain weeklyBudgetUsdc — sync LS → chain first.
-      const lsAmount = readWeeklyBudgetUsd(DEFAULT_SETTINGS.weeklyAmountUsd, ownerBase58);
-      if (budgetsDiffer(lsAmount, predca.weeklyBudgetUsd)) {
-        setPurchaseMsg(t("msg.updatingBudget"));
-        const budgetSig = await predca.setWeeklyBudget(lsAmount);
-        if (!budgetSig) {
-          const err = predca.lastTxError();
-          setPurchaseMsg(
-            err
-              ? `${t("msg.budgetSyncFail")}: ${err}`
-              : t("msg.budgetSyncFail"),
-          );
-          return;
-        }
-        // setWeeklyBudget's withTx already refreshed; simulateBuy re-fetches budget.
-      }
-
-      setPurchaseMsg(null);
-      const sig = await predca.simulateBuy(tokenNames);
-      if (sig) {
+      try {
+        const next = applyPurchase(
+          {
+            balances,
+            vaultUsdc: availableVaultUsdc,
+            holdings,
+            lastPurchase: lastPurchase ?? emptyPurchase(),
+          },
+          { amountUsd: purchaseAmount, tokens: tokenNames },
+        );
+        savePortfolioState(next);
+        setBalances(next.balances);
+        setVaultUsdc(next.vaultUsdc);
+        setHoldings(next.holdings);
+        setLastPurchase(next.lastPurchase);
+        setPortfolioRevision((r) => r + 1);
         setPurchaseMsg(
-          t("msg.purchaseOk", {
-            sig: sig.slice(0, 8),
-            amount: intendedAmount.toFixed(2),
+          t("msg.purchaseOffline", {
+            amount: purchaseAmount.toFixed(2),
             tokens: tokenNames.join(" · "),
           }),
         );
-      } else {
-        const err = predca.lastTxError();
+      } catch (error) {
         setPurchaseMsg(
-          err
-            ? `${t("msg.purchaseFail")}: ${err}`
-            : t("msg.purchaseFail"),
+          error instanceof Error ? error.message : t("msg.purchaseError"),
         );
       }
-      return;
-    }
-
-    // Offline / disconnected mock path (localStorage).
-    if (
-      availableVaultUsdc == null ||
-      !Number.isFinite(availableVaultUsdc) ||
-      availableVaultUsdc < purchaseAmount
-    ) {
-      setPurchaseMsg(
-        connected
-          ? t("msg.predcaNotReady")
-          : t("msg.vaultLowMock", {
-              have: (availableVaultUsdc ?? 0).toFixed(2),
-              need: purchaseAmount.toFixed(2),
-            }),
-      );
-      return;
-    }
-
-    try {
-      const next = applyPurchase(
-        {
-          balances,
-          vaultUsdc: availableVaultUsdc,
-          holdings,
-          lastPurchase: lastPurchase ?? emptyPurchase(),
-        },
-        { amountUsd: purchaseAmount, tokens: tokenNames },
-      );
-      savePortfolioState(next);
-      setBalances(next.balances);
-      setVaultUsdc(next.vaultUsdc);
-      setHoldings(next.holdings);
-      setLastPurchase(next.lastPurchase);
-      setPortfolioRevision((r) => r + 1);
-      setPurchaseMsg(
-        t("msg.purchaseOffline", {
-          amount: purchaseAmount.toFixed(2),
-          tokens: tokenNames.join(" · "),
-        }),
-      );
-    } catch (error) {
-      setPurchaseMsg(
-        error instanceof Error ? error.message : t("msg.purchaseError"),
-      );
+    } finally {
+      leaveManualBuy(buyInFlightRef);
+      setBuyInFlight(false);
     }
   }
 
-  const canDeposit =
-    connected &&
-    !!predca.mint &&
-    (predca.status === "ready" || predca.status === "no_config");
+  const depositPresentation = depositUi(predca.status, connected, !!predca.mint);
+  const canDeposit = depositPresentation === "enabled";
   const ownerUsdcCap =
     displayOwnerUsdc != null && Number.isFinite(displayOwnerUsdc)
       ? displayOwnerUsdc
@@ -346,24 +529,34 @@ export function OverviewView() {
     Number.isFinite(withdrawAmt) &&
     withdrawAmt > vaultUsdcCap;
   const depositDisabled =
+    sigUnresolved ||
     predca.txPending ||
+    dupChecking ||
+    predca.rechecking ||
     !canDeposit ||
     !Number.isFinite(depositAmt) ||
     depositAmt <= 0 ||
     depositOverCap;
+  const withdrawPresentation = withdrawUi(predca.status, predca.config != null);
   const withdrawDisabled =
+    sigUnresolved ||
     predca.txPending ||
+    dupChecking ||
+    predca.rechecking ||
     !Number.isFinite(withdrawAmt) ||
     withdrawAmt <= 0 ||
-    withdrawOverCap;
-  const showWithdraw = onChainReady; // account exists; enablement same as before (txPending only)
+    withdrawOverCap ||
+    withdrawPresentation === "disabled";
+  const showWithdraw = withdrawPresentation !== "hidden";
   const vaultTooLow =
     availableVaultUsdc == null ||
     !Number.isFinite(availableVaultUsdc) ||
     availableVaultUsdc < purchaseAmount;
   // Manual Buy must NOT disable because keeper/auto-buy phase is "buying".
-  // Only user's own txPending / missing recs / vault low / not ready.
+  // Only this click, the user's own tx, missing recs, vault low, or not ready.
   const purchaseDisabled =
+    sigUnresolved ||
+    buyInFlight ||
     top3.length === 0 ||
     predca.txPending ||
     (onChainReady
@@ -375,7 +568,10 @@ export function OverviewView() {
   /** Why Purchase stays gray — shown next to the button (vault check kept). */
   const purchaseDisabledReason: string | null = (() => {
     if (!purchaseDisabled) return null;
+    // The button label already says the buy is in flight. Do not claim vault-low.
+    if (sigUnresolved || buyInFlight) return null;
     if (predca.txPending) return t("purchase.disabled.tx");
+    if (predca.status === "error") return t("purchase.disabled.rpcError");
     if (top3.length === 0) return t("purchase.disabled.noRecs");
     if (connected && !onChainReady) return t("purchase.disabled.notReady");
     if (vaultTooLow) {
@@ -394,6 +590,11 @@ export function OverviewView() {
       maximumFractionDigits: digits,
     });
   }
+
+  const vaultStat =
+    predca.status === "error" && predca.vaultUsdc != null
+      ? predca.vaultUsdc
+      : onChainVaultUsdc;
 
   const statusReason =
     predca.status === "loading"
@@ -449,7 +650,7 @@ export function OverviewView() {
               <button
                 type="button"
                 onClick={() => void onClaimFaucet()}
-                disabled={faucetBusy || predca.txPending}
+                disabled={faucetBusy || predca.txPending || sigUnresolved}
                 className="rounded border border-[#fbbf2444] bg-[#0c0e12] px-2.5 py-1 text-[10px] uppercase tracking-wider text-[#fbbf24] hover:bg-[#fbbf2411] disabled:opacity-40"
               >
                 {faucetBusy ? t("faucet.busy") : t("faucet.button")}
@@ -496,15 +697,24 @@ export function OverviewView() {
           />
           <Stat
             label={t("predca.vault")}
-            value={
-              onChainVaultUsdc != null ? formatUsd(onChainVaultUsdc) : "—"
+            value={vaultStat != null ? formatUsd(vaultStat) : "—"}
+            unit={
+              predca.status === "error" && predca.vaultUsdc != null
+                ? `USDC · ${t("overview.rpcStale")}`
+                : "USDC"
             }
-            unit="USDC"
           />
-          {canDeposit && (
-            <div className="rounded border border-[#1e2633] bg-[#0c0e12] p-3">
+          {depositPresentation !== "hidden" && (
+            <div
+              className="rounded border border-[#1e2633] bg-[#0c0e12] p-3"
+              title={
+                depositPresentation === "disabled"
+                  ? t("predca.rpcActionHint")
+                  : undefined
+              }
+            >
               <p className="text-[10px] uppercase tracking-wider text-[#8b95a8]">
-                {t("predca.deposit")}
+                {t("predca.depositTitle")}
               </p>
               <div className="mt-2 flex items-end gap-2">
                 <input
@@ -514,6 +724,7 @@ export function OverviewView() {
                   max={ownerUsdcCap ?? undefined}
                   value={depositAmt}
                   onChange={(e) => {
+                    if (dupWarn?.kind === "deposit") setDupWarn(null);
                     const n = Number(e.target.value);
                     if (!Number.isFinite(n)) {
                       setDepositAmt(n);
@@ -525,35 +736,39 @@ export function OverviewView() {
                     }
                     setDepositAmt(n);
                   }}
-                  disabled={predca.txPending || !canDeposit}
+                  disabled={predca.txPending || sigUnresolved || !canDeposit}
                   className="mono-num min-w-0 flex-1 rounded border border-[#1e2633] bg-[#0c0e12] px-2 py-1.5 text-sm text-[#2dd4bf] outline-none focus:border-[#2dd4bf66] disabled:opacity-40"
                 />
                 <button
                   type="button"
                   disabled={depositDisabled}
                   onClick={() => {
-                    const amt =
-                      ownerUsdcCap != null
-                        ? Math.min(depositAmt, ownerUsdcCap)
-                        : depositAmt;
-                    void predca.depositUsdc(
-                      amt,
-                      predca.status === "no_config"
-                        ? purchaseAmount
-                        : undefined,
-                    );
+                    void submitDeposit(false);
                   }}
                   className="rounded border border-[#2dd4bf44] bg-[#0c0e12] px-3 py-1.5 text-[10px] uppercase tracking-wider text-[#2dd4bf] hover:bg-[#2dd4bf11] disabled:opacity-40"
                 >
                   {t("predca.deposit")}
                 </button>
               </div>
+              {depositPresentation === "disabled" ? (
+                <p className="mt-2 text-[10px] text-[#8b95a8]">
+                  {t("predca.rpcActionHint")}
+                </p>
+              ) : null}
+              {dupNotice("deposit", ownerUsdcCap != null ? Math.min(depositAmt, ownerUsdcCap) : depositAmt)}
             </div>
           )}
           {showWithdraw && (
-            <div className="rounded border border-[#1e2633] bg-[#0c0e12] p-3">
+            <div
+              className="rounded border border-[#1e2633] bg-[#0c0e12] p-3"
+              title={
+                withdrawPresentation === "disabled"
+                  ? t("predca.rpcActionHint")
+                  : undefined
+              }
+            >
               <p className="text-[10px] uppercase tracking-wider text-[#8b95a8]">
-                {t("predca.withdraw")}
+                {t("predca.withdrawTitle")}
               </p>
               <div className="mt-2 flex items-end gap-2">
                 <input
@@ -563,6 +778,7 @@ export function OverviewView() {
                   max={vaultUsdcCap ?? undefined}
                   value={withdrawAmt}
                   onChange={(e) => {
+                    if (dupWarn?.kind === "withdraw") setDupWarn(null);
                     const n = Number(e.target.value);
                     if (!Number.isFinite(n)) {
                       setWithdrawAmt(n);
@@ -574,24 +790,33 @@ export function OverviewView() {
                     }
                     setWithdrawAmt(n);
                   }}
-                  disabled={predca.txPending}
+                  disabled={
+                    predca.txPending ||
+                    sigUnresolved ||
+                    withdrawPresentation === "disabled"
+                  }
                   className="mono-num min-w-0 flex-1 rounded border border-[#1e2633] bg-[#0c0e12] px-2 py-1.5 text-sm text-[#a78bfa] outline-none focus:border-[#a78bfa66] disabled:opacity-40"
                 />
                 <button
                   type="button"
                   disabled={withdrawDisabled}
                   onClick={() => {
-                    const amt =
-                      vaultUsdcCap != null
-                        ? Math.min(withdrawAmt, vaultUsdcCap)
-                        : withdrawAmt;
-                    void predca.withdrawUsdc(amt);
+                    void submitWithdraw(false);
                   }}
                   className="rounded border border-[#a78bfa44] bg-[#0c0e12] px-3 py-1.5 text-[10px] uppercase tracking-wider text-[#a78bfa] hover:bg-[#a78bfa11] disabled:opacity-40"
                 >
                   {t("predca.withdraw")}
                 </button>
               </div>
+              {withdrawPresentation === "disabled" ? (
+                <p className="mt-2 text-[10px] text-[#8b95a8]">
+                  {t("predca.rpcActionHint")}
+                </p>
+              ) : null}
+              {dupNotice(
+                "withdraw",
+                vaultUsdcCap != null ? Math.min(withdrawAmt, vaultUsdcCap) : withdrawAmt,
+              )}
             </div>
           )}
         </div>
@@ -610,12 +835,16 @@ export function OverviewView() {
             )}
             {depositOverCap && ownerUsdcCap != null && (
               <p className="text-[10px] text-[#fbbf24]">
-                Max deposit: {formatUsd(ownerUsdcCap)} USDC (wallet balance)
+                {t("overview.maxDepositHint", {
+                  amount: formatUsd(ownerUsdcCap),
+                })}
               </p>
             )}
             {withdrawOverCap && vaultUsdcCap != null && (
               <p className="text-[10px] text-[#fbbf24]">
-                Max withdraw: {formatUsd(vaultUsdcCap)} USDC (vault balance)
+                {t("overview.maxWithdrawHint", {
+                  amount: formatUsd(vaultUsdcCap),
+                })}
               </p>
             )}
           </div>
@@ -633,10 +862,37 @@ export function OverviewView() {
           </p>
         )}
 
-        {predca.error && (
-          <p className="mt-3 rounded border border-[#f8717133] bg-[#f8717111] px-3 py-2 text-xs text-[#fca5a5]">
-            {predca.error}
+        {predca.sessionCheckMsg ? (
+          <TxNotice message={predca.sessionCheckMsg} tone="pending" className="mt-3" />
+        ) : null}
+        {predca.visibleUnresolvedTxs.slice(0, 2).map((rec) => (
+          <TxNotice
+            key={rec.signature}
+            message={`${UNRESOLVED_MSG} ${rec.signature} ${explorerTxUrl(rec.signature)}`}
+            tone="pending"
+            className="mt-3"
+            action={{
+              label: predca.rechecking ? t("tx.rechecking") : t("tx.recheck"),
+              disabled: predca.rechecking,
+              onClick: () => {
+                void predca.recheckUnresolved(rec.signature);
+              },
+            }}
+          />
+        ))}
+        {predca.visibleUnresolvedTxs.length > 2 ? (
+          <p className="mt-1 text-[10px] text-[#fbbf24]">
+            +{predca.visibleUnresolvedTxs.length - 2}
           </p>
+        ) : null}
+        {predca.pendingMsg && (
+          <TxNotice message={predca.pendingMsg} tone="pending" className="mt-3" />
+        )}
+        {predca.status === "error" && predca.rpcError ? (
+          <TxNotice message={predca.rpcError} tone="error" className="mt-3" />
+        ) : null}
+        {predca.error && (
+          <TxNotice message={predca.error} tone="error" className="mt-3" />
         )}
         {predca.okMsg && (
           <p className="mt-3 rounded border border-[#2dd4bf33] bg-[#2dd4bf11] px-3 py-2 text-xs text-[#2dd4bf]">
@@ -669,6 +925,7 @@ export function OverviewView() {
         {connected &&
           predca.status !== "ready" &&
           predca.status !== "no_config" &&
+          predca.status !== "error" &&
           !canDeposit && (
           <p className="mt-4 border-t border-[#1e2633] pt-4 text-[10px] text-[#8b95a8]">
             {t("predca.depositUnavailable", { reason: statusReason })}
@@ -775,11 +1032,24 @@ export function OverviewView() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => void handlePurchase()}
-                  disabled={purchaseDisabled}
+                  onClick={() => void handlePurchase(false)}
+                  disabled={
+                    purchaseDisabled ||
+                    predca.txPending ||
+                    buyInFlight ||
+                    sigUnresolved ||
+                    dupChecking ||
+                    predca.rechecking
+                  }
                   className="rounded border border-[#2dd4bf66] bg-[#0c0e12] px-2.5 py-1 text-[10px] uppercase tracking-wider text-[#2dd4bf] hover:bg-[#2dd4bf11] disabled:opacity-40"
                 >
-                  {predca.txPending ? t("btn.txPending") : t("btn.purchase")}
+                  {buyInFlight
+                    ? t("btn.buying")
+                    : sigUnresolved
+                      ? t("btn.waiting")
+                      : predca.txPending
+                        ? t("btn.txPending")
+                        : t("btn.purchase")}
                 </button>
               </div>
             </div>
@@ -814,15 +1084,18 @@ export function OverviewView() {
                 {purchaseDisabledReason}
               </p>
             )}
+            {dupNotice("buy", resolvePurchaseAmount(predca.weeklyBudgetUsd, ownerBase58))}
             {purchaseMsg && (
               <p
-                className={`mt-3 rounded border px-3 py-2 text-xs ${
-                  /nieudany|failed|Could not|Nie udało/i.test(purchaseMsg)
-                    ? "border-[#f8717133] bg-[#f8717111] text-[#fca5a5]"
-                    : "border-[#2dd4bf33] bg-[#2dd4bf11] text-[#2dd4bf]"
+                className={`mt-3 break-all rounded border px-3 py-2 text-xs ${
+                  purchaseTone === "pending"
+                    ? "border-[#fbbf2433] bg-[#fbbf2411] text-[#fbbf24]"
+                    : /nieudany|failed|Could not|Nie udało/i.test(purchaseMsg)
+                      ? "border-[#f8717133] bg-[#f8717111] text-[#fca5a5]"
+                      : "border-[#2dd4bf33] bg-[#2dd4bf11] text-[#2dd4bf]"
                 }`}
               >
-                {purchaseMsg}
+                {txMessageWithLink(purchaseMsg)}
               </p>
             )}
           </section>
