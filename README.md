@@ -1,15 +1,20 @@
-# PreStocks DCA Noir v4.31
+# PreStocks DCA Noir v4.33
 
 Tygodniowy desk DCA na PreStocks (Solana **Devnet**). Budżet tygodniowy jest dzielony równo na top-3 z rankingu Jev. Zakup idzie z vaulta USDC programu **predca** po podpisie portfela. Auto-zakup robi keeper.
 
 **Live:** https://krzysztofpazdyk.github.io/prestocks-dca-noir/  
 `basePath` / `assetPrefix`: `/prestocks-dca-noir`
 
-## Skąd jest v4.31
+## Skąd jest v4.33
 
-Promocja 1:1 z [`prestocks-dca-noir2.0`](https://github.com/krzysztofpazdyk/prestocks-dca-noir2.0) @ `041df90` (tag `v4.31`). Różnią się tylko basePath, workflow Pages i ten README.
+Promocja 1:1 z [`prestocks-dca-noir2.0`](https://github.com/krzysztofpazdyk/prestocks-dca-noir2.0) @ `ab32817` (tag `v4.33`). Różnią się tylko basePath, workflow Pages i ten README.
 
-- **Poprzedni stabilny noir:** v4.08 (`9de6b7f`, tag `noir-v4.08-przed-promocja`).
+- **Poprzednie stabilne noir:** v4.31 (`cae363c`, tag `noir-v4.31`) i v4.08 (`9de6b7f`, tag `noir-v4.08-przed-promocja`).
+- **Nowe od v4.31 (v4.32–v4.33):**
+  - **Ceny Jupiter:** jedno zapytanie (bez klucza) do Jupiter Price API v3 o mainnetowe minty PreStocks przy każdym ładowaniu i „Odśwież”. Awaria → „ostatni odczyt” z cache albo „brak danych”; sanity: walidacja ceny, kontrola skoku > 30%, niska płynność, zmiana mnożnika tokena (SpaceX ×5, OpenAI ×1.486 — używamy `usdPrice`).
+  - **Premia IPO:** `usdPrice / stockData.price − 1` zamiast zaszytych premii (fallback „szacunek” tylko dla rankingu; w UI „brak danych”).
+  - **Wycena pozycji:** sekcja „Pozycje” (jednostki, cena teraz, wartość, śr. cena zakupu, zysk/strata), wartość portfela z cen. Zakupy Devnet mintują dziś tokeny 1:1 do USDC, więc są wyceniane po koszcie; P/L włączy się dla zakupów v2 (konto `RunPrice`), gdy zmieni się program.
+  - **Odświeżenie nie czeka na Jupitera** (v4.33): komunikat po transakcji pojawia się od razu, ceny dociągają się w tle.
 - **Najważniejsze zmiany od v4.08:**
   - **Niepotwierdzona transakcja:** timeout potwierdzenia to „pending”, a nie błąd. Po oknie zawsze jest werdykt (weszła / odrzucona / nie dotarła / niepotwierdzona). Podpis jest pamiętany po F5 (`localStorage`) i jest „Sprawdź ponownie”. Druga taka sama operacja wymaga „Wyślij mimo to” (v4.18, v4.27, v4.30, v4.31).
   - **Bez podwójnej wysyłki:** synchroniczne blokady Kup / Wpłać / Wypłać i odzysk kolizji `runIndex` (v4.17, v4.27, v4.30).
@@ -22,7 +27,7 @@ Promocja 1:1 z [`prestocks-dca-noir2.0`](https://github.com/krzysztofpazdyk/pres
   - **Logowanie e-mailem (Privy, embedded wallet Devnet)** obok Phantoma i Solflare. Jest jeden przycisk „Rozłącz”, a po polsku przycisk portfela to „Zaloguj” (v4.09–v4.14, v4.23, v4.28, v4.29).
   - **Ranking Jev działa od pierwszej wizyty** dzięki domyślnemu kluczowi demo TypeSafe (v4.22, v4.25).
   - **Polskie etykiety:** „Wpłać” / „Wypłać”, podpowiedzi przez i18n (v4.26, v4.31).
-  - **135 testów automatycznych** (`scripts/*.test.ts`).
+  - **165 testów automatycznych** (`scripts/*.test.ts`).
 
 ## Co widać w UI
 
@@ -52,6 +57,7 @@ Promocja 1:1 z [`prestocks-dca-noir2.0`](https://github.com/krzysztofpazdyk/pres
 | Mint mock USDC | `99UbouJx2ZTLThQkqxrQGLZkDAYAn9vv8n6qnQh5f4Sw` |
 | RPC | `https://api.devnet.solana.com` |
 | Ranking / keeper | `https://predca-api.onrender.com`, `https://predca-api.onrender.com/keeper` |
+| Ceny | Jupiter Price API v3 (`https://lite-api.jup.ag/price/v3`, bez klucza; nadpisanie: `NEXT_PUBLIC_JUP_PRICE_URL`) |
 | Privy App ID (publiczny) | `cmuf3rgpj01rb0cjpl6ked6f4`; dozwolone originy: `https://krzysztofpazdyk.github.io`, `http://localhost:3000` |
 
 Publiczna konfiguracja buildu jest w `.env.production`. Nie ma w niej sekretów: `NEXT_PUBLIC_PRIVY_APP_ID` i `NEXT_PUBLIC_TYPESAFE_DEFAULT_KEY` są tam puste i przychodzą z workflow.
@@ -74,7 +80,7 @@ Sprawdzenia:
 
 ```bash
 npx tsc --noEmit
-npx tsx --test scripts/*.test.ts         # 135 testów
+npx tsx --test scripts/*.test.ts         # 165 testów
 npx eslint
 NODE_ENV=production npm run build        # static export → out/ (scripts/static-export.mjs)
 ```
