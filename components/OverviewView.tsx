@@ -1098,18 +1098,6 @@ export function OverviewView() {
           </div>
         )}
 
-        {connected && predca.mint && (
-          <p className="mt-2 text-[10px] text-[#8b95a8]">
-            {t("predca.mintLabel")}{" "}
-            <span className="mono-num text-[#c5cedb]">
-              {predca.mint.toBase58()}
-            </span>
-            {predca.ownerUsdc == null && (
-              <> {t("predca.mintNoAta")}</>
-            )}
-          </p>
-        )}
-
         <PrivySignWaitNotice className="mt-3" />
         {predca.sessionCheckMsg ? (
           <TxNotice message={predca.sessionCheckMsg} tone="pending" className="mt-3" />

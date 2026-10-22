@@ -53,7 +53,7 @@
   ],
   "simulate_buy": {
     "usdc_source": "vault_pda_only",
-    "note": "Burn floor(weekly_budget/3)*3 mock USDC from vault PDA only; owner USDC ATA is never the spend source",
+    "note": "Burn floor(weekly_budget/3)*3 USDC from vault PDA only; the owner USDC account is never the spend source",
     "amount_each": "weekly_budget_usdc // 3",
     "total_debit": "amount_each * 3 (remainder stays in vault)"
   },
