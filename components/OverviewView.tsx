@@ -58,10 +58,8 @@ import {
   clusterShortPl,
   explorerTxUrl,
   formatUsd,
-  rawToDollars,
   rpcHost,
 } from "@/lib/predca";
-import { mintLabel } from "@/lib/mint-label";
 import {
   formatPremiumPct,
   livePremiumPct,
@@ -1171,34 +1169,6 @@ export function OverviewView() {
             {t("predca.depositUnavailable", { reason: statusReason })}
           </p>
         )}
-
-        {predca.lastRun && (
-          <div className="mt-4 border-t border-[#1e2633] pt-4 text-xs text-[#8b95a8]">
-            <p className="mb-2 text-[10px] uppercase tracking-wider text-[#a78bfa]">
-              {t("predca.lastRun")}
-            </p>
-            <ul className="grid gap-1 sm:grid-cols-3">
-              {predca.lastRun.mints.map((m, i) => {
-                const fill = predca.runFills.find(
-                  (row) => row.runIndex === predca.lastRun!.runIndex.toString(),
-                );
-                const slot = fill?.slots?.[i] ?? null;
-                const tokens = rawToDollars(predca.lastRun!.amounts[i]);
-                const tokenText = formatGrouped(tokens, { max: 6 });
-                return (
-                <li
-                  key={i}
-                  title={t("predca.runMintAddress", { mint: m.toBase58() })}
-                  className="rounded border border-[#1e2633] bg-[#0c0e12] px-2 py-1.5 mono-num"
-                >
-                  {mintLabel(m)} · {tokenText}
-                  {slot ? ` · ${formatUsd(slot.price)}` : ""}
-                </li>
-                );
-              })}
-            </ul>
-          </div>
-        )}
       </section>
 
       <div className="grid gap-3 sm:grid-cols-3">
@@ -1432,86 +1402,86 @@ export function OverviewView() {
             )}
           </section>
 
-          <section className="relative flex min-h-[11rem] flex-1 flex-col rounded-lg border border-[#1e2633] bg-[#141820] p-5">
-            <h2 className="mb-3 text-[11px] uppercase tracking-[0.15em] text-[#a78bfa]">
-              {connected && onChainReady
-                ? t("lastPurchase.titleOnChain")
-                : connected
-                  ? t("lastPurchase.titleConnected")
-                  : t("lastPurchase.titleDisconnected")}
-            </h2>
-            <div className="flex-1 space-y-1 text-sm pb-5">
-              {!displayLastPurchase || displayLastPurchase.tokens.length === 0 ? (
-                <p className="text-[#8b95a8]">
-                  {connected
-                    ? t("lastPurchase.emptyConnected")
-                    : t("lastPurchase.emptyDisconnected")}
-                </p>
-              ) : (
-                <>
-                  <p>
-                    <span className="text-[#8b95a8]">{t("lastPurchase.date")} </span>
-                    <span className="mono-num">{displayLastPurchase.date}</span>
-                  </p>
-                  <p>
-                    <span className="text-[#8b95a8]">{t("lastPurchase.budget")} </span>
-                    {predca.lastPurchaseOnChain?.priceKnown === false ? (
-                      <span className="mono-num text-[#8b95a8]">
-                        {t("runPrice.unknown")}
-                      </span>
-                    ) : (
-                      <>
-                        <span className="mono-num text-[#2dd4bf]">
-                          {formatDollars(displayLastPurchase.amountUsd)}
-                        </span>
-                        <span className="text-[#8b95a8]">
-                          {" "}
-                          {t("lastPurchase.perToken", {
-                            amount: formatGrouped(
-                              Number(displayLastPurchase.perTokenUsd),
-                              { min: 2, max: 2 },
-                            ),
-                          })}
-                        </span>
-                      </>
-                    )}
-                  </p>
-                  {predca.lastPurchaseOnChain?.priceKnown === false ? (
-                    <p className="text-[10px] text-[#8b95a8]">{t("runPrice.loading")}</p>
-                  ) : null}
-                  <p>
-                    <span className="text-[#8b95a8]">{t("lastPurchase.bought")} </span>
-                    {displayLastPurchase.tokens
-                      .map((name, i) => {
-                        const amt = displayLastPurchase.tokenAmounts?.[i];
-                        if (amt == null || !Number.isFinite(amt)) return name;
-                        const text = formatGrouped(amt, { max: 6 });
-                        return `${name} × ${text}`;
-                      })
-                      .join(" · ")}
-                  </p>
-                </>
-              )}
-            </div>
-            <span
-              className="pointer-events-none absolute bottom-2 right-3 mono-num text-[10px] tabular-nums text-[#5c6578]"
-              title="noir 3.0"
-            >
-              v{APP_VERSION}
-            </span>
-          </section>
+          {showPnl && (
+            <PnlSection
+              rows={predca.positions}
+              locale={locale}
+              detailsOpen={detailsOpen}
+              onToggleDetails={() => setDetailsOpen((open) => !open)}
+              balancesStale={portfolioBalanceStale}
+            />
+          )}
         </div>
       </div>
 
-      {showPnl && (
-        <PnlSection
-          rows={predca.positions}
-          locale={locale}
-          detailsOpen={detailsOpen}
-          onToggleDetails={() => setDetailsOpen((open) => !open)}
-          balancesStale={portfolioBalanceStale}
-        />
-      )}
+      <section className="relative flex min-h-[11rem] flex-1 flex-col rounded-lg border border-[#1e2633] bg-[#141820] p-5">
+        <h2 className="mb-3 text-[11px] uppercase tracking-[0.15em] text-[#a78bfa]">
+          {connected && onChainReady
+            ? t("lastPurchase.titleOnChain")
+            : connected
+              ? t("lastPurchase.titleConnected")
+              : t("lastPurchase.titleDisconnected")}
+        </h2>
+        <div className="flex-1 space-y-1 text-sm pb-5">
+          {!displayLastPurchase || displayLastPurchase.tokens.length === 0 ? (
+            <p className="text-[#8b95a8]">
+              {connected
+                ? t("lastPurchase.emptyConnected")
+                : t("lastPurchase.emptyDisconnected")}
+            </p>
+          ) : (
+            <>
+              <p>
+                <span className="text-[#8b95a8]">{t("lastPurchase.date")} </span>
+                <span className="mono-num">{displayLastPurchase.date}</span>
+              </p>
+              <p>
+                <span className="text-[#8b95a8]">{t("lastPurchase.budget")} </span>
+                {predca.lastPurchaseOnChain?.priceKnown === false ? (
+                  <span className="mono-num text-[#8b95a8]">
+                    {t("runPrice.unknown")}
+                  </span>
+                ) : (
+                  <>
+                    <span className="mono-num text-[#2dd4bf]">
+                      {formatDollars(displayLastPurchase.amountUsd)}
+                    </span>
+                    <span className="text-[#8b95a8]">
+                      {" "}
+                      {t("lastPurchase.perToken", {
+                        amount: formatGrouped(
+                          Number(displayLastPurchase.perTokenUsd),
+                          { min: 2, max: 2 },
+                        ),
+                      })}
+                    </span>
+                  </>
+                )}
+              </p>
+              {predca.lastPurchaseOnChain?.priceKnown === false ? (
+                <p className="text-[10px] text-[#8b95a8]">{t("runPrice.loading")}</p>
+              ) : null}
+              <p>
+                <span className="text-[#8b95a8]">{t("lastPurchase.bought")} </span>
+                {displayLastPurchase.tokens
+                  .map((name, i) => {
+                    const amt = displayLastPurchase.tokenAmounts?.[i];
+                    if (amt == null || !Number.isFinite(amt)) return name;
+                    const text = formatGrouped(amt, { max: 6 });
+                    return `${name} × ${text}`;
+                  })
+                  .join(" · ")}
+              </p>
+            </>
+          )}
+        </div>
+        <span
+          className="pointer-events-none absolute bottom-2 right-3 mono-num text-[10px] tabular-nums text-[#5c6578]"
+          title="noir 3.0"
+        >
+          v{APP_VERSION}
+        </span>
+      </section>
 
       {showPnl && detailsOpen && (
         <PositionsCard

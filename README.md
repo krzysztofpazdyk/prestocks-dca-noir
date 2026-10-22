@@ -2,7 +2,7 @@
 
 # PreStocks UI — noir 3.0
 
-Interfejs **PreStocks Weekly DCA** w stylu trading desk: głęboki charcoal, neonowy teal/violet, liczby monospace. Wersja UI **v5.0.0**.
+Interfejs **PreStocks Weekly DCA** w stylu trading desk: głęboki charcoal, neonowy teal/violet, liczby monospace. Wersja UI **v5.0.1**.
 
 Podłączony do programu Anchor **predca 3.0** (custody USDC + config + RunRecord + PriceFeed). Zakup ręczny woła `simulate_buy_v2`: ilość tokena to `floor(usdc / price)` w jednostkach bazowych (6 decimals), nie 1 token za 1 USD. Sieć: **Solana localnet lub devnet** (wybierana przez `NEXT_PUBLIC_RPC_URL`) — bez seedów / kluczy prywatnych w repo.
 
