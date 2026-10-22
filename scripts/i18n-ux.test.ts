@@ -22,7 +22,6 @@ test("Polish deposit hints no longer say Deposit or Hint", () => {
   const keys = [
     "predca.hintNoAta",
     "predca.hintZeroUsdc",
-    "predca.mintNoAta",
     "predca.depositUnavailable",
     "faucet.nextSteps",
     "purchase.disabled.vaultLow",

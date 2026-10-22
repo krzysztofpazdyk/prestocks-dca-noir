@@ -98,19 +98,16 @@ const pl: Dict = {
   "predca.withdraw": "Wypłać",
   "predca.rpcActionHint": "Nieaktywne — brak połączenia z RPC. Kliknij Odśwież.",
   "predca.hintNoAta":
-    "Wskazówka: brak ATA mock USDC — Wpłata zwykle się nie uda, dopóki nie masz konta tokenowego dla mint {mint}.",
+    "Brak USDC w portfelu — pobierz je z faucetu przed wpłatą.",
   "predca.hintZeroUsdc":
-    "Wskazówka: saldo mock USDC = 0 — doładuj ATA (mint {mint}) przed wpłatą.",
-  "predca.mintLabel": "Mint mock USDC:",
-  "predca.mintNoAta":
-    "· Brak ATA / saldo — utwórz konto tokenowe i zrób mint testowych USDC przed wpłatą.",
+    "Saldo USDC wynosi 0 — pobierz je z faucetu przed wpłatą.",
   "predca.initBudget": "Budżet tygodniowy (USDC)",
   "predca.initialize": "Initialize",
   "predca.waiting": "Czekam…",
   "predca.initHint":
-    "Pierwsza wpłata = initialize_user + deposit w jednej tx. Budżet tygodniowy bierze się z Ustawień (ta sama kwota). Zmień go w Ustawieniach, potem wpłać USDC z ATA portfela.",
+    "Pierwsza wpłata = initialize_user + deposit w jednej tx. Budżet tygodniowy bierze się z Ustawień (ta sama kwota). Zmień go w Ustawieniach, potem wpłać USDC z portfela.",
   "predca.rentHint":
-    "Hint: init tworzy UserConfig + vault ATA — potrzebujesz ~0.002–0.003 SOL na rent (opłata konta).",
+    "Hint: init tworzy UserConfig i konto vaulta — potrzebujesz ~0.002–0.003 SOL na rent (opłata konta).",
   "predca.depositUnavailable":
     "Wpłata niedostępna ({reason}). Podłącz portfel z mintem USDC, by wpłacić.",
   "predca.status.loading": "ładowanie…",
@@ -126,11 +123,11 @@ const pl: Dict = {
   "tile.portfolioHint":
     "Wartość portfela PreStock: vault USDC + wartość tokenów (zakupy v2 po cenie rynkowej; starsze 1:1 po koszcie). USDC w portfelu osobno.",
 
-  "holdings.titleOnChain": "Alokacja holdings (on-chain ATAs)",
+  "holdings.titleOnChain": "Alokacja holdings (on-chain)",
   "holdings.titleOffline": "Alokacja holdings (offline)",
   "holdings.titleDisconnected": "Alokacja holdings",
   "holdings.emptyConnected":
-    "Brak niezerowych sald mock PreStock w ATA — wykonaj zakup (simulate_buy_v2) lub czekaj na mint.",
+    "Brak niezerowych sald PreStock — wykonaj zakup (simulate_buy_v2) lub czekaj na mint.",
   "holdings.empty": "Brak holdings.",
   "holdings.emptyDisconnected": "Podłącz portfel, by zobaczyć holdings on-chain.",
   "holdings.allocation": "alokacja",
@@ -461,9 +458,9 @@ const pl: Dict = {
   "tx.err.unknown": "Nieznany błąd",
   "tx.err.walletRejected": "Transakcja odrzucona w portfelu.",
   "tx.err.rpcDown": "Brak połączenia z RPC (sprawdź NEXT_PUBLIC_RPC_URL).{detail}",
-  "tx.err.insufficientMock": "Niewystarczające środki (mock USDC). Potrzebujesz salda mock USDC (mint {mint}) w ATA portfela. Utwórz ATA i zrób mint/airdrop testowych tokenów, potem Wpłać.",
-  "tx.err.missingAta": "Brak konta tokenowego (ATA) dla mock USDC. Potrzebujesz ATA dla mint {mint} (np. spl-token create-account {mint} / mint tokenów do portfela). Jeśli Predca nie jest zainicjalizowane — najpierw Initialize.",
-  "tx.err.lowWalletUsdc": "Niewystarczające saldo mock USDC w portfelu (mint {mint}). Doładuj ATA przed wpłatą.",
+  "tx.err.insufficientMock": "Brak USDC na wpłatę — pobierz je z faucetu i spróbuj ponownie.",
+  "tx.err.missingAta": "Brak USDC w portfelu — pobierz je z faucetu przed wpłatą.",
+  "tx.err.lowWalletUsdc": "Saldo USDC w portfelu nie wystarcza — pobierz je z faucetu przed wpłatą.",
   "tx.vaultLag": "Potwierdzono on-chain; saldo odświeża się. Odśwież Overview albo sprawdź transakcję w explorerze.",
   "tx.sigUnconfirmed": "Nie potwierdzono podpisu transakcji. Sprawdź explorer.",
   "tx.unconfirmedTimeout": "Transakcja wysłana. Sieć jeszcze nie potwierdziła — nie wysyłaj jej drugi raz. Sprawdź podpis w explorerze.",
@@ -580,19 +577,16 @@ const en: Dict = {
   "predca.withdraw": "Withdraw",
   "predca.rpcActionHint": "Inactive — no RPC connection. Click Refresh.",
   "predca.hintNoAta":
-    "Hint: no mock USDC ATA — Deposit usually fails until you have a token account for mint {mint}.",
+    "No USDC in the wallet — get some from the faucet before you deposit.",
   "predca.hintZeroUsdc":
-    "Hint: mock USDC balance = 0 — fund the ATA (mint {mint}) before Deposit.",
-  "predca.mintLabel": "Mock USDC mint:",
-  "predca.mintNoAta":
-    "· No ATA / balance — create a token account and mint test USDC before Deposit.",
+    "USDC balance is 0 — get some from the faucet before you deposit.",
   "predca.initBudget": "Weekly budget (USDC)",
   "predca.initialize": "Initialize",
   "predca.waiting": "Waiting…",
   "predca.initHint":
-    "First deposit = initialize_user + deposit in one tx. Weekly budget comes from Settings (same amount). Change it in Settings, then deposit USDC from the wallet ATA.",
+    "First deposit = initialize_user + deposit in one tx. Weekly budget comes from Settings (same amount). Change it in Settings, then deposit USDC from the wallet.",
   "predca.rentHint":
-    "Hint: init creates UserConfig + vault ATA — you need ~0.002–0.003 SOL for rent (account fee).",
+    "Hint: init creates UserConfig and the vault account — you need ~0.002–0.003 SOL for rent (account fee).",
   "predca.depositUnavailable":
     "Deposit unavailable ({reason}). Connect a wallet with the USDC mint configured to deposit.",
   "predca.status.loading": "loading…",
@@ -608,11 +602,11 @@ const en: Dict = {
   "tile.portfolioHint":
     "PreStock portfolio value: vault USDC + token value (v2 buys at the market price; older 1:1 buys at cost). Wallet USDC is separate.",
 
-  "holdings.titleOnChain": "Holdings allocation (on-chain ATAs)",
+  "holdings.titleOnChain": "Holdings allocation (on-chain)",
   "holdings.titleOffline": "Holdings allocation (offline)",
   "holdings.titleDisconnected": "Holdings allocation",
   "holdings.emptyConnected":
-    "No non-zero mock PreStock ATA balances — run a buy (simulate_buy_v2) or wait for the mint.",
+    "No non-zero PreStock balances — run a buy (simulate_buy_v2) or wait for the mint.",
   "holdings.empty": "No holdings.",
   "holdings.emptyDisconnected": "Connect wallet to see on-chain holdings.",
   "holdings.allocation": "allocation",
@@ -943,9 +937,9 @@ const en: Dict = {
   "tx.err.unknown": "Unknown error",
   "tx.err.walletRejected": "Transaction rejected in the wallet.",
   "tx.err.rpcDown": "No RPC connection (check NEXT_PUBLIC_RPC_URL).{detail}",
-  "tx.err.insufficientMock": "Insufficient funds (mock USDC). You need a mock USDC balance (mint {mint}) in the wallet ATA. Create the ATA and mint/airdrop test tokens, then Deposit.",
-  "tx.err.missingAta": "No token account (ATA) for mock USDC. You need an ATA for mint {mint} (for example spl-token create-account {mint} / mint tokens to the wallet). If Predca is not initialized — Initialize first.",
-  "tx.err.lowWalletUsdc": "Insufficient mock USDC balance in the wallet (mint {mint}). Fund the ATA before depositing.",
+  "tx.err.insufficientMock": "The wallet does not hold enough USDC for this deposit — get some from the faucet and try again.",
+  "tx.err.missingAta": "No USDC in the wallet — get some from the faucet before you deposit.",
+  "tx.err.lowWalletUsdc": "The wallet USDC balance is too low — get some from the faucet before you deposit.",
   "tx.vaultLag": "Confirmed on-chain; the balance is refreshing. Refresh Overview or check the transaction in the explorer.",
   "tx.sigUnconfirmed": "The transaction signature was not confirmed. Check the explorer.",
   "tx.unconfirmedTimeout": "Transaction sent. The network has not confirmed it yet — do not send it a second time. Check the signature in the explorer.",
