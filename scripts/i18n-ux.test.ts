@@ -111,11 +111,11 @@ test("stale portfolio and RPC timeout copy exists in Polish and English", () => 
   );
   assert.equal(
     values("rpc.timeoutWarning")[0],
-    "RPC Devnet odpowiada zbyt wolno — pokazuję poprzednie dane. Spróbuję ponownie automatycznie.",
+    "RPC odpowiada zbyt wolno — pokazuję poprzednie dane. Spróbuję ponownie automatycznie.",
   );
   assert.equal(
     values("rpc.timeoutWarning")[1],
-    "Devnet RPC is responding slowly — showing the previous data. Retrying automatically.",
+    "RPC is responding slowly — showing the previous data. Retrying automatically.",
   );
 });
 
@@ -139,5 +139,10 @@ test("Overview and Trading desk stay English in the Polish dictionary", () => {
     new URL("../components/HistoryView.tsx", import.meta.url),
     "utf8",
   );
-  assert.match(history, />\s*on-chain\s*</);
+  const entry = readFileSync(
+    new URL("../components/HistoryRunEntry.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(history, /HistoryRunEntry/);
+  assert.match(entry, />\s*on-chain\s*</);
 });

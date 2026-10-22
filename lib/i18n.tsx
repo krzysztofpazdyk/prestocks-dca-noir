@@ -66,15 +66,15 @@ const pl: Dict = {
   "overview.maxDepositHint": "Maks. wpłata: {amount} (saldo portfela)",
   "overview.maxWithdrawHint": "Maks. wypłata: {amount} (saldo vaulta)",
   "overview.disconnectedHint":
-    "Portfel odłączony — podłącz wallet, by zobaczyć salda on-chain. {cluster}.",
+    "Portfel odłączony — podłącz wallet, by zobaczyć salda on-chain.",
   "overview.noMintHint":
     "Ustaw NEXT_PUBLIC_USDC_MINT na lokalny mock mint.",
-  "overview.onChainHint": "On-chain · {cluster} · wartości z RPC",
+  "overview.onChainHint": "On-chain · wartości z RPC",
   "overview.rpcStale": "ostatni odczyt",
   "overview.clusterMainnet":
-    "Uwaga: RPC wygląda na Mainnet — ta aplikacja jest Devnet-only. Sprawdź NEXT_PUBLIC_RPC_URL.",
+    "Uwaga: RPC wygląda na Mainnet — ta aplikacja nie działa na tej sieci. Sprawdź NEXT_PUBLIC_RPC_URL.",
   "overview.clusterNotDevnet":
-    "Uwaga: oczekiwano Devnet, genesis RPC = {genesis}. Sprawdź sieć / RPC.",
+    "Uwaga: nieoczekiwana sieć, genesis RPC = {genesis}. Sprawdź sieć / RPC.",
 
   "faucet.button": "Weź 1000 USDC + 0.1 SOL (demo)",
   "faucet.busy": "Wysyłam USDC + SOL…",
@@ -83,7 +83,7 @@ const pl: Dict = {
   "faucet.error": "Faucet: {error}",
   "faucet.needWallet": "Podłącz portfel, by wziąć demo USDC + SOL.",
 
-  "predca.title": "Predca on-chain ({cluster})",
+  "predca.title": "Predca on-chain",
   "predca.rpc": "RPC:",
   "predca.refresh": "Odśwież",
   "predca.loading": "Ładowanie…",
@@ -93,14 +93,14 @@ const pl: Dict = {
   "predca.withdrawTitle": "Wypłata",
   "predca.deposit": "Wpłać",
   "predca.withdraw": "Wypłać",
-  "predca.rpcActionHint": "Nieaktywne — brak połączenia z RPC Devnet. Kliknij Odśwież.",
+  "predca.rpcActionHint": "Nieaktywne — brak połączenia z RPC. Kliknij Odśwież.",
   "predca.hintNoAta":
-    "Wskazówka: brak ATA mock USDC — Wpłata zwykle się nie uda, dopóki nie masz konta tokenowego dla mint {mint} na Devnet.",
+    "Wskazówka: brak ATA mock USDC — Wpłata zwykle się nie uda, dopóki nie masz konta tokenowego dla mint {mint}.",
   "predca.hintZeroUsdc":
     "Wskazówka: saldo mock USDC = 0 — doładuj ATA (mint {mint}) przed wpłatą.",
   "predca.mintLabel": "Mint mock USDC:",
   "predca.mintNoAta":
-    "· Brak ATA / saldo — utwórz konto tokenowe i zrób mint testowych USDC na Devnet przed wpłatą.",
+    "· Brak ATA / saldo — utwórz konto tokenowe i zrób mint testowych USDC przed wpłatą.",
   "predca.initBudget": "Budżet tygodniowy (USDC)",
   "predca.initialize": "Initialize",
   "predca.waiting": "Czekam…",
@@ -167,7 +167,7 @@ const pl: Dict = {
   "purchase.disabled.tx": "Transakcja w toku…",
   "purchase.disabled.noRecs": "Zakup nieaktywny — najpierw kliknij Wygeneruj rekomendacje (top-3).",
   "purchase.disabled.notReady": "Zakup nieaktywny — najpierw wpłać USDC na Overview (konto powstaje z wpłatą).",
-  "purchase.disabled.rpcError": "Zakup nieaktywny — brak połączenia z RPC Devnet. Kliknij Odśwież.",
+  "purchase.disabled.rpcError": "Zakup nieaktywny — brak połączenia z RPC. Kliknij Odśwież.",
   "purchase.disabled.flatRanking": "Zakup nieaktywny — ranking awaryjny nie rozróżnia spółek (wszystkie 50,0). Spróbuj ponownie później albo włącz „Premia IPO ma znaczenie”.",
   "purchase.confirmBudget": "Zmienię budżet on-chain z {from} na {to} i kupię. Potwierdzić?",
   "purchase.disabled.vaultLow": "Zakup nieaktywny — vault ma {have}, potrzeba ≥ {need}. Wpłać z portfela (faucet zasila portfel, nie vault).",
@@ -203,12 +203,12 @@ const pl: Dict = {
     "Zakup on-chain (simulate_buy_v2): ${amount} z vault → ⅓ na {names}.{preview}",
   "tx.buyPreviewLeg": "≈ {tokens} {name} po ${price}",
   "tx.err.noBuyIx": "Brak instrukcji zakupu.",
-  "tx.err.rejected": "Transakcja odrzucona przez Devnet. {signature}",
-  "tx.err.rejectedShort": "Transakcja odrzucona przez Devnet.",
+  "tx.err.rejected": "Transakcja odrzucona. {signature}",
+  "tx.err.rejectedShort": "Transakcja odrzucona.",
   "msg.purchaseFail":
     "Zakup nieudany — szczegóły w sekcji Predca powyżej (czerwony komunikat).",
   "msg.purchasePending":
-    "Zakup wysłany, Devnet jeszcze nie potwierdził · {sig} {url}. Nie wysyłaj drugi raz.",
+    "Zakup wysłany, sieć jeszcze nie potwierdziła · {sig} {url}. Nie wysyłaj drugi raz.",
   "msg.updatingBudget": "Aktualizuję budżet on-chain…",
   "msg.budgetSyncFail":
     "Nie udało się zaktualizować budżetu on-chain przed zakupem.",
@@ -358,7 +358,7 @@ const pl: Dict = {
   "history.kicker": "Przebiegi DCA",
   "history.title": "Historia",
   "history.onChainIntro":
-    "RunRecord on-chain · {count} wpis(ów) ({cluster}).",
+    "RunRecord on-chain · {count} wpis(ów).",
   "history.connectHint":
     "Podłącz portfel, aby zobaczyć historię zakupów (RunRecord) z Predca.",
   "history.noRuns":
@@ -384,7 +384,7 @@ const pl: Dict = {
   "positions.noData": "brak danych",
   "positions.atCost": "po koszcie (zakup 1:1 sprzed v2)",
   "positions.legacyHint":
-    "Wcześniejsze zakupy na Devnecie mintowały tokeny 1:1 do USDC — wyceniamy je po koszcie.",
+    "Wcześniejsze zakupy mintowały tokeny 1:1 do USDC — wyceniamy je po koszcie.",
   "positions.mismatch": "Saldo tokenów różni się od historii zakupów.",
   "runPrice.loading": "dane o cenie zakupu się ładują",
   "runPrice.unknown": "—",
@@ -393,7 +393,7 @@ const pl: Dict = {
   "portfolio.staleHint":
     "Wartość portfela może być nieaktualna do czasu odczytu sald.",
   "rpc.timeoutWarning":
-    "RPC Devnet odpowiada zbyt wolno — pokazuję poprzednie dane. Spróbuję ponownie automatycznie.",
+    "RPC odpowiada zbyt wolno — pokazuję poprzednie dane. Spróbuję ponownie automatycznie.",
 
   "prices.source": "Ceny: Jupiter (mainnet PreStocks)",
   "prices.stale": "ceny: ostatni odczyt · {time}",
@@ -444,30 +444,30 @@ const pl: Dict = {
   "tx.kind.budget": "zmiana budżetu",
   "tx.sessionCheck": "Sprawdzam transakcję z poprzedniej sesji…",
   "tx.err.connectWallet": "Podłącz portfel.",
-  "tx.err.noUsdcMint": "Brak NEXT_PUBLIC_USDC_MINT. Ustaw mock mint ({mint}) na Devnet.",
+  "tx.err.noUsdcMint": "Brak NEXT_PUBLIC_USDC_MINT. Ustaw mock mint ({mint}).",
   "tx.err.depositPositive": "Kwota depozytu musi być > 0.",
   "tx.err.firstDepositBudget": "Przy pierwszej wpłacie ustaw budżet tygodniowy > 0 (init + deposit w jednej tx).",
   "tx.err.predcaNotInit": "Predca nie jest zainicjalizowane. Zrób pierwszą wpłatę (Wpłać) — init + deposit w jednej tx.",
   "tx.err.withdrawPositive": "Kwota wypłaty musi być > 0.",
   "tx.err.budgetPositive": "Budżet tygodniowy musi być > 0.",
-  "tx.err.missingMints": "Brak mapowania mint dla: {names}. Sprawdź lib/devnet-mock-mints.",
+  "tx.err.missingMints": "Brak mapowania mint dla: {names}.",
   "tx.err.needThreeMints": "Potrzebne dokładnie 3 tokeny top-3 z mapowaniem mint.",
   "tx.err.noFreeRunIndex": "Brak wolnego indeksu RunRecord (limit skanu). Odśwież i spróbuj ponownie.",
   "tx.err.buyInFlight": "Zakup już w toku.",
   "tx.err.invalidAmount": "Nieprawidłowa kwota",
   "tx.err.unknown": "Nieznany błąd",
   "tx.err.walletRejected": "Transakcja odrzucona w portfelu.",
-  "tx.err.rpcDown": "Brak połączenia z RPC (sprawdź NEXT_PUBLIC_RPC_URL / Devnet).{detail}",
-  "tx.err.insufficientMock": "Niewystarczające środki (mock USDC). Potrzebujesz salda mock USDC (mint {mint}) na Devnet w ATA portfela. Utwórz ATA i zrób mint/airdrop testowych tokenów, potem Wpłać.",
-  "tx.err.missingAta": "Brak konta tokenowego (ATA) dla mock USDC. Na Devnet potrzebujesz ATA dla mint {mint} (np. spl-token create-account {mint} / mint tokenów do portfela). Jeśli Predca nie jest zainicjalizowane — najpierw Initialize.",
+  "tx.err.rpcDown": "Brak połączenia z RPC (sprawdź NEXT_PUBLIC_RPC_URL).{detail}",
+  "tx.err.insufficientMock": "Niewystarczające środki (mock USDC). Potrzebujesz salda mock USDC (mint {mint}) w ATA portfela. Utwórz ATA i zrób mint/airdrop testowych tokenów, potem Wpłać.",
+  "tx.err.missingAta": "Brak konta tokenowego (ATA) dla mock USDC. Potrzebujesz ATA dla mint {mint} (np. spl-token create-account {mint} / mint tokenów do portfela). Jeśli Predca nie jest zainicjalizowane — najpierw Initialize.",
   "tx.err.lowWalletUsdc": "Niewystarczające saldo mock USDC w portfelu (mint {mint}). Doładuj ATA przed wpłatą.",
   "tx.vaultLag": "Potwierdzono on-chain; saldo odświeża się. Odśwież Overview albo sprawdź transakcję w explorerze.",
   "tx.sigUnconfirmed": "Nie potwierdzono podpisu transakcji. Sprawdź explorer.",
-  "tx.unconfirmedTimeout": "Transakcja wysłana. Devnet jeszcze nie potwierdził — nie wysyłaj jej drugi raz. Sprawdź podpis w explorerze.",
-  "tx.confirmStillPending": "Brak potwierdzenia transakcji na Devnet.",
+  "tx.unconfirmedTimeout": "Transakcja wysłana. Sieć jeszcze nie potwierdziła — nie wysyłaj jej drugi raz. Sprawdź podpis w explorerze.",
+  "tx.confirmStillPending": "Brak potwierdzenia transakcji.",
   "tx.failedExpired": "Transakcja nie dotarła do sieci (blockhash wygasł) — możesz spróbować ponownie.",
   "tx.unresolved": "Transakcja niepotwierdzona — sprawdź w explorerze. Nie wysyłaj tej samej operacji, dopóki status się nie wyjaśni.",
-  "predca.rpcReadError": "Brak połączenia z RPC Devnet — nie udało się odczytać konta. Dane mogą być nieaktualne. Kliknij Odśwież.",
+  "predca.rpcReadError": "Brak połączenia z RPC — nie udało się odczytać konta. Dane mogą być nieaktualne. Kliknij Odśwież.",
   "msg.vaultLow": "Za mało USDC w vault: {have} < {need}.",
   "privy.missingWallet": "Brak portfela Privy.",
   "privy.noSignedTx": "Privy nie zwrócił podpisanej transakcji.",
@@ -545,15 +545,15 @@ const en: Dict = {
   "overview.maxDepositHint": "Max deposit: {amount} (wallet balance)",
   "overview.maxWithdrawHint": "Max withdraw: {amount} (vault balance)",
   "overview.disconnectedHint":
-    "Wallet disconnected — connect to see on-chain balances. {cluster}.",
+    "Wallet disconnected — connect to see on-chain balances.",
   "overview.noMintHint":
     "Set NEXT_PUBLIC_USDC_MINT to a local mock mint.",
-  "overview.onChainHint": "On-chain · {cluster} · values from RPC",
+  "overview.onChainHint": "On-chain · values from RPC",
   "overview.rpcStale": "last read",
   "overview.clusterMainnet":
-    "Warning: RPC looks like Mainnet — this app is Devnet-only. Check NEXT_PUBLIC_RPC_URL.",
+    "Warning: RPC looks like Mainnet — this app does not run on that network. Check NEXT_PUBLIC_RPC_URL.",
   "overview.clusterNotDevnet":
-    "Warning: expected Devnet, RPC genesis = {genesis}. Check network / RPC.",
+    "Warning: unexpected network, RPC genesis = {genesis}. Check network / RPC.",
 
   "faucet.button": "Get 1000 USDC + 0.1 SOL (demo)",
   "faucet.busy": "Sending USDC + SOL…",
@@ -562,7 +562,7 @@ const en: Dict = {
   "faucet.error": "Faucet: {error}",
   "faucet.needWallet": "Connect a wallet to claim demo USDC + SOL.",
 
-  "predca.title": "Predca on-chain ({cluster})",
+  "predca.title": "Predca on-chain",
   "predca.rpc": "RPC:",
   "predca.refresh": "Refresh",
   "predca.loading": "Loading…",
@@ -572,14 +572,14 @@ const en: Dict = {
   "predca.withdrawTitle": "Withdraw",
   "predca.deposit": "Deposit",
   "predca.withdraw": "Withdraw",
-  "predca.rpcActionHint": "Inactive — no Devnet RPC connection. Click Refresh.",
+  "predca.rpcActionHint": "Inactive — no RPC connection. Click Refresh.",
   "predca.hintNoAta":
-    "Hint: no mock USDC ATA — Deposit usually fails until you have a token account for mint {mint} on Devnet.",
+    "Hint: no mock USDC ATA — Deposit usually fails until you have a token account for mint {mint}.",
   "predca.hintZeroUsdc":
     "Hint: mock USDC balance = 0 — fund the ATA (mint {mint}) before Deposit.",
   "predca.mintLabel": "Mock USDC mint:",
   "predca.mintNoAta":
-    "· No ATA / balance — create a token account and mint test USDC on Devnet before Deposit.",
+    "· No ATA / balance — create a token account and mint test USDC before Deposit.",
   "predca.initBudget": "Weekly budget (USDC)",
   "predca.initialize": "Initialize",
   "predca.waiting": "Waiting…",
@@ -646,7 +646,7 @@ const en: Dict = {
   "purchase.disabled.tx": "Transaction in progress…",
   "purchase.disabled.noRecs": "Purchase disabled — click Generate recommendations first (top-3).",
   "purchase.disabled.notReady": "Purchase disabled — deposit USDC on Overview first (the account is created with that deposit).",
-  "purchase.disabled.rpcError": "Purchase disabled — no Devnet RPC connection. Click Refresh.",
+  "purchase.disabled.rpcError": "Purchase disabled — no RPC connection. Click Refresh.",
   "purchase.disabled.flatRanking": "Purchase disabled — the backup ranking can't tell names apart (all 50.0). Try again later or turn on “IPO premium matters”.",
   "purchase.confirmBudget": "I'll change the on-chain budget from {from} to {to} and buy. Confirm?",
   "purchase.disabled.vaultLow": "Purchase disabled — vault has {have}, need ≥ {need}. Deposit from wallet (faucet fills wallet, not vault).",
@@ -682,12 +682,12 @@ const en: Dict = {
     "On-chain purchase (simulate_buy_v2): ${amount} from the vault → ⅓ across {names}.{preview}",
   "tx.buyPreviewLeg": "≈ {tokens} {name} at ${price}",
   "tx.err.noBuyIx": "No purchase instruction.",
-  "tx.err.rejected": "Transaction rejected by Devnet. {signature}",
-  "tx.err.rejectedShort": "Transaction rejected by Devnet.",
+  "tx.err.rejected": "Transaction rejected. {signature}",
+  "tx.err.rejectedShort": "Transaction rejected.",
   "msg.purchaseFail":
     "Purchase failed — see details in the Predca section above (red message).",
   "msg.purchasePending":
-    "Purchase sent, Devnet has not confirmed yet · {sig} {url}. Don't send it again.",
+    "Purchase sent, the network has not confirmed yet · {sig} {url}. Don't send it again.",
   "msg.updatingBudget": "Updating budget on-chain…",
   "msg.budgetSyncFail":
     "Could not update on-chain budget before purchase.",
@@ -837,7 +837,7 @@ const en: Dict = {
   "history.kicker": "DCA runs",
   "history.title": "History",
   "history.onChainIntro":
-    "RunRecord on-chain · {count} entries ({cluster}).",
+    "RunRecord on-chain · {count} entries.",
   "history.connectHint":
     "Connect your wallet to see purchase history (RunRecord) from Predca.",
   "history.noRuns":
@@ -863,7 +863,7 @@ const en: Dict = {
   "positions.noData": "no data",
   "positions.atCost": "at cost (1:1 buy before v2)",
   "positions.legacyHint":
-    "Earlier Devnet buys minted tokens 1:1 to USDC — they are valued at cost.",
+    "Earlier buys minted tokens 1:1 to USDC — they are valued at cost.",
   "positions.mismatch": "Token balance differs from purchase history.",
   "runPrice.loading": "purchase price is loading",
   "runPrice.unknown": "—",
@@ -872,7 +872,7 @@ const en: Dict = {
   "portfolio.staleHint":
     "Portfolio value may be out of date until balances load.",
   "rpc.timeoutWarning":
-    "Devnet RPC is responding slowly — showing the previous data. Retrying automatically.",
+    "RPC is responding slowly — showing the previous data. Retrying automatically.",
 
   "prices.source": "Prices: Jupiter (mainnet PreStocks)",
   "prices.stale": "prices: last read · {time}",
@@ -923,30 +923,30 @@ const en: Dict = {
   "tx.kind.budget": "budget change",
   "tx.sessionCheck": "Checking the transaction from the previous session…",
   "tx.err.connectWallet": "Connect a wallet.",
-  "tx.err.noUsdcMint": "Missing NEXT_PUBLIC_USDC_MINT. Set the mock mint ({mint}) on Devnet.",
+  "tx.err.noUsdcMint": "Missing NEXT_PUBLIC_USDC_MINT. Set the mock mint ({mint}).",
   "tx.err.depositPositive": "Deposit amount must be > 0.",
   "tx.err.firstDepositBudget": "On the first deposit, set a weekly budget > 0 (init + deposit in one tx).",
   "tx.err.predcaNotInit": "Predca is not initialized. Make the first deposit (Deposit) — init + deposit in one tx.",
   "tx.err.withdrawPositive": "Withdrawal amount must be > 0.",
   "tx.err.budgetPositive": "Weekly budget must be > 0.",
-  "tx.err.missingMints": "No mint mapping for: {names}. Check lib/devnet-mock-mints.",
+  "tx.err.missingMints": "No mint mapping for: {names}.",
   "tx.err.needThreeMints": "Exactly 3 top-3 tokens with a mint mapping are required.",
   "tx.err.noFreeRunIndex": "No free RunRecord index (scan limit). Refresh and try again.",
   "tx.err.buyInFlight": "A purchase is already in progress.",
   "tx.err.invalidAmount": "Invalid amount",
   "tx.err.unknown": "Unknown error",
   "tx.err.walletRejected": "Transaction rejected in the wallet.",
-  "tx.err.rpcDown": "No RPC connection (check NEXT_PUBLIC_RPC_URL / Devnet).{detail}",
-  "tx.err.insufficientMock": "Insufficient funds (mock USDC). You need a mock USDC balance (mint {mint}) on Devnet in the wallet ATA. Create the ATA and mint/airdrop test tokens, then Deposit.",
-  "tx.err.missingAta": "No token account (ATA) for mock USDC. On Devnet you need an ATA for mint {mint} (for example spl-token create-account {mint} / mint tokens to the wallet). If Predca is not initialized — Initialize first.",
+  "tx.err.rpcDown": "No RPC connection (check NEXT_PUBLIC_RPC_URL).{detail}",
+  "tx.err.insufficientMock": "Insufficient funds (mock USDC). You need a mock USDC balance (mint {mint}) in the wallet ATA. Create the ATA and mint/airdrop test tokens, then Deposit.",
+  "tx.err.missingAta": "No token account (ATA) for mock USDC. You need an ATA for mint {mint} (for example spl-token create-account {mint} / mint tokens to the wallet). If Predca is not initialized — Initialize first.",
   "tx.err.lowWalletUsdc": "Insufficient mock USDC balance in the wallet (mint {mint}). Fund the ATA before depositing.",
   "tx.vaultLag": "Confirmed on-chain; the balance is refreshing. Refresh Overview or check the transaction in the explorer.",
   "tx.sigUnconfirmed": "The transaction signature was not confirmed. Check the explorer.",
-  "tx.unconfirmedTimeout": "Transaction sent. Devnet has not confirmed it yet — do not send it a second time. Check the signature in the explorer.",
-  "tx.confirmStillPending": "No transaction confirmation on Devnet.",
+  "tx.unconfirmedTimeout": "Transaction sent. The network has not confirmed it yet — do not send it a second time. Check the signature in the explorer.",
+  "tx.confirmStillPending": "No transaction confirmation.",
   "tx.failedExpired": "The transaction did not reach the network (blockhash expired) — you can try again.",
   "tx.unresolved": "Transaction unconfirmed — check the explorer. Do not send the same operation until the status is clear.",
-  "predca.rpcReadError": "No Devnet RPC connection — could not read the account. Data may be out of date. Click Refresh.",
+  "predca.rpcReadError": "No RPC connection — could not read the account. Data may be out of date. Click Refresh.",
   "msg.vaultLow": "Not enough USDC in the vault: {have} < {need}.",
   "privy.missingWallet": "No Privy wallet.",
   "privy.noSignedTx": "Privy did not return a signed transaction.",

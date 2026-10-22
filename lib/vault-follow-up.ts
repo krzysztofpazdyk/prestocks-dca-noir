@@ -138,8 +138,10 @@ export function isOnChainSignatureReject(err: unknown): boolean {
     if ((err as { onChainReject?: unknown }).onChainReject === true) return true;
     if (errorName(err) === "SignatureFailedError") return true;
   }
-  // Polish sentence saved earlier, and the English sentence from tx.err.rejected.
-  return /odrzucona przez Devnet|rejected by Devnet/i.test(errorMessage(err));
+  // Older sessions stored "przez Devnet" / "by Devnet". Current copy has no network name.
+  return /odrzucona przez Devnet|rejected by Devnet|Transakcja odrzucona\.|Transaction rejected\./i.test(
+    errorMessage(err),
+  );
 }
 
 /**
