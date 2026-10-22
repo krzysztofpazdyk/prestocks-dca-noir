@@ -1,7 +1,7 @@
 "use client";
 
 import { useWallet } from "@solana/wallet-adapter-react";
-import { nameByMint } from "@/lib/devnet-mock-mints";
+import { mintLabel } from "@/lib/mint-label";
 import { usePredca } from "@/lib/hooks/usePredca";
 import { TxNotice } from "@/components/TxNotice";
 import {
@@ -9,47 +9,52 @@ import {
   formatTs,
   formatUsd,
   rawToDollars,
-  shortPk,
   type RunRecordData,
 } from "@/lib/predca";
+import { fmtSignedPnl, fmtUsdAmount } from "@/lib/format-usd";
+import { formatGrouped } from "@/lib/number-format";
+import { runPnl } from "@/lib/position-value";
+import { historyBudgetUsd, historyLegUsd, historyView } from "@/lib/history-view";
 import { useI18n } from "@/lib/i18n";
 
-function mintLabel(mint: RunRecordData["mints"][number]): string {
-  const named = nameByMint(mint);
-  if (named) return named;
-  return shortPk(mint, 6);
+function runBudgetUsd(
+  run: RunRecordData,
+  slots: Array<{ usdc?: number } | null> | null | undefined,
+  priceState: "priced" | "legacy" | "unknown",
+): number | null {
+  const legs = run.mints.map((_, i) =>
+    historyLegUsd(priceState, slots?.[i]?.usdc, rawToDollars(run.amounts[i])),
+  );
+  return historyBudgetUsd(priceState, legs);
 }
 
-function runBudgetUsd(run: RunRecordData): number {
-  return run.amounts.reduce((s, a) => s + rawToDollars(a), 0);
+function fmtUnits(n: number): string {
+  return formatGrouped(n, { max: 6 });
 }
 
 export function HistoryView() {
   const { connected } = useWallet();
   const predca = usePredca();
-  const { t } = useI18n();
-  const ready = connected && predca.status === "ready";
-  const loading = connected && predca.loading && predca.status === "loading";
-  const hasRuns = ready && predca.runs.length > 0;
+  const { t, locale } = useI18n();
+  const mode = historyView(predca.status, predca.runs.length, connected);
+  const showRuns = mode === "list" || mode === "list_stale";
 
   let intro: string;
-  if (!connected) {
+  if (mode === "disconnected") {
     intro = t("history.connectHint");
-  } else if (loading) {
+  } else if (mode === "loading") {
     intro = t("history.loading");
-  } else if (ready && hasRuns) {
+  } else if (showRuns) {
     intro = t("history.onChainIntro", {
       count: predca.runs.length,
       cluster: clusterShortPl(),
     });
-  } else if (ready) {
+  } else if (mode === "empty") {
     intro = t("history.noRuns");
-  } else if (predca.status === "no_config" || predca.status === "no_mint") {
+  } else if (mode === "not_ready") {
     intro = t("history.notReady");
-  } else if (predca.status === "error") {
-    intro = t("history.fetchError");
   } else {
-    intro = t("history.connectHint");
+    intro = t("history.fetchError");
   }
 
   return (
@@ -62,37 +67,74 @@ export function HistoryView() {
         <p className="mt-1 text-xs text-[#8b95a8]">{intro}</p>
       </div>
 
-      {predca.error && <TxNotice message={predca.error} tone="error" />}
       {predca.status === "error" && predca.rpcError ? (
         <TxNotice message={predca.rpcError} tone="error" />
       ) : null}
 
-      {!connected && (
+      {mode === "disconnected" && (
         <p className="rounded border border-dashed border-[#1e2633] px-3 py-6 text-center text-xs text-[#8b95a8]">
           {t("history.connectHint")}
         </p>
       )}
 
-      {connected && !ready && !loading && (
+      {mode === "loading" && (
         <p className="rounded border border-dashed border-[#1e2633] px-3 py-6 text-center text-xs text-[#8b95a8]">
-          {predca.status === "loading"
-            ? t("history.loading")
-            : predca.status === "error"
-              ? t("history.fetchError")
-              : t("history.notReady")}
+          {t("history.loading")}
         </p>
       )}
 
-      {ready && !hasRuns && (
+      {(mode === "error" || mode === "not_ready") && (
+        <p className="rounded border border-dashed border-[#1e2633] px-3 py-6 text-center text-xs text-[#8b95a8]">
+          {mode === "error" ? t("history.fetchError") : t("history.notReady")}
+        </p>
+      )}
+
+      {mode === "empty" && (
         <p className="rounded border border-dashed border-[#1e2633] px-3 py-6 text-center text-xs text-[#8b95a8]">
           {t("history.noRuns")}
         </p>
       )}
 
-      {hasRuns && (
+      {mode === "list_stale" && (
+        <p className="text-xs text-[#fbbf24]">{t("history.staleRuns")}</p>
+      )}
+
+      {showRuns && (
         <ul className="space-y-3">
           {[...predca.runs].reverse().map((run) => {
-            const budget = runBudgetUsd(run);
+            const fill = predca.runFills.find(
+              (row) => row.runIndex === run.runIndex.toString(),
+            );
+            const priceState = fill?.priceState ?? "unknown";
+            const budget = runBudgetUsd(run, fill?.slots, priceState);
+            const names = run.mints.map((m) => mintLabel(m, 6));
+            const usdcEach = run.mints.map((_, i) =>
+              historyLegUsd(
+                priceState,
+                fill?.slots?.[i]?.usdc,
+                rawToDollars(run.amounts[i]),
+              ),
+            );
+            const pnl =
+              priceState === "unknown"
+                ? null
+                : runPnl(
+                    fill?.slots ?? null,
+                    usdcEach.map((n) => (n == null ? Number.NaN : n)),
+                    predca.jupPrices.quotes,
+                    names,
+                  );
+            const runPnlText =
+              pnl?.totalPnlUsd != null
+                ? fmtSignedPnl(pnl.totalPnlUsd, pnl.totalPnlPct, locale)
+                : null;
+            const runPos = pnl?.totalPnlUsd != null && pnl.totalPnlUsd > 0;
+            const runNeg = pnl?.totalPnlUsd != null && pnl.totalPnlUsd < 0;
+            const runClass = runPos
+              ? "text-[#34d399]"
+              : runNeg
+                ? "text-[#f87171]"
+                : "text-[#8b95a8]";
             return (
               <li
                 key={run.runIndex.toString()}
@@ -104,29 +146,69 @@ export function HistoryView() {
                       {formatTs(run.ts)}
                     </p>
                     <p className="text-xs text-[#8b95a8]">
-                      {t("history.runMeta", {
-                        index: run.runIndex.toString(),
-                        budget: formatUsd(budget),
-                        slot: run.slot.toString(),
-                      })}
+                      {priceState === "unknown"
+                        ? t("history.runMetaUnknown", {
+                            index: run.runIndex.toString(),
+                            unknown: t("runPrice.unknown"),
+                            slot: run.slot.toString(),
+                          })
+                        : t("history.runMeta", {
+                            index: run.runIndex.toString(),
+                            budget: formatUsd(budget ?? 0),
+                            slot: run.slot.toString(),
+                          })}
                     </p>
+                    {priceState === "unknown" ? (
+                      <p className="text-[10px] text-[#8b95a8]">{t("runPrice.loading")}</p>
+                    ) : null}
+                    {runPnlText && (
+                      <p className={`mono-num text-xs ${runClass}`}>
+                        {t("history.runPnl", { pnl: runPnlText })}
+                      </p>
+                    )}
                   </div>
                   <span className="mono-num rounded border border-[#2dd4bf44] px-2 py-1 text-[11px] text-[#2dd4bf]">
                     on-chain
                   </span>
                 </div>
                 <ul className="mt-3 grid gap-1 sm:grid-cols-3">
-                  {run.mints.map((m, i) => (
+                  {run.mints.map((m, i) => {
+                    const slot = fill?.slots?.[i] ?? null;
+                    const leg = pnl?.legs[i] ?? null;
+                    return (
                     <li
                       key={`${run.runIndex.toString()}-${i}`}
                       className="rounded border border-[#1e2633] bg-[#0c0e12] px-2 py-1.5 text-xs"
                     >
-                      <span className="text-[#c5cedb]">{mintLabel(m)}</span>
+                      <span className="text-[#c5cedb]">{mintLabel(m, 6)}</span>
                       <span className="mono-num ml-2 text-[#8b95a8]">
-                        ${formatUsd(rawToDollars(run.amounts[i]))}
+                        {usdcEach[i] == null
+                          ? t("runPrice.unknown")
+                          : formatUsd(usdcEach[i])}
                       </span>
+                      {slot ? (
+                        <span className="mono-num mt-0.5 block text-[10px] text-[#8b95a8]">
+                          {t("history.buyPrice", {
+                            price: fmtUsdAmount(slot.price, locale) ?? t("positions.noData"),
+                            units: fmtUnits(slot.units),
+                          })}
+                          {leg ? (
+                            <span className="mt-0.5 block">
+                              {t("history.legPnl", {
+                                value:
+                                  fmtUsdAmount(leg.valueUsd, locale) ??
+                                  t("positions.noData"),
+                                pnl:
+                                  fmtSignedPnl(leg.pnlUsd, leg.pnlPct, locale) ??
+                                  t("positions.noData"),
+                              })}
+                            </span>
+                          ) : null}
+                        </span>
+                      ) : null}
                     </li>
-                  ))}
+                    );
+                  })}
                 </ul>
               </li>
             );

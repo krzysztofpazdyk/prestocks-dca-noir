@@ -1,12 +1,13 @@
 {
-  "name": "prestocks-ui-noir",
+  "name": "prestocks-dca-noir",
   "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
     "build": "node scripts/static-export.mjs",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "node --experimental-strip-types --import ./scripts/test-register.mjs --test scripts/*.test.ts"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",

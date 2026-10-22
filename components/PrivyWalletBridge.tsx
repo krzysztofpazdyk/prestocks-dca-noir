@@ -6,6 +6,7 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
@@ -24,7 +25,18 @@ import {
   Transaction,
   VersionedTransaction,
 } from "@solana/web3.js";
+import { TxNotice } from "@/components/TxNotice";
+import { translate, useI18n } from "@/lib/i18n";
+import { getLocaleSnapshot } from "@/lib/locale-store";
 import { PRIVY_SOLANA_CHAIN, privyAppId } from "@/lib/privy-devnet";
+import {
+  beginPrivySign,
+  endPrivySign,
+  getPrivySigningServerSnapshot,
+  getPrivySigningSnapshot,
+  privySignSuccessUi,
+  subscribePrivySigning,
+} from "@/lib/privy-sign-ui";
 import { PRIVY_WALLET_NAME } from "@/lib/privy-embedded-adapter";
 import { registerWallet } from "@/lib/privy-register-wallet";
 import {
@@ -37,6 +49,10 @@ import {
   setPrivyWalletDelegate,
 } from "@/lib/privy-wallet-delegate";
 import { hasForeignSignature } from "@/lib/privy-blockhash";
+import {
+  commitLatestRef,
+  useIsomorphicLayoutEffect,
+} from "@/lib/hooks/useLatestRef";
 
 /** One registration per address. Wallet Standard ignores a second copy of the same object. */
 const registeredKeys = new Set<string>();
@@ -93,7 +109,6 @@ function clearFeePayerSignature(transaction: Transaction, feePayer: PublicKey) {
 export function PrivyWalletBridge({ children }: { children: ReactNode }) {
   const { connection } = useConnection();
   const connectionRef = useRef(connection);
-  connectionRef.current = connection;
   const { wallets: standardWallets } = useStandardWallets();
   const { wallets } = useWallets();
   const { signMessage: privySignMessage } = useSignMessage();
@@ -106,13 +121,18 @@ export function PrivyWalletBridge({ children }: { children: ReactNode }) {
   );
 
   const embeddedRef = useRef(embedded);
-  embeddedRef.current = embedded;
   const signMessageRef = useRef(privySignMessage);
-  signMessageRef.current = privySignMessage;
   const signTransactionRef = useRef(privySignTransaction);
-  signTransactionRef.current = privySignTransaction;
   const standardRef = useRef(standardWallets);
-  standardRef.current = standardWallets;
+  // Before the registration and delegate effects below, and before child
+  // useEffect. The ref is created with this render's value, then kept current.
+  useIsomorphicLayoutEffect(() => {
+    commitLatestRef(connectionRef, connection);
+    commitLatestRef(embeddedRef, embedded);
+    commitLatestRef(signMessageRef, privySignMessage);
+    commitLatestRef(signTransactionRef, privySignTransaction);
+    commitLatestRef(standardRef, standardWallets);
+  });
 
   const privyStandard = useMemo(
     () =>
@@ -159,7 +179,7 @@ export function PrivyWalletBridge({ children }: { children: ReactNode }) {
       address: current.address,
       signMessage: async (message) => {
         const wallet = embeddedRef.current;
-        if (!wallet) throw new Error("Brak portfela Privy.");
+        if (!wallet) throw new Error(translate(getLocaleSnapshot(), "privy.missingWallet"));
         const { signature } = await signMessageRef.current({
           message,
           wallet,
@@ -168,19 +188,29 @@ export function PrivyWalletBridge({ children }: { children: ReactNode }) {
       },
       signTransactionBytes: async (serialized) => {
         const wallet = embeddedRef.current;
-        if (!wallet) throw new Error("Brak portfela Privy.");
-        const { signedTransaction } = await signTransactionRef.current({
-          transaction: serialized,
-          wallet,
-          chain: PRIVY_SOLANA_CHAIN,
-        });
-        if (
-          !(signedTransaction instanceof Uint8Array) ||
-          signedTransaction.byteLength === 0
-        ) {
-          throw new Error("Privy nie zwrócił podpisanej transakcji.");
+        if (!wallet) throw new Error(translate(getLocaleSnapshot(), "privy.missingWallet"));
+        // Success copy only. showWalletUIs stays untouched so Approve remains.
+        // Privy resolves this promise when the user closes the success screen.
+        beginPrivySign();
+        try {
+          const { signedTransaction } = await signTransactionRef.current({
+            transaction: serialized,
+            wallet,
+            chain: PRIVY_SOLANA_CHAIN,
+            options: {
+              uiOptions: privySignSuccessUi(getLocaleSnapshot()),
+            },
+          });
+          if (
+            !(signedTransaction instanceof Uint8Array) ||
+            signedTransaction.byteLength === 0
+          ) {
+            throw new Error(translate(getLocaleSnapshot(), "privy.noSignedTx"));
+          }
+          return signedTransaction;
+        } finally {
+          endPrivySign();
         }
-        return signedTransaction;
       },
     });
     return () => setPrivyWalletDelegate(null);
@@ -200,7 +230,7 @@ export function PrivyWalletBridge({ children }: { children: ReactNode }) {
     async function requireDelegate() {
       const delegate = getPrivyWalletDelegate();
       if (!delegate || delegate.address !== publicKey.toBase58()) {
-        throw new Error("Portfel Privy nie jest gotowy do podpisu.");
+        throw new Error(translate(getLocaleSnapshot(), "privy.notReadyToSign"));
       }
       return delegate;
     }
@@ -290,4 +320,18 @@ export function useKeeperSignMessage():
 
 export function privyWalletEnabled(): boolean {
   return privyAppId().length > 0;
+}
+
+/** Pending line while Privy is still holding the signature. */
+export function PrivySignWaitNotice({ className = "" }: { className?: string }) {
+  const signing = useSyncExternalStore(
+    subscribePrivySigning,
+    getPrivySigningSnapshot,
+    getPrivySigningServerSnapshot,
+  );
+  const { t } = useI18n();
+  if (!signing) return null;
+  return (
+    <TxNotice message={t("privy.signWait")} tone="pending" className={className} />
+  );
 }

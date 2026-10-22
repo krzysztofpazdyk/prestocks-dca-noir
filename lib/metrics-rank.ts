@@ -6,6 +6,8 @@
  */
 
 import { filterProducts, readExclusions } from "@/lib/exclusions";
+import { shown } from "@/lib/i18n";
+import { premiumBasisFor } from "@/lib/premium-view";
 import type { RankPrefs } from "@/lib/rank-prefs";
 import {
   filterExpired,
@@ -51,7 +53,9 @@ export function metricsRank(
   const scores: RankRow[] = filtered.map((p) => {
     let score = 50;
     if (premiumsMatter) {
-      score -= Number(p.premium_pct);
+      const premium =
+        p.premium_source === "jupiter_stockdata" ? Number(p.premium_pct) : 0;
+      score -= Number.isFinite(premium) ? premium : 0;
       if (p.near_ipo && nearIpoBoost) score += 8;
     }
     score = Math.max(0, Math.min(100, score));
@@ -65,12 +69,13 @@ export function metricsRank(
   scores.sort((a, b) => b.score - a.score);
   return {
     mode: "metrics_fallback",
-    sourceLabel: "Źródło: metryki (bez AI — awaria Jev)",
+    sourceLabel: shown("rank.source.metricsJevDown"),
     pipeline: ["prestocks", "metrics_rank"],
     top3: scores.slice(0, 3),
     scores,
     products: filtered,
     grok: { skipped: true, reason: "metrics_fallback" },
     fetchedAt: new Date().toISOString(),
+    premiumBasis: premiumBasisFor("client", premiumsMatter),
   };
 }

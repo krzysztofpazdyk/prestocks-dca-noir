@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { PublicKey } from "@solana/web3.js";
-import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import type { Connection } from "@solana/web3.js";
 import type { Program } from "@coral-xyz/anchor";
 import {
@@ -71,7 +70,7 @@ test("vault and owner USDC reads reject transport errors and return null when th
   );
 });
 
-test("SOL balance rejects, and one missing ATA does not hide another token RPC error", async () => {
+test("SOL balance rejects, and a token-balance 503 stays a soft unknown", async () => {
   const ownerKey = PublicKey.unique();
   await assert.rejects(
     () =>
@@ -86,30 +85,17 @@ test("SOL balance rejects, and one missing ATA does not hide another token RPC e
     /failed to fetch/,
   );
 
-  const missingMint = PublicKey.unique();
-  const badMint = PublicKey.unique();
-  const missingAta = getAssociatedTokenAddressSync(
-    missingMint,
+  const read = await fetchMockTokenBalances(
+    connectionWith({
+      getMultipleAccountsInfo: async () => {
+        throw new Error("503");
+      },
+    }),
     ownerKey,
-    false,
-    TOKEN_PROGRAM_ID,
+    [{ name: "Down", mint: PublicKey.unique() }],
   );
-  const badAta = getAssociatedTokenAddressSync(badMint, ownerKey, false, TOKEN_PROGRAM_ID);
-  const connection = connectionWith({
-    getTokenAccountBalance: async (ata: PublicKey) => {
-      if (ata.equals(missingAta)) throw new Error("could not find account");
-      if (ata.equals(badAta)) throw new Error("503");
-      throw new Error("unexpected ata");
-    },
-  });
-  await assert.rejects(
-    () =>
-      fetchMockTokenBalances(connection, ownerKey, [
-        { name: "Missing", mint: missingMint },
-        { name: "Down", mint: badMint },
-      ]),
-    /503/,
-  );
+  assert.equal(read.status, "unknown");
+  assert.equal(read.detail, "balances.warning");
 });
 
 test("an RPC error is status error for a known account and for an unknown one", () => {

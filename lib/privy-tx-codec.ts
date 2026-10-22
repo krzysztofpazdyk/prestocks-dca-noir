@@ -3,6 +3,7 @@ import {
   Transaction,
   VersionedTransaction,
 } from "@solana/web3.js";
+import { shown } from "@/lib/i18n";
 
 /**
  * Privy `signTransaction` takes encoded bytes and returns bytes.
@@ -27,7 +28,7 @@ export function signedBytesToTransaction<
   T extends Transaction | VersionedTransaction,
 >(original: T, signed: Uint8Array, feePayer: PublicKey): T {
   if (!(signed instanceof Uint8Array) || signed.byteLength === 0) {
-    throw new Error("Privy nie zwrócił podpisanej transakcji.");
+    throw new Error(shown("privy.noSignedTx"));
   }
   if (original instanceof VersionedTransaction) {
     if (signed.byteLength === 64) {
@@ -52,7 +53,7 @@ export function signedBytesToTransaction<
 
 export function signatureBytesFromPrivy(signature: Uint8Array): Uint8Array {
   if (!(signature instanceof Uint8Array) || signature.byteLength === 0) {
-    throw new Error("Privy nie zwrócił bajtów podpisu.");
+    throw new Error(shown("privy.noSignatureBytes"));
   }
   return signature;
 }

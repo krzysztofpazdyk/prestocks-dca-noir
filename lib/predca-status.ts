@@ -1,3 +1,4 @@
+import { shown } from "@/lib/i18n";
 import type { MockTokenBalance, RunRecordData, UserConfigData } from "@/lib/predca";
 
 export type PredcaStatus =
@@ -19,6 +20,15 @@ export type PredcaSnapshot = {
   tokenBalances: MockTokenBalance[];
   runs: RunRecordData[];
   rpcError: string | null;
+  /** i18n key. Token ATA read failed softly; previous balances stay. */
+  balanceWarning?: string | null;
+  /** i18n key. At least one run has no confirmed RunPrice yet. */
+  priceWarning?: string | null;
+  /**
+   * i18n key. A refresh read timed out. Previous snapshot stays.
+   * Not `rpcError`: a slow Devnet read must not block a manual buy.
+   */
+  rpcWarning?: string | null;
 };
 
 export const EMPTY_SNAPSHOT: PredcaSnapshot = {
@@ -32,6 +42,9 @@ export const EMPTY_SNAPSHOT: PredcaSnapshot = {
   rpcError: null,
 };
 
+/** i18n key for a timed-out refresh that kept the previous snapshot. */
+export const RPC_TIMEOUT_WARNING_KEY = "rpc.timeoutWarning";
+
 export type RefreshOutcome =
   | {
       ok: true;
@@ -40,17 +53,31 @@ export type RefreshOutcome =
       ownerUsdc: number | null;
       solBalance: number | null;
       tokenBalances: MockTokenBalance[];
+      /** Keep `prev.tokenBalances` and set a non-blocking warning. */
+      tokenBalancesStale?: boolean;
       runs: RunRecordData[];
     }
-  | { ok: false; error: string };
+  | { ok: false; error: string; soft?: false }
+  | { ok: false; soft: true; warning?: string };
 
-/** Success replaces the snapshot. Failure keeps the last-known fields and sets rpcError. */
+/**
+ * Success replaces the snapshot and clears warnings.
+ * A hard failure keeps the last-known fields and sets rpcError.
+ * A soft timeout keeps the last-known fields, does not set rpcError, and
+ * sets `rpcWarning`. A previous `balanceWarning` stays until a successful read.
+ */
 export function nextSnapshotAfterRefresh(
   prev: PredcaSnapshot,
   outcome: RefreshOutcome,
 ): PredcaSnapshot {
+  if (!outcome.ok && outcome.soft === true) {
+    return {
+      ...prev,
+      rpcWarning: outcome.warning ?? RPC_TIMEOUT_WARNING_KEY,
+    };
+  }
   if (!outcome.ok) {
-    return { ...prev, rpcError: outcome.error };
+    return { ...prev, rpcError: outcome.error, rpcWarning: null };
   }
   return {
     config: outcome.config,
@@ -58,9 +85,12 @@ export function nextSnapshotAfterRefresh(
     vaultUsdc: outcome.vaultUsdc,
     ownerUsdc: outcome.ownerUsdc,
     solBalance: outcome.solBalance,
-    tokenBalances: outcome.tokenBalances,
+    tokenBalances: outcome.tokenBalancesStale ? prev.tokenBalances : outcome.tokenBalances,
     runs: outcome.runs,
     rpcError: null,
+    balanceWarning: outcome.tokenBalancesStale ? "balances.warning" : null,
+    priceWarning: null,
+    rpcWarning: null,
   };
 }
 
@@ -116,5 +146,6 @@ export function withdrawUi(
   return "hidden";
 }
 
-export const RPC_READ_ERROR_MSG =
-  "Brak połączenia z RPC Devnet — nie udało się odczytać konta. Dane mogą być nieaktualne. Kliknij Odśwież.";
+export function rpcReadErrorMessage(): string {
+  return shown("predca.rpcReadError");
+}

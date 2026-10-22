@@ -1,38 +1,38 @@
 {
   "cluster": "devnet",
-  "usdc_mint": "99UbouJx2ZTLThQkqxrQGLZkDAYAn9vv8n6qnQh5f4Sw",
-  "mint_authority_pda": "8rLFWJLS2u25dSXrEsaxvDe2umg6hyzTCP91LKvYHe1u",
-  "program_id": "HajLzgcp6fyHVgVLFtwujnU53re47PSMJcQZZes8ZvbU",
+  "usdc_mint": "3xtTBfHRf8AKEmhbFYqRoXfi9RaxxiqG9YfifjCjD4qm",
+  "mint_authority_pda": "AN9m7fyUFGXCR7n21DLvG5CHCuQJyC6cXdy4yAHxEhRD",
+  "program_id": "Eb3TFLeYi3dHZwoKCBvvUpx3gMnP2XdmMXX3rstUpdwC",
   "decimals": 6,
   "mints": [
     {
       "name": "SpaceX",
-      "mint": "BdgMgZMNjuDnNbqQWXePAx5XhtkzMmyEx1dYBdezA7Ez",
+      "mint": "6CeRGMDMex7utcfKqwXnXncqcWYkKYss7SuocJi1oMQn",
       "symbol": "SPACEX"
     },
     {
       "name": "Anthropic",
-      "mint": "2yqHN6bCAJZHngGuRnuTKBB43F2S6GGLAJqgwZ4WVXT1",
+      "mint": "3MFLVffGvwRVpo4iGvALruCwZmQQvSDuwyFqgiaknZ5V",
       "symbol": "ANTHROPIC"
     },
     {
       "name": "Anduril",
-      "mint": "3EV3AmLvT38ttTaYJdTYg2oR32rM3GZZHFFr2zByky52",
+      "mint": "Hh6CgEFaJuUgAKfg9MDPosqaSdHVDnkKe4rgPWz2Evn7",
       "symbol": "ANDURIL"
     },
     {
       "name": "OpenAI",
-      "mint": "31oc45vupHAFmxs9LzwG9z1RcMGUypRBZxvwZEga3dC9",
+      "mint": "rFakiZmgJhHxTuUzo33KEyWxv5fCGjeBX1py3u3FrUR",
       "symbol": "OPENAI"
     },
     {
       "name": "Neuralink",
-      "mint": "5Uyshjsz9nh3q15mBy2KcximwTsT7do7xhwcv2WqEuBP",
+      "mint": "4MVpmbXoJuEzdtXjFZ2o5mVQ1pKJnzrDBTmdp3kYTfLb",
       "symbol": "NEURALINK"
     },
     {
       "name": "Figure AI",
-      "mint": "F4zN87F1Pcz4etSBL2QmehrjQ2A5E94T8sSYi4j63KDx",
+      "mint": "Ea2yntPKjKE5Ako2qBX5axHi9dr1bcsGSYENjpZjeUak",
       "symbol": "FIGUREAI",
       "aliases": [
         "FigureAI",
@@ -42,12 +42,12 @@
     },
     {
       "name": "Kalshi",
-      "mint": "ibWmc5V4LfcM4rGnh7nsNFVixsfSMFwhHWjUHDe13zY",
+      "mint": "5SBgs3rTmYk54PhiK3yrXxWDVjFZYJCx2UhbuppwVZkx",
       "symbol": "KALSHI"
     },
     {
       "name": "Polymarket",
-      "mint": "7t9CoqXDVb3j7aRHFqa5BVuXz8p7CCUDatGMa275yPe7",
+      "mint": "CiGa3tzhgK2dAK5GhCYyhdZ7WCvnaipJBFiMbbENy39m",
       "symbol": "POLYMARKET"
     }
   ],
@@ -58,5 +58,6 @@
     "total_debit": "amount_each * 3 (remainder stays in vault)"
   },
   "universe_note": "Active PreStocks from API excluding xAI; display name 'Figure AI' aliases FigureAI/FIGUREAI for UI universe.ts keys",
-  "name_lookup": "case-insensitive; spaces ignored (Figure AI == FigureAI == FIGUREAI)"
+  "name_lookup": "case-insensitive; spaces ignored (Figure AI == FigureAI == FIGUREAI)",
+  "note": "predca 3.0 fresh mocks (program Eb3TFLey...). USDC mint authority = devnet payer/faucet; stock mints authority = mint_auth PDA of the new program."
 }

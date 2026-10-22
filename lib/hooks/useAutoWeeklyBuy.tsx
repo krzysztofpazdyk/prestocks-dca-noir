@@ -45,7 +45,14 @@ import {
   type AutoBuyBlockReason,
   type EnableStatusBaseline,
 } from "@/lib/auto-weekly-buy";
+import { presentAutoBuyError } from "@/lib/auto-buy-error";
 import { useI18n } from "@/lib/i18n";
+import { formatDollars, formatGrouped } from "@/lib/number-format";
+import { isVaultLowReason } from "@/lib/vault-low-reason";
+import {
+  commitLatestRef,
+  useIsomorphicLayoutEffect,
+} from "@/lib/hooks/useLatestRef";
 import { usePredca } from "@/lib/hooks/usePredca";
 import { keeperEnabledForConnectedOwner } from "@/lib/keeper-enabled";
 import { unresolvedSignatureBlocksTx } from "@/lib/vault-follow-up";
@@ -107,22 +114,28 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
   const [due, setDue] = useState(false);
   const [keeperMode, setKeeperMode] = useState<KeeperMode | null>(null);
 
+  const ownerKey = publicKey?.toBase58() ?? null;
+  // These eight follow the latest render. The copy is a layout effect, so
+  // the status effect, tick, and sign callbacks below still see this render
+  // before they run. Initial values are the first render's values.
   const predcaRef = useRef(predca);
-  predcaRef.current = predca;
   const connectedRef = useRef(connected);
-  connectedRef.current = connected;
-  const ownerRef = useRef(publicKey?.toBase58() ?? null);
-  ownerRef.current = publicKey?.toBase58() ?? null;
+  const ownerRef = useRef(ownerKey);
   const signMessageRef = useRef(signMessage);
-  signMessageRef.current = signMessage;
   const enabledRef = useRef(enabled);
-  enabledRef.current = enabled;
   const tRef = useRef(t);
-  tRef.current = t;
   const localeRef = useRef(locale);
-  localeRef.current = locale;
-  const nextAtRef = useRef<number | null>(null);
-  nextAtRef.current = nextAt;
+  const nextAtRef = useRef(nextAt);
+  useIsomorphicLayoutEffect(() => {
+    commitLatestRef(predcaRef, predca);
+    commitLatestRef(connectedRef, connected);
+    commitLatestRef(ownerRef, ownerKey);
+    commitLatestRef(signMessageRef, signMessage);
+    commitLatestRef(enabledRef, enabled);
+    commitLatestRef(tRef, t);
+    commitLatestRef(localeRef, locale);
+    commitLatestRef(nextAtRef, nextAt);
+  });
   const ignoreOffUntilRef = useRef(0);
   /** Bumped on every publicKey change — ignore in-flight status/tick/startCycle. */
   const statusEpochRef = useRef(0);
@@ -140,7 +153,6 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
   const enablePendingOwnerRef = useRef<string | null>(null);
   const enableBaselineRef = useRef<EnableStatusBaseline | null>(null);
 
-  const ownerKey = publicKey?.toBase58() ?? null;
   const signReady = typeof signMessage === "function";
 
   const resetBannerState = useCallback(() => {
@@ -155,7 +167,8 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
 
   useEffect(() => {
     const prev = prevOwnerRef.current;
-    if (prev && prev !== ownerKey) {
+    const ownerChanged = prev !== ownerKey;
+    if (prev && ownerChanged) {
       // Disconnect drops every wallet. A switch drops only the one we left.
       if (!ownerKey) clearStatusAuthCache();
       else clearStatusAuthCache(prev);
@@ -167,12 +180,17 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
     enablePendingRef.current = false;
     enablePendingOwnerRef.current = null;
     enableBaselineRef.current = null;
-    // Drop the previous owner's On immediately. Status below corrects it.
-    resetBannerState();
-    setPrefsReady(false);
-    setKeeperMode(null);
     cycleInFlight = false;
     if (ownerKey) ignoreOffUntilRef.current = Date.now() + 2000;
+    // Drop the previous owner's On immediately. Status below corrects it.
+    // The first paint already starts cleared, so an unchanged owner (the
+    // no-wallet mount) does not set state again. A real switch still resets
+    // in this effect, before the status fetch below.
+    if (ownerChanged) {
+      resetBannerState();
+      setPrefsReady(false);
+      setKeeperMode(null);
+    }
   }, [ownerKey, resetBannerState]);
 
   useEffect(() => {
@@ -232,7 +250,7 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
             setPhase("error");
             setMessage(
               res.error?.includes("signature") || res.error?.includes("sign_")
-                ? `Podpis odrzucony: ${res.error}`
+                ? tRef.current("auto.signRejected", { error: res.error ?? "" })
                 : res.error || "Keeper disable failed",
             );
           }
@@ -258,11 +276,11 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
     if (!Number.isFinite(amount) || amount <= 0) {
       bannerHoldUntilRef.current = Date.now() + BANNER_HOLD_MS;
       setPhase("error");
-      setMessage("Budżet tygodniowy musi być > 0.");
+      setMessage(tRef.current("tx.err.budgetPositive"));
       return;
     }
-    // Snapshot. ownerRef updates on the wallet-switch render, before the
-    // status effect bumps the epoch. Failed-cycle cleanup must keep this pubkey.
+    // Snapshot. The layout effect has already copied this render's pubkey.
+    // The owner effect bumps the epoch after that. Cleanup must keep this pubkey.
     const cycleOwner = ownerRef.current;
     if (!cycleOwner) {
       bannerHoldUntilRef.current = Date.now() + BANNER_HOLD_MS;
@@ -281,7 +299,7 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
         bannerHoldUntilRef.current = Date.now() + BANNER_HOLD_MS;
         setPhase("blocked");
         setBlockReason("need_wallet");
-        setMessage("Portfel musi obsługiwać signMessage (włącz auto-buy wymaga podpisu).");
+        setMessage(tRef.current("auto.needSignMessage"));
         return;
       }
       writeWeeklyBudgetUsd(amount, cycleOwner);
@@ -334,7 +352,7 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
           setPhase("error");
           setMessage(
             predcaRef.current.lastTxError() ||
-              "Nie udało się zapisać kwoty tygodniowej.",
+              tRef.current("auto.weeklySaveFailed"),
           );
           return;
         }
@@ -383,7 +401,10 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
         void predcaRef.current.refresh();
         const nextBuyMs = keeperNextBuyAtMs(ran) ?? Date.now() + WEEK_MS;
         setNextAt(nextBuyMs);
-        const amountLabel = (ran.amountUsd ?? amount).toFixed(2);
+        const amountLabel = formatGrouped(ran.amountUsd ?? amount, {
+          min: 2,
+          max: 2,
+        });
         const tokensLabel = (ran.names ?? []).join(" · ");
         setMessage(
           tRef.current("auto.status.okWithNext", {
@@ -408,12 +429,12 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
         writeAutoWeeklyBuy(false, cleanupOwner);
         if (statusEpochRef.current !== epoch) return;
         setPhase("error");
-        const vaultish = /vault|USDC|za mało|Za mało|vault_low/i.test(reason);
+        const vaultish = isVaultLowReason(reason);
         setMessage(
           vaultish
             ? tRef.current("auto.status.vaultLow", {
                 have: "?",
-                need: amount.toFixed(2),
+                need: formatDollars(amount),
               })
             : tRef.current("auto.status.error", { reason }),
         );
@@ -496,7 +517,7 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
           String(err).includes("403") ||
           String(err).includes("401")
         ) {
-          throw new Error(`Podpis odrzucony: ${err}`);
+          throw new Error(tRef.current("auto.signRejected", { error: String(err) }));
         }
         throw new Error(err);
       }
@@ -524,7 +545,7 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
       writeAutoWeeklyBuy(false, cleanupOwner);
       if (statusEpochRef.current !== epoch) return;
       setPhase("error");
-      const vaultish = /vault|USDC|za mało|Za mało|vault_low/i.test(reason);
+      const vaultish = isVaultLowReason(reason);
       setMessage(
         vaultish
           ? tRef.current("auto.status.vaultLow", {
@@ -584,7 +605,7 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
         if (st.amountUsd != null && st.names) {
           setMessage(
             tRef.current("auto.status.okWithNext", {
-              amount: st.amountUsd.toFixed(2),
+              amount: formatGrouped(st.amountUsd, { min: 2, max: 2 }),
               tokens: st.names.join(" · "),
               nextBuy: formatWarsawWhen(nextBuyMs, localeRef.current),
             }),
@@ -675,7 +696,7 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
       }
       if (st.amountUsd != null && st.names) {
         const nextBuy = nextBuyMs ?? nextAtRef.current;
-        const amountLabel = st.amountUsd.toFixed(2);
+        const amountLabel = formatGrouped(st.amountUsd, { min: 2, max: 2 });
         const tokensLabel = st.names.join(" · ");
         setMessage(
           nextBuy != null
@@ -775,6 +796,16 @@ export function AutoWeeklyBuyProvider({ children }: { children: ReactNode }) {
 export function AutoWeeklyBuyBanner() {
   const value = useAutoWeeklyBuy();
   const { t } = useI18n();
+  const errorView =
+    value.phase === "error" && value.message
+      ? presentAutoBuyError(value.message, t)
+      : null;
+
+  useEffect(() => {
+    if (!errorView?.title) return;
+    console.debug("auto-buy error", errorView.title);
+  }, [errorView?.title]);
+
   const showBanner =
     value.phase === "ranking" ||
     value.phase === "buying" ||
@@ -782,9 +813,16 @@ export function AutoWeeklyBuyBanner() {
     value.phase === "error" ||
     (value.phase === "ok" && value.message != null);
   if (!showBanner || !value.message) return null;
+  const text =
+    value.phase === "ranking"
+      ? t("auto.banner.ranking")
+      : value.phase === "buying"
+        ? value.message || t("auto.banner.buying")
+        : (errorView?.text ?? value.message);
   return (
     <div
       role="status"
+      title={errorView?.title}
       className={`border-b px-4 py-2 text-center text-xs ${
         value.phase === "error"
           ? "border-[#f8717133] bg-[#f8717111] text-[#fca5a5]"
@@ -793,11 +831,7 @@ export function AutoWeeklyBuyBanner() {
             : "border-[#2dd4bf33] bg-[#2dd4bf11] text-[#2dd4bf]"
       }`}
     >
-      {value.phase === "ranking"
-        ? t("auto.banner.ranking")
-        : value.phase === "buying"
-          ? value.message || t("auto.banner.buying")
-          : value.message}
+      {text}
     </div>
   );
 }

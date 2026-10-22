@@ -1,8 +1,23 @@
 /** Predca keeper client — public HTTPS (rank API /keeper proxy) + wallet sig auth. */
 
+import {
+  ensureRuntimeConfig,
+  runtimeDcaApiUrl,
+  runtimeKeeperUrl,
+} from "@/lib/runtime-config";
+
 const DEFAULT_KEEPER = "http://127.0.0.1:8792";
 
-function keeperUrl(): string {
+/**
+ * runtime keeperUrl, else runtime API + /keeper,
+ * else NEXT_PUBLIC_KEEPER_URL, else NEXT_PUBLIC_DCA_API_URL + /keeper,
+ * else local default.
+ */
+export function keeperUrl(): string {
+  const runtimeKeeper = runtimeKeeperUrl().trim().replace(/\/$/, "");
+  if (runtimeKeeper) return runtimeKeeper;
+  const runtimeDca = runtimeDcaApiUrl().trim().replace(/\/$/, "");
+  if (runtimeDca) return `${runtimeDca}/keeper`;
   const fromEnv = (process.env.NEXT_PUBLIC_KEEPER_URL ?? "").trim().replace(/\/$/, "");
   if (fromEnv) return fromEnv;
   const dca = (process.env.NEXT_PUBLIC_DCA_API_URL ?? "").trim().replace(/\/$/, "");
@@ -138,8 +153,11 @@ function parseExpiresFromMessage(message: string): number {
   return m ? Number(m[1]) : 0;
 }
 
+/** Origin-shared with noir/noir2. Do not read the unprefixed keeper session key. */
+export const KEEPER_SESSION_PREFIX = "noir3.predca.keeper.session.";
+
 function sessionStorageKey(owner: string): string {
-  return `predca.keeper.session.${owner.trim()}`;
+  return `${KEEPER_SESSION_PREFIX}${owner.trim()}`;
 }
 
 function readStoredSession(owner: string): SessionCached | null {
@@ -190,7 +208,7 @@ function removeStoredSession(owner?: string): void {
   try {
     if (owner) localStorage.removeItem(sessionStorageKey(owner));
     else {
-      const prefix = "predca.keeper.session.";
+      const prefix = KEEPER_SESSION_PREFIX;
       for (let i = localStorage.length - 1; i >= 0; i--) {
         const k = localStorage.key(i);
         if (k && k.startsWith(prefix)) localStorage.removeItem(k);
@@ -369,6 +387,7 @@ async function keeperFetch(
   init?: RequestInit,
   timeoutMs = 90000,
 ): Promise<KeeperTransport> {
+  await ensureRuntimeConfig();
   const ctrl = new AbortController();
   const t = window.setTimeout(() => ctrl.abort(), timeoutMs);
   try {

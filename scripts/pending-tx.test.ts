@@ -8,6 +8,7 @@ import { autoToggleBlocked } from "../lib/auto-weekly-buy";
 import {
   DUPLICATE_GUARD_KINDS,
   EXPIRY_TIME_FALLBACK_MS,
+  PENDING_TX_LS_PREFIX,
   PENDING_TX_MAX_AGE_MS,
   checkPendingOnce,
   decidePendingVerdict,
@@ -224,8 +225,9 @@ test("pending records survive a new session, then leave storage when the verdict
 test("stale and corrupt pending records are dropped, and storage keeps five newest signatures", () => {
   const storage = memStorage();
   const fresh = rec({ signature: sig(9), createdAtMs: 10_000 });
+  assert.equal(PENDING_TX_LS_PREFIX, "noir3.predca.pendingTx.v1.");
   storage.setItem(
-    `predca.pendingTx.v1.${OWNER}`,
+    `${PENDING_TX_LS_PREFIX}${OWNER}`,
     JSON.stringify([
       fresh,
       { nope: true },
@@ -236,7 +238,7 @@ test("stale and corrupt pending records are dropped, and storage keeps five newe
   const kept = readPendingRecords(storage, OWNER, 10_000);
   assert.deepEqual(kept.map((row) => row.signature), [fresh.signature]);
 
-  storage.setItem(`predca.pendingTx.v1.${OWNER}`, "{not json");
+  storage.setItem(`${PENDING_TX_LS_PREFIX}${OWNER}`, "{not json");
   assert.deepEqual(readPendingRecords(storage, OWNER, 10_000), []);
 
   for (let i = 0; i < 6; i++) {

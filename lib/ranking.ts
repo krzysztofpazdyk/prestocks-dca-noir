@@ -7,11 +7,14 @@
  */
 
 import { runByokAiRank } from "@/lib/ai-rank";
+import { shown, translate } from "@/lib/i18n";
+import { getLocaleSnapshot } from "@/lib/locale-store";
 import {
   filterExpired,
   filterIpoCompleted,
   filterProducts,
   readRankPrefs,
+  type RankPrefs,
 } from "@/lib/rank-prefs";
 import {
   emergencyFromProducts,
@@ -31,26 +34,139 @@ import {
 } from "@/lib/keys";
 import {
   fetchPrestocksProducts,
+  fillNoticeVars,
   type ProductsFetchResult,
 } from "@/lib/prestocks";
 import type { RankResult } from "@/lib/universe";
 
-function saveRankSession(rank: RankResult) {
+type RankStore = {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+};
+
+type RankSessionSnap = { raw: string | null };
+
+const RANK_SERVER_SNAP: RankSessionSnap = { raw: null };
+let rankRaw: string | null | undefined;
+let rankSnap: RankSessionSnap = RANK_SERVER_SNAP;
+const rankListeners = new Set<() => void>();
+
+/** Stable fingerprint: sorted exclusions plus the four ranking flags. */
+export function rankPrefsKey(prefs: RankPrefs = readRankPrefs()): string {
+  const exclusions = [...prefs.exclusions].sort((a, b) => a.localeCompare(b, "en"));
+  return JSON.stringify([
+    exclusions,
+    prefs.deadlinesUnimportant,
+    prefs.premiumsMatter,
+    prefs.premiumsEspeciallyNearIpo,
+    prefs.buyDespiteIpo,
+  ]);
+}
+
+export function parseRankSession(
+  raw: string | null,
+  prefsKeyNow: string,
+): { rank: RankResult; savedAt: number } | null {
+  if (!raw) return null;
   try {
-    sessionStorage.setItem(SS_RANK, JSON.stringify(rank));
+    const parsed = JSON.parse(raw) as {
+      v?: unknown;
+      rank?: RankResult;
+      prefsKey?: unknown;
+      savedAt?: unknown;
+    };
+    if (!parsed || parsed.v !== 2 || !parsed.rank || typeof parsed.rank !== "object") {
+      return null;
+    }
+    if (parsed.prefsKey !== prefsKeyNow) return null;
+    if (typeof parsed.savedAt !== "number" || !Number.isFinite(parsed.savedAt)) return null;
+    return { rank: parsed.rank, savedAt: parsed.savedAt };
+  } catch {
+    return null;
+  }
+}
+
+export function saveRankSession(rank: RankResult, storage?: RankStore) {
+  const envelope = {
+    v: 2 as const,
+    rank,
+    prefsKey: rankPrefsKey(),
+    savedAt: Date.now(),
+  };
+  const raw = JSON.stringify(envelope);
+  try {
+    (storage ?? sessionStorage).setItem(SS_RANK, raw);
+    if (!storage) {
+      rankRaw = raw;
+      rankSnap = { raw };
+      for (const listener of rankListeners) listener();
+    }
   } catch {
     /* ignore */
   }
 }
 
-function loadRankSession(): RankResult | null {
+export function restoreRankSession(
+  prefsKeyNow: string,
+  storage?: RankStore,
+): { rank: RankResult; savedAt: number } | null {
   try {
-    const raw = sessionStorage.getItem(SS_RANK);
-    if (!raw) return null;
-    return JSON.parse(raw) as RankResult;
+    const store = storage ?? (typeof sessionStorage === "undefined" ? null : sessionStorage);
+    if (!store) return null;
+    return parseRankSession(store.getItem(SS_RANK), prefsKeyNow);
   } catch {
     return null;
   }
+}
+
+function loadRankSession(): RankResult | null {
+  return restoreRankSession(rankPrefsKey())?.rank ?? null;
+}
+
+export function rankSessionClientSnapshot(): RankSessionSnap {
+  let raw: string | null = null;
+  try {
+    raw = sessionStorage.getItem(SS_RANK);
+  } catch {
+    raw = null;
+  }
+  if (rankRaw !== undefined && raw === rankRaw) return rankSnap;
+  rankRaw = raw;
+  rankSnap = { raw };
+  return rankSnap;
+}
+
+export function rankSessionServerSnapshot(): RankSessionSnap {
+  return RANK_SERVER_SNAP;
+}
+
+export function subscribeRankSession(onStoreChange: () => void): () => void {
+  rankListeners.add(onStoreChange);
+  if (typeof window === "undefined") {
+    return () => {
+      rankListeners.delete(onStoreChange);
+    };
+  }
+  const onStorage = (event: StorageEvent) => {
+    if (event.key != null && event.key !== SS_RANK) return;
+    rankRaw = undefined;
+    onStoreChange();
+  };
+  window.addEventListener("storage", onStorage);
+  return () => {
+    rankListeners.delete(onStoreChange);
+    window.removeEventListener("storage", onStorage);
+  };
+}
+
+function productsNotice(result: ProductsFetchResult): string | null {
+  if (!result.errorKey) return result.errorPl;
+  const locale = getLocaleSnapshot();
+  return translate(
+    locale,
+    result.errorKey,
+    fillNoticeVars(result.errorVars, (key, vars) => translate(locale, key, vars)),
+  );
 }
 
 export async function loadInitialRanking(): Promise<{
@@ -60,7 +176,7 @@ export async function loadInitialRanking(): Promise<{
 }> {
   const productsResult = await fetchPrestocksProducts();
   let rank: RankResult | null = null;
-  let error: string | null = productsResult.errorPl;
+  let error: string | null = productsNotice(productsResult);
 
   if (dcaApiBase()) {
     try {
@@ -95,7 +211,7 @@ export async function runRankingNow(
     prefs.deadlinesUnimportant,
   );
   if (products.length < 3) {
-    throw new Error("Za mało produktów PreStocks do rankingu (<3).");
+    throw new Error(shown("msg.tooFewProducts"));
   }
 
   const byok = hasByokTypesafe();
@@ -145,7 +261,9 @@ export async function runRankingNow(
         saveRankSession(byokFallback);
         return byokFallback;
       }
-      const reason = `Hosted Jev niedostępny (${e instanceof Error ? e.message : e}). Awaryjny ranking metryczny.`;
+      const reason = shown("rank.err.hostedDown", {
+        error: e instanceof Error ? e.message : String(e),
+      });
       const fallback = emergencyFromProducts(
         products,
         reason,
@@ -163,8 +281,8 @@ export async function runRankingNow(
   }
 
   const reason = byok
-    ? "Brak NEXT_PUBLIC_DCA_API_URL i brak same-origin /api/jev — Jev nie może wystartować. Awaryjny ranking metryczny."
-    : "Wymagany klucz TypeSafe (BYOK) do Jev — brak darmowego hosted Jev. Awaryjny ranking metryczny.";
+    ? shown("rank.err.noApiNoProxy")
+    : shown("rank.err.byokRequired");
   const fallback = emergencyFromProducts(
     products,
     reason,
@@ -175,12 +293,24 @@ export async function runRankingNow(
   return fallback;
 }
 
+/** Backup ranking that scored every name the same. Hosted AI is never flat. */
+export function isFlatFallback(rank: RankResult | null | undefined): boolean {
+  if (!rank || rank.mode !== "metrics_fallback") return false;
+  const top = rank.top3 ?? [];
+  if (top.length < 2) return false;
+  const first = top[0]?.score;
+  if (typeof first !== "number" || !Number.isFinite(first)) return false;
+  return top.every(
+    (row) => typeof row.score === "number" && Math.abs(row.score - first) < 1e-9,
+  );
+}
+
 export function activeModeLabel(
   rank: RankResult | null,
   hasByok: boolean,
 ): string {
   if (rank?.sourceLabel) return rank.sourceLabel;
-  if (hasByok) return "Źródło: PreStocks + AI (BYOK) — czekam na ranking";
+  if (hasByok) return shown("rank.source.waiting");
   // Without client TypeSafe BYOK we never call hosted Jev — do not claim hosted.
-  return "Źródło: PreStocks — brak TypeSafe BYOK (wymagany do Jev)";
+  return shown("rank.source.noByok");
 }

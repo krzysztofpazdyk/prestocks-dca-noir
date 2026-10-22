@@ -1,5 +1,6 @@
 import { AnchorProvider, BN, Program } from "@coral-xyz/anchor";
 import {
+  AccountLayout,
   ASSOCIATED_TOKEN_PROGRAM_ID,
   createAssociatedTokenAccountIdempotentInstruction,
   getAssociatedTokenAddressSync,
@@ -13,29 +14,40 @@ import {
 } from "@solana/web3.js";
 import idl from "@/idl/predca.json";
 import type { Predca } from "@/types/predca";
+import {
+  isRpcTimeout,
+  readTimeoutMs,
+  RPC_READ_TIMEOUT_MS,
+  withTimeout,
+} from "@/lib/rpc-timeout";
+import { shown, translate } from "@/lib/i18n";
+import { formatDollars } from "@/lib/number-format";
 import { textKeepingSignature } from "@/lib/vault-follow-up";
 
 export const DEFAULT_PROGRAM_ID =
-  "HajLzgcp6fyHVgVLFtwujnU53re47PSMJcQZZes8ZvbU";
+  "Eb3TFLeYi3dHZwoKCBvvUpx3gMnP2XdmMXX3rstUpdwC";
 
 export const USDC_DECIMALS = 6;
 export const USDC_FACTOR = 1_000_000;
 
-/** Devnet mock USDC mint used by Predca (see .env.production). */
+/** Devnet mock USDC mint used by predca 3.0 (see .env.production). */
 export const MOCK_USDC_MINT =
-  "99UbouJx2ZTLThQkqxrQGLZkDAYAn9vv8n6qnQh5f4Sw";
+  "3xtTBfHRf8AKEmhbFYqRoXfi9RaxxiqG9YfifjCjD4qm";
 
-export const PREDCA_ERROR_PL: Record<number, string> = {
-  6000: "Brak uprawnień (Unauthorized).",
-  6001: "Kwota musi być większa od zera.",
-  6002: "Niewystarczające saldo w vault.",
-  6003: "Nieprawidłowy budżet tygodniowy (musi być > 0).",
-  6004: "Indeks RunRecord zajęty. Spróbuj ponownie.",
-  6005: "Mint authority musi być PDA mint_auth programu.",
-  6006: "Mint nie zgadza się z kontem w instrukcji.",
-  6007: "Duplikaty mintów w top-3.",
-  6008: "Za wcześnie: odczekaj 7 dni od ostatniego zakupu (TooSoon).",
-};
+const PREDCA_ERROR_CODES = [
+  6000, 6001, 6002, 6003, 6004, 6005, 6006, 6007,
+  6008, 6009, 6010, 6011, 6012, 6013, 6014, 6015,
+] as const;
+
+/** Polish program sentences. Values come from i18n so the wording stays one place. */
+export const PREDCA_ERROR_PL: Record<number, string> = Object.fromEntries(
+  PREDCA_ERROR_CODES.map((code) => [code, translate("pl", `auto.error.predca.${code}`)]),
+);
+
+function predcaErrorText(code: number): string | null {
+  if (!PREDCA_ERROR_PL[code]) return null;
+  return shown(`auto.error.predca.${code}`);
+}
 
 export function programId(): PublicKey {
   const raw =
@@ -162,6 +174,33 @@ export function runRecordPda(
   );
 }
 
+/** PriceFeed PDA. Seeds [b"price", mint]. Pass it explicitly — the IDL does not derive it. */
+export function priceFeedPda(
+  mint: PublicKey,
+  program: PublicKey = programId(),
+): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("price"), mint.toBuffer()],
+    program,
+  );
+}
+
+/**
+ * RunPrice PDA. Seeds [b"run_price", owner, run_index u64 LE].
+ * The program creates the account. Callers must pass it explicitly.
+ */
+export function runPricePda(
+  owner: PublicKey,
+  runIndex: number | BN,
+  program: PublicKey = programId(),
+): [PublicKey, number] {
+  const idx = BN.isBN(runIndex) ? runIndex : new BN(runIndex);
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("run_price"), owner.toBuffer(), idx.toArrayLike(Buffer, "le", 8)],
+    program,
+  );
+}
+
 export function getProgram(provider: AnchorProvider): Program<Predca> {
   const idlWithAddress = {
     ...idl,
@@ -172,7 +211,7 @@ export function getProgram(provider: AnchorProvider): Program<Predca> {
 
 export function dollarsToRaw(dollars: number): BN {
   if (!Number.isFinite(dollars) || dollars < 0) {
-    throw new Error("Nieprawidłowa kwota");
+    throw new Error(shown("tx.err.invalidAmount"));
   }
   return new BN(Math.round(dollars * USDC_FACTOR));
 }
@@ -185,10 +224,7 @@ export function rawToDollars(raw: BN | number | string | bigint): number {
 }
 
 export function formatUsd(amount: number, digits = 2): string {
-  return amount.toLocaleString("pl-PL", {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  });
+  return formatDollars(amount, digits);
 }
 
 export function ownerUsdcAta(owner: PublicKey, mint: PublicKey): PublicKey {
@@ -229,12 +265,64 @@ export function isMissingAccountError(e: unknown): boolean {
   return MISSING_ACCOUNT_RE.test(`${message}\n${String(e)}`);
 }
 
+/** status / statusCode on the error or on error.response. */
+export function httpStatusCode(err: unknown): number | null {
+  if (err == null || typeof err !== "object") return null;
+  const e = err as {
+    status?: unknown;
+    statusCode?: unknown;
+    response?: { status?: unknown; statusCode?: unknown };
+  };
+  const values = [e.status, e.statusCode, e.response?.status, e.response?.statusCode];
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string" && /^\d+$/.test(value)) return Number(value);
+  }
+  return null;
+}
+
+function errorMessageText(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (err && typeof err === "object" && "message" in err) {
+    return String((err as { message?: unknown }).message ?? "");
+  }
+  return String(err ?? "");
+}
+
+/**
+ * Transport and rate-limit failures. `\b429\b` does not match a digit run
+ * buried inside a signature. An object with status 429 counts even if the
+ * message never says 429. `RpcTimeoutError` counts: a hung read is a soft miss.
+ */
+export function isRateOrNetworkError(err: unknown): boolean {
+  if (isRpcTimeout(err)) return true;
+  if (httpStatusCode(err) === 429) return true;
+  const msg = errorMessageText(err);
+  if (/\b429\b/.test(msg) || /\b50[234]\b/.test(msg)) return true;
+  return /failed to fetch|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|Network request failed|fetch failed|too many requests|rate limit/i.test(
+    msg,
+  );
+}
+
+export function isRpcDisconnect(err: unknown, msg: string): boolean {
+  if (isRpcTimeout(err) || httpStatusCode(err) === 429) return true;
+  return (
+    /failed to fetch|ECONNREFUSED|Network request failed|fetch failed/i.test(msg) ||
+    /\b429\b/.test(msg)
+  );
+}
+
 export async function fetchUserConfig(
   program: Program<Predca>,
   owner: PublicKey,
+  timeoutMs?: number,
 ): Promise<UserConfigData | null> {
   const [pda] = userConfigPda(owner);
-  const acc = await program.account.userConfig.fetchNullable(pda);
+  const pending = program.account.userConfig.fetchNullable(pda);
+  const acc =
+    timeoutMs == null
+      ? await pending
+      : await withTimeout(pending, timeoutMs, "userConfig");
   if (!acc) return null;
   return acc as unknown as UserConfigData;
 }
@@ -251,6 +339,21 @@ export async function fetchVaultBalance(
     if (isMissingAccountError(e)) return null;
     throw e;
   }
+}
+
+/**
+ * Fresh vault balance wins. The on-screen number is used only when that one
+ * read fails with a rate limit or a dropped connection. Any other read error
+ * is rethrown, and a missing account (fresh null, no error) stays null.
+ */
+export function resolveVaultBalanceForBuy(
+  fresh: number | null,
+  screen: number | null,
+  readError: unknown | null,
+): number | null {
+  if (readError == null) return fresh;
+  if (isRateOrNetworkError(readError) && screen != null) return screen;
+  throw readError;
 }
 
 /** Vault read that never throws. A failed read is "unknown", not zero. */
@@ -290,7 +393,14 @@ export async function fetchOwnerUsdcBalance(
 export const RUN_RECORD_SCAN_CAP = 1024;
 const RUN_RECORD_BATCH = 100;
 
-export const RUN_INDEX_TAKEN_MSG = "Indeks RunRecord zajęty. Spróbuj ponownie.";
+/** Polish sentence kept for equality checks and messages saved earlier. */
+export const RUN_INDEX_TAKEN_MSG = translate("pl", "auto.error.predca.6004");
+
+/** Run-index collision copy in Polish, English, or the sentence saved earlier. */
+export function isRunIndexTakenMessage(text: string): boolean {
+  const raw = text.trim();
+  return raw === RUN_INDEX_TAKEN_MSG || raw === translate("en", "auto.error.predca.6004");
+}
 
 /** Index of the first null slot. `start` is the on-chain index of slots[0]. */
 export function firstFreeRunIndex(
@@ -326,7 +436,7 @@ export type RunRecordScan = {
 
 /**
  * Load RunRecords for owner by scanning PDA indices in batches.
- * Stops at the first missing account (simulate_buy / execute_buy use the
+ * Stops at the first missing account (simulate_buy_v2 / execute_buy_v2 use the
  * next free index). `scanCap` is an exclusive upper bound, not an inclusive
  * last index.
  */
@@ -396,7 +506,7 @@ export function formatTs(ts: BN | number): string {
 }
 
 export function parseAnchorError(err: unknown): string {
-  if (err == null) return "Nieznany błąd";
+  if (err == null) return shown("tx.err.unknown");
   const e = err as {
     error?: { errorCode?: { number?: number; code?: string }; errorMessage?: string };
     message?: string;
@@ -404,13 +514,14 @@ export function parseAnchorError(err: unknown): string {
   };
 
   const code = e.error?.errorCode?.number;
-  if (code != null && PREDCA_ERROR_PL[code]) {
-    return PREDCA_ERROR_PL[code];
+  if (code != null) {
+    const text = predcaErrorText(code);
+    if (text) return text;
   }
   if (e.error?.errorMessage) {
     const em = e.error.errorMessage;
     if (/RunRecord already exists|RunAlreadyExists/i.test(em)) {
-      return RUN_INDEX_TAKEN_MSG;
+      return shown("auto.error.predca.6004");
     }
     const mapped = mapCommonSolanaError(em);
     if (mapped) return mapped;
@@ -426,24 +537,25 @@ export function parseAnchorError(err: unknown): string {
   const m = msg.match(/Error Code: (\w+)\. Error Number: (\d+)/);
   if (m) {
     const num = Number(m[2]);
-    if (PREDCA_ERROR_PL[num]) return PREDCA_ERROR_PL[num];
+    const text = predcaErrorText(num);
+    if (text) return text;
     return `${m[1]} (${m[2]})`;
   }
   if (/User rejected|rejected the request/i.test(msg)) {
-    return "Transakcja odrzucona w portfelu.";
+    return shown("tx.err.walletRejected");
   }
-  if (
-    /failed to fetch|ECONNREFUSED|429|Network request failed|fetch failed/i.test(
-      msg,
-    )
-  ) {
+  if (isRpcDisconnect(err, msg)) {
     const raw = (e.message ?? String(err)).trim().slice(0, 120);
-    return (
-      `Brak połączenia z RPC (sprawdź NEXT_PUBLIC_RPC_URL / Devnet).` +
-      (raw ? ` [${raw}]` : "")
-    );
+    return shown("tx.err.rpcDown", { detail: raw ? ` [${raw}]` : "" });
   }
   const trimmed = (e.message ?? String(err)).trim();
+  if (isRunIndexTakenMessage(trimmed)) return shown("auto.error.predca.6004");
+  if (
+    trimmed === translate("pl", "tx.err.buyInFlight") ||
+    trimmed === translate("en", "tx.err.buyInFlight")
+  ) {
+    return shown("tx.err.buyInFlight");
+  }
   return textKeepingSignature(trimmed);
 }
 
@@ -453,11 +565,7 @@ function mapCommonSolanaError(msg: string): string | null {
     /insufficient funds|insufficient lamports|Error: Insufficient/i.test(msg) ||
     /Transfer: insufficient/i.test(msg)
   ) {
-    return (
-      `Niewystarczające środki (mock USDC). Potrzebujesz salda mock USDC ` +
-      `(mint ${mintHint}) na Devnet w ATA portfela. ` +
-      `Utwórz ATA i zrób mint/airdrop testowych tokenów, potem Wpłać.`
-    );
+    return shown("tx.err.insufficientMock", { mint: mintHint });
   }
   if (
     /could not find account|AccountNotFound|Account does not exist|InvalidAccountData|account not found/i.test(
@@ -465,18 +573,10 @@ function mapCommonSolanaError(msg: string): string | null {
     ) ||
     /failed to get account info|AccountOwnedByWrongProgram/i.test(msg)
   ) {
-    return (
-      `Brak konta tokenowego (ATA) dla mock USDC. ` +
-      `Na Devnet potrzebujesz ATA dla mint ${mintHint} ` +
-      `(np. spl-token create-account ${mintHint} / mint tokenów do portfela). ` +
-      `Jeśli Predca nie jest zainicjalizowane — najpierw Initialize.`
-    );
+    return shown("tx.err.missingAta", { mint: mintHint });
   }
   if (/Simulation failed/i.test(msg) && /custom program error: 0x1\b/i.test(msg)) {
-    return (
-      `Niewystarczające saldo mock USDC w portfelu (mint ${mintHint}). ` +
-      `Doładuj ATA przed wpłatą.`
-    );
+    return shown("tx.err.lowWalletUsdc", { mint: mintHint });
   }
   return null;
 }
@@ -494,45 +594,100 @@ export async function fetchSolBalance(
 export type MockTokenBalance = {
   name: string;
   mint: PublicKey;
-  /** Human amount (raw / 1e6). Devnet mock: 1 unit ≈ $1 USD. */
+  /** Human amount (raw / 1e6). Token count, not a market value. */
   amount: number;
   raw: bigint;
 };
 
+/** One getMultipleAccountsInfo batch. Devnet mock set is 8; cap is 100. */
+export const TOKEN_BALANCE_BATCH = 100;
+
+export type TokenBalanceRead = {
+  balances: MockTokenBalance[];
+  /** `unknown` keeps the previous balances. `error` may become rpcError. */
+  status: "ok" | "unknown" | "error";
+  /** i18n key when unknown; raw message when error. */
+  detail: string | null;
+};
+
+/** SPL token amount at byte 64. Null when the account cannot be decoded. */
+export function rawTokenAmount(data: Uint8Array): bigint | null {
+  try {
+    if (data.byteLength < AccountLayout.span) return null;
+    const decoded = AccountLayout.decode(
+      Buffer.from(data.buffer, data.byteOffset, data.byteLength),
+    );
+    const amount = decoded.amount;
+    if (typeof amount === "bigint") return amount;
+    if (typeof amount === "number" && Number.isFinite(amount)) return BigInt(Math.trunc(amount));
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Read owner ATAs for all Devnet mock PreStock mints.
- * Missing ATA → skip (treated as zero).
+ * Read owner ATAs for all Devnet mock PreStock mints in batches of 100.
+ * Missing account → 0. A 429/network failure or one undecodable account
+ * returns `unknown` instead of throwing the whole refresh away.
  */
 export async function fetchMockTokenBalances(
   connection: Connection,
   owner: PublicKey,
   entries: { name: string; mint: PublicKey }[],
-): Promise<MockTokenBalance[]> {
-  const out: MockTokenBalance[] = [];
-  await Promise.all(
-    entries.map(async ({ name, mint }) => {
-      const ata = getAssociatedTokenAddressSync(
-        mint,
-        owner,
-        false,
-        TOKEN_PROGRAM_ID,
+  opts?: { timeoutMs?: number },
+): Promise<TokenBalanceRead> {
+  const rows: MockTokenBalance[] = [];
+  const atas = entries.map(({ name, mint }) => ({
+    name,
+    mint,
+    ata: getAssociatedTokenAddressSync(mint, owner, false, TOKEN_PROGRAM_ID),
+  }));
+  const budget = opts?.timeoutMs ?? RPC_READ_TIMEOUT_MS;
+  const deadline = Date.now() + budget;
+  try {
+    for (let i = 0; i < atas.length; i += TOKEN_BALANCE_BATCH) {
+      const slice = atas.slice(i, i + TOKEN_BALANCE_BATCH);
+      const infos = await withTimeout(
+        connection.getMultipleAccountsInfo(slice.map((row) => row.ata)),
+        readTimeoutMs(deadline),
+        "getMultipleAccountsInfo",
       );
-      try {
-        const bal = await connection.getTokenAccountBalance(ata);
-        const raw = BigInt(bal.value.amount);
-        if (raw === BigInt(0)) return;
-        const amount = Number(
-          bal.value.uiAmountString ?? bal.value.uiAmount ?? Number(raw) / 1e6,
-        );
-        out.push({ name, mint, amount, raw });
-      } catch (e) {
-        if (isMissingAccountError(e)) return;
-        throw e;
+      if (infos.length !== slice.length) {
+        return { balances: [], status: "unknown", detail: "balances.warning" };
       }
-    }),
-  );
-  out.sort((a, b) => b.amount - a.amount);
-  return out;
+      for (let j = 0; j < slice.length; j++) {
+        const info = infos[j];
+        const { name, mint } = slice[j];
+        if (!info) {
+          rows.push({ name, mint, amount: 0, raw: BigInt(0) });
+          continue;
+        }
+        const raw = rawTokenAmount(info.data);
+        if (raw == null) {
+          return { balances: [], status: "unknown", detail: "balances.warning" };
+        }
+        const amount = Number(raw) / 1e6;
+        rows.push({
+          name,
+          mint,
+          amount: Number.isFinite(amount) ? amount : 0,
+          raw,
+        });
+      }
+    }
+  } catch (e) {
+    if (isRateOrNetworkError(e)) {
+      return { balances: [], status: "unknown", detail: "balances.warning" };
+    }
+    return {
+      balances: [],
+      status: "error",
+      detail: errorMessageText(e),
+    };
+  }
+  rows.sort((a, b) => b.amount - a.amount || a.name.localeCompare(b.name));
+  return { balances: rows, status: "ok", detail: null };
 }
 
 /**

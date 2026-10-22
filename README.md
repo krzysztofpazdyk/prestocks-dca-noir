@@ -1,90 +1,184 @@
-# PreStocks DCA Noir v4.31
+> **noir 3.0 w repo noir** — UI pod program **predca 3.0** (priced buys v2), przeniesione z `prestocks-dca-noir3.0` (main 609e73b). `basePath` `/prestocks-dca-noir`. Deploy Pages przez workflow `pages.yml`, uruchamiany ręcznie (`workflow_dispatch`); merge do main sam nie publikuje strony.
 
-Tygodniowy desk DCA na PreStocks (Solana **Devnet**). Budżet tygodniowy jest dzielony równo na top-3 z rankingu Jev. Zakup idzie z vaulta USDC programu **predca** po podpisie portfela. Auto-zakup robi keeper.
+# PreStocks UI — noir 3.0
 
-**Live:** https://krzysztofpazdyk.github.io/prestocks-dca-noir/  
-`basePath` / `assetPrefix`: `/prestocks-dca-noir`
+Interfejs **PreStocks Weekly DCA** w stylu trading desk: głęboki charcoal, neonowy teal/violet, liczby monospace. Wersja UI **v5.0.0**.
 
-## Skąd jest v4.31
+Podłączony do programu Anchor **predca 3.0** (custody USDC + config + RunRecord + PriceFeed). Zakup ręczny woła `simulate_buy_v2`: ilość tokena to `floor(usdc / price)` w jednostkach bazowych (6 decimals), nie 1 token za 1 USD. Sieć: **Solana localnet lub devnet** (wybierana przez `NEXT_PUBLIC_RPC_URL`) — bez seedów / kluczy prywatnych w repo.
 
-Promocja 1:1 z [`prestocks-dca-noir2.0`](https://github.com/krzysztofpazdyk/prestocks-dca-noir2.0) @ `041df90` (tag `v4.31`). Różnią się tylko basePath, workflow Pages i ten README.
+## Wymagania
 
-- **Poprzedni stabilny noir:** v4.08 (`9de6b7f`, tag `noir-v4.08-przed-promocja`).
-- **Najważniejsze zmiany od v4.08:**
-  - **Niepotwierdzona transakcja:** timeout potwierdzenia to „pending”, a nie błąd. Po oknie zawsze jest werdykt (weszła / odrzucona / nie dotarła / niepotwierdzona). Podpis jest pamiętany po F5 (`localStorage`) i jest „Sprawdź ponownie”. Druga taka sama operacja wymaga „Wyślij mimo to” (v4.18, v4.27, v4.30, v4.31).
-  - **Bez podwójnej wysyłki:** synchroniczne blokady Kup / Wpłać / Wypłać i odzysk kolizji `runIndex` (v4.17, v4.27, v4.30).
-  - **Błąd RPC to nie brak konta:** ostatni odczyt zostaje („ostatni odczyt”), Wpłata i Wypłata są widoczne, ale wyszarzone, nie ma `initialize_user` przy nieznanym stanie (v4.30, v4.31).
-  - **Auto-zakup:**
-    - `/enable` jest idempotentne, a timeout to pending + poll, bez drugiego zakupu,
-    - przełącznik On zapisuje się dopiero po prawdziwym starcie,
-    - Off działa także w trakcie transakcji (v4.15, v4.19, v4.21, v4.30).
-  - **Zmiana portfela:** odczyty i autoryzacja keepera są per portfel, a spóźnione odświeżenie nie nadpisuje nowego portfela (v4.16, v4.20).
-  - **Logowanie e-mailem (Privy, embedded wallet Devnet)** obok Phantoma i Solflare. Jest jeden przycisk „Rozłącz”, a po polsku przycisk portfela to „Zaloguj” (v4.09–v4.14, v4.23, v4.28, v4.29).
-  - **Ranking Jev działa od pierwszej wizyty** dzięki domyślnemu kluczowi demo TypeSafe (v4.22, v4.25).
-  - **Polskie etykiety:** „Wpłać” / „Wypłać”, podpowiedzi przez i18n (v4.26, v4.31).
-  - **135 testów automatycznych** (`scripts/*.test.ts`).
+- Node.js 20+
+- npm
+- `solana-test-validator` (CLI Solana) — do transakcji on-chain
+- Program **predca 3.0** (`Eb3TFLeYi3dHZwoKCBvvUpx3gMnP2XdmMXX3rstUpdwC`)
 
-## Co widać w UI
-
-- **Logowanie:** „Zaloguj”, potem Privy (e-mail + kod OTP → portfel Solana w przeglądarce) albo Phantom / Solflare (sieć **Devnet**).
-- **Pierwsza wpłata** wysyła `initialize_user` i `deposit_usdc` w jednej transakcji. Osobnego kroku Initialize nie ma.
-- **Faucet demo:** 1000 USDC + 0.1 SOL na portfel (Devnet).
-- **Ranking:** Jev potrzebuje klucza TypeSafe. Build Pages wstawia klucz demo do `localStorage` przy pierwszej wizycie. Własny klucz albo jego wyczyszczenie w Ustawieniach zostaje. Klucz xAI jest opcjonalny (komentarz Groka).
-- **Transakcje:** amber „Czekam na potwierdzenie…” z linkiem do explorera. Po werdykcie widać zielony sukces albo czerwony błąd, a przy niepotwierdzonej tx przycisk „Sprawdź ponownie”.
-
-## Znane ograniczenia (odłożone do mainnetu)
-
-- **Klucz demo TypeSafe jest w bundlu JS** (`NEXT_PUBLIC_TYPESAFE_DEFAULT_KEY` jest wstawiany przez Next do klienta). Celowe na Devnet. Przed mainnetem trzeba go wyjąć albo dać proxy.
-- **Kaprysy przełączania portfela Privy ↔ Phantom:**
-  - po „Rozłącz” Privy od razu nic nie robi,
-  - modal Phantom→Privy sam się zamyka,
-  - prompt „Sign message” keepera przy każdym połączeniu,
-  - blokada Phantoma nie jest wykrywana,
-  - Esc zostawia „Łączenie…”,
-  - wiszący podpis psuje szybkie ponowne połączenie.
-- **F5 w pierwszych ~30 s** wysyłki (przed timeoutem web3) nie ma podpisu do zapamiętania.
-
-## Konfiguracja
-
-| | Wartość |
-|---|---|
-| Program Devnet (predca) | `HajLzgcp6fyHVgVLFtwujnU53re47PSMJcQZZes8ZvbU` |
-| Mint mock USDC | `99UbouJx2ZTLThQkqxrQGLZkDAYAn9vv8n6qnQh5f4Sw` |
-| RPC | `https://api.devnet.solana.com` |
-| Ranking / keeper | `https://predca-api.onrender.com`, `https://predca-api.onrender.com/keeper` |
-| Privy App ID (publiczny) | `cmuf3rgpj01rb0cjpl6ked6f4`; dozwolone originy: `https://krzysztofpazdyk.github.io`, `http://localhost:3000` |
-
-Publiczna konfiguracja buildu jest w `.env.production`. Nie ma w niej sekretów: `NEXT_PUBLIC_PRIVY_APP_ID` i `NEXT_PUBLIC_TYPESAFE_DEFAULT_KEY` są tam puste i przychodzą z workflow.
-
-noir i noir2.0 działają na tym samym originie (`krzysztofpazdyk.github.io`), więc dzielą `localStorage` i sesję Privy. Oba używają tego samego programu, mintu i keepera, więc współdzielony stan jest spójny.
-
-## Lokalnie
-
-Node.js 20+ (CI: 22), katalog repozytorium `prestocks-dca-noir`. `.npmrc` ma `legacy-peer-deps=true` (opcjonalny peer EVM Privy).
+## Instalacja
 
 ```bash
-cp .env.example .env.local      # dla Devnet skopiuj wartości z .env.production
-npm ci
-npm run dev                     # http://localhost:3000/prestocks-dca-noir/
+cd ~/prestocks-dca-noir
+cp .env.example .env.local
+npm install
 ```
 
-Opcjonalnie w `.env.local`: `NEXT_PUBLIC_PRIVY_APP_ID` (bez niego jest tylko Phantom / Solflare) i `NEXT_PUBLIC_TYPESAFE_DEFAULT_KEY` (nie commitować).
+## Localnet + Predca
 
-Sprawdzenia:
+1. Uruchom validator:
 
 ```bash
-npx tsc --noEmit
-npx tsx --test scripts/*.test.ts         # 135 testów
-npx eslint
-NODE_ENV=production npm run build        # static export → out/ (scripts/static-export.mjs)
+solana-test-validator
 ```
 
-## Deploy
+2. Ustaw CLI na localnet i upewnij się, że **predca** jest zdeployowany (z katalogu `/workspace/predca`):
 
-Push do `main` (albo ręczny `workflow_dispatch`) uruchamia GitHub Actions [`.github/workflows/pages.yml`](.github/workflows/pages.yml): `npm ci`, potem `npm run build` → `out/` → GitHub Pages.
+```bash
+solana config set --url http://127.0.0.1:8899
+anchor deploy   # lub równoważny deploy programu predca
+```
 
-Build dostaje:
-- `NEXT_PUBLIC_PRIVY_APP_ID` (jawna wartość w workflow),
-- `NEXT_PUBLIC_TYPESAFE_DEFAULT_KEY` z sekretu repo o tej samej nazwie.
+3. Utwórz lokalny mock mint USDC (6 decimals) i wpisz pubkey do env:
 
-PR-y i inne branche **nie** deployują.
+```bash
+spl-token create-token --decimals 6
+# skopiuj mint → NEXT_PUBLIC_USDC_MINT w .env.local
+```
+
+Mint **nie jest zahardcodowany** w programie — to konto w instrukcjach. Bez `NEXT_PUBLIC_USDC_MINT` UI pokaże ostrzeżenie i zablokuje init/deposit/withdraw.
+
+4. Dev UI:
+
+```bash
+cd ~/prestocks-dca-noir
+npm run dev
+```
+
+Aplikacja: [http://localhost:3000/prestocks-dca-noir](http://localhost:3000/prestocks-dca-noir) (`basePath`).
+
+Zmienne (patrz `.env.example`):
+
+| Zmienna | Domyślnie |
+|---------|-----------|
+| `NEXT_PUBLIC_RPC_URL` | `http://127.0.0.1:8899` |
+| `NEXT_PUBLIC_PREDCA_PROGRAM_ID` | `Eb3TFLeYi3dHZwoKCBvvUpx3gMnP2XdmMXX3rstUpdwC` |
+| `NEXT_PUBLIC_USDC_MINT` | `3xtTBfHRf8AKEmhbFYqRoXfi9RaxxiqG9YfifjCjD4qm` (mock devnet) |
+| `NEXT_PUBLIC_DCA_API_URL` | *(puste — fallback z buildu; w runtime wygrywa `config.json`)* |
+| `NEXT_PUBLIC_KEEPER_URL` | *(puste — fallback z buildu; w runtime wygrywa `config.json`)* |
+| `NEXT_PUBLIC_BASE_PATH` | `/prestocks-dca-noir` |
+
+Adres API i keepera nie musi być wbudowany w JS. Przy starcie strona pobiera `${basePath}/config.json` (szablon: `public/config.json`) i używa go przed zmiennymi z buildu.
+
+Priorytet API: niepuste `dcaApiUrl` z `config.json`, potem `NEXT_PUBLIC_DCA_API_URL`, potem pusto (klient nie woła API).
+
+Priorytet keepera: `keeperUrl` z `config.json`, potem `dcaApiUrl` z `config.json` + `/keeper`, potem `NEXT_PUBLIC_KEEPER_URL`, potem `NEXT_PUBLIC_DCA_API_URL` + `/keeper`, potem `http://127.0.0.1:8792`.
+
+```json
+{
+  "dcaApiUrl": "",
+  "keeperUrl": "",
+  "updatedAt": ""
+}
+```
+
+Tylko publiczne adresy `https` (w dev także `http` dla `localhost` i `127.0.0.1`) oraz opcjonalny `updatedAt`. Puste pole oznacza fallback do zmiennej z buildu. **Nie wolno** wpisywać tu kluczy, tokenów, Privy ID, klucza TypeSafe ani adresu RPC z kluczem. Nie commituj prawdziwego adresu tunelu — w repo zostaje pusty szablon.
+
+IDL jest skopiowane do `idl/predca.json` (aplikacja self-contained — bez runtime importu z `/workspace/predca`).
+
+## Build
+
+```bash
+npm run build
+npm start
+```
+
+Build **nie wymaga** żywego validatora (tylko typy + IDL).
+
+## Ekrany
+
+1. **Overview** — salda Predca on-chain (budżet, vault USDC, ostatni RunRecord), Initialize / Deposit / Withdraw, mock holdings pie (off-chain), connect wallet
+2. **Ustawienia** — budżet → `set_weekly_budget` / `initialize_user` gdy portfel + mint; BYOK w localStorage
+3. **Historia** — RunRecord on-chain (skan `run_index` 0…), inaczej mock z adnotacją
+
+`record_run` **nie** jest akcją użytkownika w UI — zapisuje go job off-chain; UI tylko czyta RunRecord.
+
+## Portfel podłączony vs odłączony
+
+| Stan | Zachowanie |
+|------|------------|
+| Odłączony | Mock salda/holdings/historia; brak tx Predca |
+| Podłączony, brak mint | Ostrzeżenie o `NEXT_PUBLIC_USDC_MINT` |
+| Podłączony, brak UserConfig | Przycisk **Initialize** |
+| Podłączony + config | Deposit / Withdraw / zapis budżetu; Historia z chain jeśli są RunRecord |
+
+## BYOK (Bring Your Own Key)
+
+W **Ustawieniach** pole TypeSafe może być już wypełnione kluczem demo. Wklejasz własny, żeby go zastąpić. Zapis w **localStorage** (`noir3.prestocks.TYPESAFE_API_KEY`) — klient nadal wysyła ten klucz do `/rank`. Serwer nie dostaje osobnego fallbacku.
+
+Build z `NEXT_PUBLIC_TYPESAFE_DEFAULT_KEY` wpisuje tę wartość do localStorage **tylko przy pierwszej wizycie** (klucza jeszcze nie ma). Zapis własnego klucza zostaje. Wyczyszczenie pola i zapis zostawia pusty string — Jev nie wraca, dopóki znowu nie zapiszesz klucza. Build bez tej zmiennej zachowuje się jak wcześniej: puste Ustawienia, brak Jev.
+
+`NEXT_PUBLIC_*` trafia do bundla przeglądarki. Klucz demo da się odczytać z JS na Pages. To świadomy kompromis playgroundu, nie sekret serwera. Prawdziwej wartości nie commituj: CI / lokalny `.env.local` (gitignore).
+
+| Klucz | Opis |
+|-------|------|
+| `TYPESAFE_API_KEY` | Jev — demo albo własny klucz w `noir3.prestocks.TYPESAFE_API_KEY`. Jest → etykieta źródła „BYOK · Jev”. Pusto → ranking metryczny. |
+| `XAI_API_KEY` | Grok — **opcjonalny**; pusty = metrics→Jev bez LLM (`noir3.prestocks.XAI_API_KEY`) |
+
+## GitHub Pages (static / DEVNET)
+
+Adres:
+**https://krzysztofpazdyk.github.io/prestocks-dca-noir/**
+
+- Build uses `output: 'export'` with `basePath` / `assetPrefix` `/prestocks-dca-noir`.
+- Production env (`.env.production`) points at **Solana DEVNET** and predca 3.0.
+- API i keeper: serwis Render `https://predca-api.onrender.com` (keeper pod `/keeper`). Workflow ustawia go jako fallback z buildu (`NEXT_PUBLIC_DCA_API_URL`, `NEXT_PUBLIC_KEEPER_URL`) i po buildzie zapisuje `out/config.json` skryptem `scripts/write-runtime-config.mjs`. Szablon `public/config.json` w repo zostaje pusty.
+- Zmiana adresu API bez przebudowy nie jest możliwa (brak gałęzi `gh-pages`, Pages z artefaktu workflow): zmień adres w `.github/workflows/pages.yml` i uruchom workflow ponownie.
+- `NEXT_PUBLIC_TYPESAFE_DEFAULT_KEY` pochodzi z sekretu repozytorium o tej nazwie (ustawiany tylko w workflow). Wartość i tak widać w JS strony. Publiczny Privy App ID jest wpisany w workflow.
+- Deploy: Actions → „Deploy GitHub Pages” → Run workflow na `main` (środowisko `github-pages` dopuszcza tylko `main`).
+
+## Klucze storage (`noir3.`)
+
+localStorage, sessionStorage i cache na `krzysztofpazdyk.github.io` są wspólne dla noir, noir 2.0 i noir 3.0. Ta aplikacja **nie czyta** starych kluczy (bez migracji). Każdy własny klucz ma prefiks `noir3.`:
+
+| Klucz | Gdzie |
+|-------|--------|
+| `noir3.prestocks.TYPESAFE_API_KEY` | localStorage, BYOK Jev |
+| `noir3.prestocks.XAI_API_KEY` | localStorage, BYOK Grok |
+| `noir3.prestocks.session.products` | sessionStorage, katalog produktów |
+| `noir3.prestocks.session.rank` | sessionStorage, ostatni ranking |
+| `noir3.prestocks.deadlineInvalid` | localStorage |
+| `noir3.prestocks.ipoPremiumMatters` | localStorage |
+| `noir3.prestocks.buyDespiteIpo` | localStorage |
+| `noir3.prestocks.exclusions` | localStorage |
+| `noir3.prestocks.companyData.v1` | localStorage |
+| `noir3.prestocks.autoWeeklyBuy` | localStorage (`.{owner}` gdy jest portfel) |
+| `noir3.prestocks.autoWeeklyBuy.meta` | localStorage (`.{owner}`) |
+| `noir3.predca_weekly_budget_usd` | localStorage (`.{owner}`) |
+| `noir3.predca_weekly_budget_usd.__migrated` | localStorage, znacznik odrzucenia niescopowanego budżetu |
+| `noir3.predca_weekly_budget_usd.__draft` | sessionStorage |
+| `noir3.predca_mock_portfolio_v1` | localStorage |
+| `noir3.predca.pendingTx.v1.{owner}` | localStorage |
+| `noir3.predca.jupPrices.v1` | localStorage |
+| `noir3.predca_locale` | localStorage, PL/EN |
+| `noir3.predca.keeper.session.{owner}` | localStorage (sesja keepera) |
+
+Brak IndexedDB, ciasteczek aplikacji i service workera. Klucze Privy (`privy-*`, ciasteczka SDK) należą do SDK i nie dostają prefiksu `noir3.`.
+
+## Changelog
+
+- noir 3.0 = predca 3.0 (priced buys v2), first version
+
+## Phantom / Solflare / Privy
+
+W Phantom lub Solflare ustaw sieć na **Devnet** przed łączeniem. UI Pages jest na `https://api.devnet.solana.com` — Mainnet nie zadziała z tym deployem.
+
+Jeden przycisk **Select Wallet** otwiera listę: Phantom, Solflare i — gdy ustawione jest `NEXT_PUBLIC_PRIVY_APP_ID` — Privy. Puste App ID zostawia tylko Phantom i Solflare.
+
+**Privy** jest opcjonalnym trzecim portfelem (e-mail lub Google + wbudowany portfel Solana). To **osobny adres** niż Phantom i Solflare, więc vault Predca jest pusty, dopóki nie użyjesz faucetu Devnet i wpłaty (init + deposit). Przełączenie portfela przełącza właściciela on-chain, vault i keepera. Auto-buy (keeper) układa własny ranking; ręczny zakup na Overview używa listy metryk z UI — to celowo różne ścieżki.
+
+Publiczny identyfikator (bez App Secret):
+
+```
+NEXT_PUBLIC_PRIVY_APP_ID=
+```
+
+W dashboardzie Privy: **Solana Devnet**, embedded wallets włączone, login email + Google, allowed origins `https://krzysztofpazdyk.github.io` i `http://localhost:3000`. Puste `NEXT_PUBLIC_PRIVY_APP_ID` w `.env.production` jest OK, dopóki App ID nie zostanie wpisane przed buildem Pages. App Secret nie trafia do repo.
+

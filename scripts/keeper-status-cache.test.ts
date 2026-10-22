@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
 import {
+  KEEPER_SESSION_PREFIX,
   clearStatusAuthCache,
   getStatusAuth,
   keeperStatus,
@@ -42,7 +43,7 @@ function installStorage(): void {
 }
 
 function sessionKey(owner: string): string {
-  return `predca.keeper.session.${owner}`;
+  return `${KEEPER_SESSION_PREFIX}${owner}`;
 }
 
 function writeSession(owner: string, token: string): void {

@@ -1,8 +1,8 @@
-import { RUN_INDEX_TAKEN_MSG } from "./predca";
+import { shown, translate } from "@/lib/i18n";
 import { isUnconfirmedTimeout } from "./vault-follow-up";
 
-/** Shown when this card already created the colliding RunRecord. */
-export const BUY_ALREADY_IN_FLIGHT_MSG = "Zakup już w toku.";
+/** Polish sentence. A throw uses the language active at that moment. */
+export const BUY_ALREADY_IN_FLIGHT_MSG = translate("pl", "tx.err.buyInFlight");
 
 /** Mutable flag. A ref `{ current: boolean }` satisfies this. */
 export type ManualBuyGate = { current: boolean };
@@ -59,11 +59,11 @@ export async function recoverRunCollision(args: {
   submitOnce: (index: number) => Promise<string>;
 }): Promise<string> {
   if (!shouldRetryRunIndex(args.createdRunIndices, args.failedIndex)) {
-    throw new Error(BUY_ALREADY_IN_FLIGHT_MSG);
+    throw new Error(shown("tx.err.buyInFlight"));
   }
   const retryIndex = await args.findNextIndex();
   if (retryIndex == null || retryIndex === args.failedIndex) {
-    throw new Error(RUN_INDEX_TAKEN_MSG);
+    throw new Error(shown("auto.error.predca.6004"));
   }
   return args.submitOnce(retryIndex);
 }

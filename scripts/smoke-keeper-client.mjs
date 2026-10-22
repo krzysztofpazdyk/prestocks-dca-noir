@@ -6,7 +6,11 @@ import { Keypair } from '@solana/web3.js';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import bs58 from 'bs58';
 
-const KEEPER = 'https://predca-api.onrender.com/keeper';
+const KEEPER = (process.env.NEXT_PUBLIC_KEEPER_URL || "").replace(/\/$/, "");
+if (!KEEPER) {
+  console.error("Set NEXT_PUBLIC_KEEPER_URL. It is empty in the repo and injected only at build time.");
+  process.exit(1);
+}
 const SIG_TTL_S = 5 * 60;
 
 const statusAuthCache = new Map();
@@ -15,7 +19,7 @@ const statusAuthInflight = new Map();
 const sessionInflight = new Map();
 
 function sessionStorageKey(owner) {
-  return `predca.keeper.session.${owner.trim()}`;
+  return `noir3.predca.keeper.session.${owner.trim()}`;
 }
 // memory-only stand-in for sessionStorage
 const fakeSS = new Map();

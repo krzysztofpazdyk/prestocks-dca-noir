@@ -1,3 +1,6 @@
+import { translate } from "@/lib/i18n";
+import { formatDollars } from "@/lib/number-format";
+import { getLocaleSnapshot } from "@/lib/locale-store";
 import {
   HOLDINGS,
   LAST_PURCHASE,
@@ -20,7 +23,7 @@ export type PortfolioState = {
   lastPurchase: Purchase;
 };
 
-export const PORTFOLIO_STORAGE_KEY = "predca_mock_portfolio_v1";
+export const PORTFOLIO_STORAGE_KEY = "noir3.predca_mock_portfolio_v1";
 
 const NEW_HOLDING_COLORS = ["#14b8a6", "#8b5cf6", "#22d3ee"] as const;
 
@@ -158,8 +161,12 @@ export function applyPurchase(
   const amountUsd = Math.max(0, Number(opts.amountUsd) || 0);
   const vaultUsdc = Number(state.vaultUsdc);
   if (!Number.isFinite(vaultUsdc) || vaultUsdc < amountUsd) {
+    const locale = getLocaleSnapshot();
     throw new Error(
-      `Za mało USDC w vault: ${Number.isFinite(vaultUsdc) ? vaultUsdc.toFixed(2) : "0.00"} < ${amountUsd.toFixed(2)}.`,
+      translate(locale, "msg.vaultLow", {
+        have: formatDollars(Number.isFinite(vaultUsdc) ? vaultUsdc : 0),
+        need: formatDollars(amountUsd),
+      }),
     );
   }
   const tokens = opts.tokens.slice(0, 3);

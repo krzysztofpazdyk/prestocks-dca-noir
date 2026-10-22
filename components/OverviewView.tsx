@@ -1,30 +1,50 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { claimFaucetUsdc } from "@/lib/dca-api";
 import { HoldingsPie } from "./HoldingsPie";
+import { fmtPriceClock, fmtSignedPnl, fmtUsdAmount } from "@/lib/format-usd";
+import { formatDollars, formatGrouped } from "@/lib/number-format";
+import {
+  purchaseMsgClass,
+  purchaseMsgTone,
+} from "@/lib/purchase-msg-tone";
+import { renderPurchaseNotice, type PurchaseNotice } from "@/lib/purchase-notice";
+import {
+  canonicalName,
+  isLowLiquidity,
+  quoteByName,
+  type JupPrices,
+} from "@/lib/jup-prices";
+import { priceRows, type PriceRowFlag } from "@/lib/price-rows";
+import {
+  pnlSummary,
+  portfolioTileState,
+  positionPnlKind,
+  type PositionRow,
+} from "@/lib/position-value";
 import {
   DEFAULT_SETTINGS,
-  HOLDINGS,
-  LAST_PURCHASE,
-  MOCK_BALANCES,
-  MOCK_VAULT_USDC,
   type Holding,
-  type JevRank,
   type Purchase,
 } from "@/lib/mock-data";
-import {
-  applyPurchase,
-  loadPortfolioState,
-  savePortfolioState,
-  type PortfolioBalances,
-} from "@/lib/portfolio-state";
+import { purchaseDisabledReasonKey } from "@/lib/purchase-reason";
 import { readWeeklyBudgetUsd } from "@/lib/auto-weekly-buy";
+import {
+  adoptWeeklyDraftForOwner,
+  budgetsDiffer,
+  needsBudgetConfirm,
+  subscribeWeeklyBudget,
+  WEEKLY_BUDGET_EPS,
+  weeklyBudgetRevision,
+  weeklyBudgetServerRevision,
+} from "@/lib/weekly-budget";
 import { usePredca } from "@/lib/hooks/usePredca";
 import { leaveManualBuy, tryEnterManualBuy } from "@/lib/manual-buy-guard";
 import { isOnChainSignatureReject } from "@/lib/vault-follow-up";
 import { depositUi, withdrawUi } from "@/lib/predca-status";
+import { dupOutcomeMessage } from "@/lib/dup-message";
 import {
   FAILED_EXPIRED_MSG,
   UNRESOLVED_MSG,
@@ -32,6 +52,7 @@ import {
   nextDuplicateStep,
   tryEnterDupCheck,
 } from "@/lib/pending-tx";
+import { PrivySignWaitNotice } from "@/components/PrivyWalletBridge";
 import { TxNotice, txMessageWithLink } from "@/components/TxNotice";
 import {
   clusterShortPl,
@@ -39,19 +60,41 @@ import {
   formatUsd,
   rawToDollars,
   rpcHost,
-  shortPk,
 } from "@/lib/predca";
-import { fetchPrestocksProducts } from "@/lib/prestocks";
-import { runRankingNow } from "@/lib/ranking";
+import { mintLabel } from "@/lib/mint-label";
+import {
+  formatPremiumPct,
+  livePremiumPct,
+  PREMIUM_TONE_CLASS,
+  premiumCopy,
+  showsSpacexDiscount,
+  type PremiumTone,
+} from "@/lib/premium-view";
+import {
+  fetchPrestocksProducts,
+  fillNoticeVars,
+  PRESTOCKS_SNAPSHOT_DATE,
+} from "@/lib/prestocks";
+import {
+  isFlatFallback,
+  parseRankSession,
+  rankPrefsKey,
+  rankSessionClientSnapshot,
+  rankSessionServerSnapshot,
+  restoreRankSession,
+  runRankingNow,
+  subscribeRankSession,
+} from "@/lib/ranking";
 import { useI18n } from "@/lib/i18n";
 import { APP_VERSION } from "@/lib/app-version";
 import type { RankResult } from "@/lib/universe";
 
+/** Page-load clock. Avoids Date.now() during render (react-hooks/purity). */
+const UI_CLOCK_AT = Date.now();
+
 /** Short Top-3 h2 from RankResult.mode — never claim live Jev for metrics. */
 function top3TitleFromRank(result: RankResult, locale: string): string {
-  const grok =
-    /grok/i.test(result.sourceLabel || "") ||
-    (result.pipeline || []).some((p) => /grok/i.test(p));
+  const grok = (result.pipeline || []).includes("grok");
   if (result.mode === "metrics_fallback") {
     return locale === "en" ? "Top-3 · metrics" : "Top-3 · metryki";
   }
@@ -63,7 +106,7 @@ function top3TitleFromRank(result: RankResult, locale: string): string {
   return locale === "en" ? "Top-3 · ranking" : "Top-3 · ranking";
 }
 
-const BUDGET_EPS = 0.000001;
+const BUDGET_EPS = WEEKLY_BUDGET_EPS;
 
 /** Intended buy amount: Settings LS is SoT; on-chain is synced before Manual Buy. */
 function resolvePurchaseAmount(
@@ -76,18 +119,35 @@ function resolvePurchaseAmount(
   return DEFAULT_SETTINGS.weeklyAmountUsd;
 }
 
-function budgetsDiffer(ls: number, onChain: number | null): boolean {
-  if (onChain == null || !Number.isFinite(onChain)) return ls > 0;
-  return Math.abs(ls - onChain) > BUDGET_EPS;
-}
+type TopPick = {
+  name: string;
+  score: number;
+  priceNow: number | null;
+  premiumPct: number | null;
+  premiumSource: string;
+};
 
-function emptyPurchase(): Purchase {
+type RankView = {
+  top3: TopPick[];
+  title: string | null;
+  subtitle: string | null;
+  premiumBasis: RankResult["premiumBasis"];
+  rankFlat: boolean;
+};
+
+function rankView(result: RankResult, locale: string): RankView {
   return {
-    date: "—",
-    amountUsd: 0,
-    tokens: [],
-    perTokenUsd: 0,
-    signature: "",
+    top3: result.top3.slice(0, 3).map((row) => ({
+      name: row.name,
+      score: row.score,
+      priceNow: row.token_price_usd,
+      premiumPct: Number.isFinite(row.premium_pct) ? row.premium_pct : null,
+      premiumSource: row.premium_source,
+    })),
+    title: top3TitleFromRank(result, locale),
+    subtitle: result.sourceLabel || null,
+    premiumBasis: result.premiumBasis,
+    rankFlat: isFlatFallback(result),
   };
 }
 
@@ -96,25 +156,42 @@ export function OverviewView() {
   const ownerBase58 = publicKey?.toBase58() ?? null;
   const predca = usePredca();
   const { locale, t } = useI18n();
-  const [balances, setBalances] = useState<PortfolioBalances>({ ...MOCK_BALANCES });
-  const [vaultUsdc, setVaultUsdc] = useState(MOCK_VAULT_USDC);
-  const [holdings, setHoldings] = useState<Holding[]>(() =>
-    HOLDINGS.map((h) => ({ ...h })),
-  );
-  const [lastPurchase, setLastPurchase] = useState<Purchase>(() => ({
-    ...LAST_PURCHASE,
-    tokens: [...LAST_PURCHASE.tokens],
-  }));
-  const [portfolioRevision, setPortfolioRevision] = useState(0);
   const [depositAmt, setDepositAmt] = useState(500);
   const [withdrawAmt, setWithdrawAmt] = useState(10);
-  const [top3, setTop3] = useState<JevRank[]>([]);
-  const [top3Title, setTop3Title] = useState<string | null>(null);
-  const [top3Subtitle, setTop3Subtitle] = useState<string | null>(null);
+  const [generated, setGenerated] = useState<RankView | null>(null);
+  const sessionSnap = useSyncExternalStore(
+    subscribeRankSession,
+    rankSessionClientSnapshot,
+    rankSessionServerSnapshot,
+  );
+  useEffect(() => {
+    restoreRankSession(rankPrefsKey());
+  }, []);
+  useEffect(() => {
+    adoptWeeklyDraftForOwner(ownerBase58);
+  }, [ownerBase58]);
   const [rankBusy, setRankBusy] = useState(false);
   const [rankError, setRankError] = useState<string | null>(null);
   const [purchaseMsg, setPurchaseMsg] = useState<string | null>(null);
   const [purchaseTone, setPurchaseTone] = useState<"ok" | "fail" | "pending">("ok");
+  const [purchaseNotice, setPurchaseNotice] = useState<
+    (PurchaseNotice & { expectMsg: string | null }) | null
+  >(null);
+  /**
+   * handlePurchase stores a translation key. The verdict effect below still
+   * writes a finished sentence with the real setPurchaseMsg. The key stays
+   * visible only while purchaseMsg is still the anchor this handler wrote.
+   * A later effect write (a different string, including null) wins.
+   */
+  function showPurchase(notice: PurchaseNotice | null, anchor: string | null = null) {
+    if (notice == null) {
+      setPurchaseNotice(null);
+      return;
+    }
+    setPurchaseMsg(anchor);
+    setPurchaseNotice({ ...notice, expectMsg: anchor });
+  }
+  const [buyPreview, setBuyPreview] = useState<string | null>(null);
   /** Sync lock across setWeeklyBudget and simulateBuy. A second Kup returns immediately. */
   const buyInFlightRef = useRef(false);
   const [buyInFlight, setBuyInFlight] = useState(false);
@@ -125,6 +202,18 @@ export function OverviewView() {
     kind: "deposit" | "withdraw" | "buy";
     amount: number;
   } | null>(null);
+  const [dupInfo, setDupInfo] = useState<{
+    kind: "deposit" | "withdraw" | "buy";
+    amount: number;
+  } | null>(null);
+  const [budgetPrompt, setBudgetPrompt] = useState<{
+    from: number;
+    to: number;
+  } | null>(null);
+  /** Last on-chain change the user already confirmed, so a dup retry does not ask again. */
+  const budgetConfirmedPair = useRef<{ ls: number; chain: number } | null>(null);
+  const [priceNow, setPriceNow] = useState(UI_CLOCK_AT);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const sigUnresolved = predca.pendingSignature != null;
 
   useEffect(() => {
@@ -190,18 +279,16 @@ export function OverviewView() {
   }
 
 
-  useEffect(() => {
-    // Offline / disconnected fallback only — localStorage mock portfolio.
-    if (connected) return;
-    const s = loadPortfolioState();
-    setBalances(s.balances);
-    setVaultUsdc(s.vaultUsdc);
-    setHoldings(s.holdings);
-    setLastPurchase(s.lastPurchase);
-    setPortfolioRevision((r) => r + 1);
-  }, [connected]);
-
-  const lsWeekly = readWeeklyBudgetUsd(DEFAULT_SETTINGS.weeklyAmountUsd, ownerBase58);
+  // Bump after adoptWeeklyDraftForOwner writes, so this read sees the scoped amount.
+  const weeklyRev = useSyncExternalStore(
+    subscribeWeeklyBudget,
+    weeklyBudgetRevision,
+    weeklyBudgetServerRevision,
+  );
+  const lsWeekly = readWeeklyBudgetUsd(
+    DEFAULT_SETTINGS.weeklyAmountUsd,
+    weeklyRev < 0 ? null : ownerBase58,
+  );
   const purchaseAmount = resolvePurchaseAmount(predca.weeklyBudgetUsd, ownerBase58);
   const budgetDirty = budgetsDiffer(lsWeekly, predca.weeklyBudgetUsd);
   const onChainReady = predca.status === "ready";
@@ -215,8 +302,18 @@ export function OverviewView() {
     connected && predca.solBalance != null ? predca.solBalance : null;
   const displayOwnerUsdc =
     connected && predca.ownerUsdc != null ? predca.ownerUsdc : null;
+  const portfolioTile = portfolioTileState({
+    priceWarning: predca.priceWarning,
+    balanceWarning: predca.balanceWarning,
+    positions: predca.positions,
+  });
+  const portfolioUnknown = connected && portfolioTile.unknown;
+  const portfolioPriceUnknown = connected && portfolioTile.priceUnknown;
+  const portfolioBalanceStale = connected && portfolioTile.balancesStale;
   const displayPortfolioUsd =
-    connected && predca.portfolioUsd != null ? predca.portfolioUsd : null;
+    connected && !portfolioUnknown && predca.portfolioUsd != null
+      ? predca.portfolioUsd
+      : null;
 
   // Connected: on-chain ATAs for ALL mints in devnet-mock-mints (via allMockMints).
   // Disconnected: holdings stay empty; never render the mock allocation pie.
@@ -232,31 +329,42 @@ export function OverviewView() {
       amountUsd: lp.amountUsd,
       tokens: lp.tokens,
       perTokenUsd: lp.perTokenUsd,
+      tokenAmounts: lp.tokenAmounts,
       signature: `run#${lp.runIndex}`,
     };
   })();
 
   async function handleGenerateRecommendations() {
     setRankError(null);
+    showPurchase(null);
     setPurchaseMsg(null);
     setRankBusy(true);
     try {
-      const productsResult = await fetchPrestocksProducts();
+      const productsResult = await fetchPrestocksProducts(
+        predca.jupPrices.fetchedAt > 0 ? predca.jupPrices : undefined,
+      );
       const result = await runRankingNow(productsResult);
       if (result.error && (!result.top3 || result.top3.length === 0)) {
         throw new Error(result.error);
       }
-      setTop3(
-        result.top3.slice(0, 3).map((r) => ({
-          name: r.name,
-          score: r.score,
-        })),
-      );
-      setTop3Title(top3TitleFromRank(result, locale));
-      setTop3Subtitle(result.sourceLabel || null);
-      if (result.error) {
-        setRankError(result.error);
+      setGenerated(rankView(result, locale));
+      const notes: string[] = [];
+      if (productsResult.dataSource === "snapshot") {
+        notes.push(
+          t("prestocks.snapshotDated", { date: PRESTOCKS_SNAPSHOT_DATE }),
+        );
+      } else if (productsResult.errorKey) {
+        notes.push(
+          t(
+            productsResult.errorKey,
+            fillNoticeVars(productsResult.errorVars, t),
+          ),
+        );
+      } else if (productsResult.errorPl) {
+        notes.push(productsResult.errorPl);
       }
+      if (result.error) notes.push(result.error);
+      if (notes.length) setRankError(notes.join(" "));
     } catch (e) {
       setRankError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -267,9 +375,9 @@ export function OverviewView() {
   function markPendingPurchase(): boolean {
     const sig = predca.pendingSignatureNow();
     if (!sig) return false;
-    setPurchaseMsg(
-      t("msg.purchasePending", { sig, url: explorerTxUrl(sig) }),
-    );
+    const url = explorerTxUrl(sig);
+    const text = t("msg.purchasePending", { sig, url });
+    showPurchase({ key: "msg.purchasePending", vars: { sig, url } }, text);
     setPurchaseTone("pending");
     return true;
   }
@@ -279,6 +387,7 @@ export function OverviewView() {
     amount: number,
     acknowledged: boolean,
   ): Promise<boolean> {
+    setDupInfo(null);
     const rec = predca.unresolvedFor(kind);
     if (!rec) {
       if (dupWarn?.kind === kind) setDupWarn(null);
@@ -298,7 +407,10 @@ export function OverviewView() {
       return false;
     }
     const verdict = await predca.recheckUnresolved(rec.signature);
-    if (verdict === "confirmed") return false;
+    if (dupOutcomeMessage(verdict) === "dup.prevConfirmed") {
+      setDupInfo({ kind, amount });
+      return false;
+    }
     if (verdict === "unresolved") {
       setDupWarn({ kind, amount });
       return false;
@@ -355,7 +467,7 @@ export function OverviewView() {
           : t("dup.action.deposit");
     return (
       <div className="mt-2 rounded border border-[#fbbf2433] bg-[#fbbf2411] px-3 py-2 text-xs text-[#fbbf24]">
-        <p>{t("dup.warn", { action, amount })}</p>
+        <p>{t("dup.warn", { action, amount: formatDollars(amount) })}</p>
         <button
           type="button"
           disabled={dupChecking || predca.rechecking}
@@ -372,7 +484,51 @@ export function OverviewView() {
     );
   }
 
-  async function handlePurchase(acknowledged = false) {
+  function dupInfoNotice(kind: "deposit" | "withdraw" | "buy", amount: number) {
+    if (dupInfo?.kind !== kind || dupInfo.amount !== amount) return null;
+    const action =
+      kind === "withdraw"
+        ? t("dup.action.withdraw")
+        : kind === "buy"
+          ? t("dup.action.buy")
+          : t("dup.action.deposit");
+    return (
+      <div className="mt-2 rounded border border-[#fbbf2433] bg-[#fbbf2411] px-3 py-2 text-xs text-[#fbbf24]">
+        <p>{t("dup.prevConfirmed", { action })}</p>
+      </div>
+    );
+  }
+
+  function acceptBudgetAndBuy() {
+    const prompt = budgetPrompt;
+    if (!prompt) return;
+    budgetConfirmedPair.current = { ls: prompt.to, chain: prompt.from };
+    setBudgetPrompt(null);
+    void handlePurchase(false, true);
+  }
+
+  async function handlePurchase(acknowledged = false, budgetConfirmed = false) {
+    if (!connected) return;
+    const lsAmountNow = readWeeklyBudgetUsd(
+      DEFAULT_SETTINGS.weeklyAmountUsd,
+      ownerBase58,
+    );
+    const chainNow = predca.weeklyBudgetUsd;
+    const remembered = budgetConfirmedPair.current;
+    const alreadyConfirmed =
+      budgetConfirmed ||
+      (remembered != null &&
+        chainNow != null &&
+        Math.abs(remembered.ls - lsAmountNow) <= BUDGET_EPS &&
+        Math.abs(remembered.chain - chainNow) <= BUDGET_EPS);
+    if (
+      onChainReady &&
+      chainNow != null &&
+      needsBudgetConfirm(lsAmountNow, chainNow, alreadyConfirmed)
+    ) {
+      setBudgetPrompt({ from: chainNow, to: lsAmountNow });
+      return;
+    }
     if (!tryEnterDupCheck(dupCheckRef)) return;
     setDupChecking(true);
     let allowed = false;
@@ -396,42 +552,47 @@ export function OverviewView() {
     try {
       setPurchaseTone("ok");
       if (top3.length === 0) {
-        setPurchaseMsg(t("msg.noRecs"));
+        setPurchaseTone("fail");
+        showPurchase({ key: "msg.noRecs" });
         return;
       }
 
       const tokenNames = top3.slice(0, 3).map((r) => r.name);
-      // LS is SoT for intended amount (sync on-chain before simulate_buy when dirty).
+      // LS is SoT for intended amount (sync on-chain before simulate_buy_v2 when dirty).
       const intendedAmount = resolvePurchaseAmount(predca.weeklyBudgetUsd, ownerBase58);
 
-      // Prefer on-chain simulate_buy when Predca is ready.
+      // Prefer on-chain simulate_buy_v2 when Predca is ready.
       if (onChainReady) {
         if (
           availableVaultUsdc == null ||
           !Number.isFinite(availableVaultUsdc) ||
           availableVaultUsdc < intendedAmount
         ) {
-          setPurchaseMsg(
-            t("msg.vaultLowOnChain", {
-              have: (availableVaultUsdc ?? 0).toFixed(2),
-              need: intendedAmount.toFixed(2),
-            }),
-          );
+          setPurchaseTone("fail");
+          showPurchase({
+            key: "msg.vaultLowOnChain",
+            vars: {
+              have: formatDollars(availableVaultUsdc ?? 0),
+              need: formatDollars(intendedAmount),
+            },
+          });
           return;
         }
 
-        // simulate_buy spends on-chain weeklyBudgetUsdc — sync LS → chain first.
+        // simulate_buy_v2 spends on-chain weeklyBudgetUsdc — sync LS → chain first.
         const lsAmount = readWeeklyBudgetUsd(DEFAULT_SETTINGS.weeklyAmountUsd, ownerBase58);
         if (budgetsDiffer(lsAmount, predca.weeklyBudgetUsd)) {
-          setPurchaseMsg(t("msg.updatingBudget"));
+          setPurchaseTone("pending");
+          showPurchase({ key: "msg.updatingBudget" });
           const budgetSig = await predca.setWeeklyBudget(lsAmount);
           if (!budgetSig) {
             if (markPendingPurchase()) return;
             const err = predca.lastTxError();
             if (err) {
-              setPurchaseMsg(`${t("msg.budgetSyncFail")}: ${err}`);
               setPurchaseTone("fail");
+              showPurchase({ key: "msg.budgetSyncFail", detail: err });
             } else {
+              showPurchase(null);
               setPurchaseMsg(null);
             }
             return;
@@ -439,70 +600,28 @@ export function OverviewView() {
           // setWeeklyBudget's withTx already refreshed; simulateBuy re-fetches budget.
         }
 
+        showPurchase(null);
         setPurchaseMsg(null);
         const sig = await predca.simulateBuy(tokenNames);
         if (sig) {
           setPurchaseTone("ok");
-          setPurchaseMsg(
-            t("msg.purchaseOk", {
+          showPurchase({
+            key: "msg.purchaseOk",
+            vars: {
               sig: sig.slice(0, 8),
-              amount: intendedAmount.toFixed(2),
+              amount: formatGrouped(intendedAmount, { min: 2, max: 2 }),
               tokens: tokenNames.join(" · "),
-            }),
-          );
+            },
+            withPreview: buyPreview != null,
+          });
         } else if (!markPendingPurchase()) {
           const err = predca.lastTxError();
           if (err) {
-            setPurchaseMsg(`${t("msg.purchaseFail")}: ${err}`);
             setPurchaseTone("fail");
+            showPurchase({ key: "msg.purchaseFail", detail: err });
           }
         }
         return;
-      }
-
-      // Offline / disconnected mock path (localStorage).
-      if (
-        availableVaultUsdc == null ||
-        !Number.isFinite(availableVaultUsdc) ||
-        availableVaultUsdc < purchaseAmount
-      ) {
-        setPurchaseMsg(
-          connected
-            ? t("msg.predcaNotReady")
-            : t("msg.vaultLowMock", {
-                have: (availableVaultUsdc ?? 0).toFixed(2),
-                need: purchaseAmount.toFixed(2),
-              }),
-        );
-        return;
-      }
-
-      try {
-        const next = applyPurchase(
-          {
-            balances,
-            vaultUsdc: availableVaultUsdc,
-            holdings,
-            lastPurchase: lastPurchase ?? emptyPurchase(),
-          },
-          { amountUsd: purchaseAmount, tokens: tokenNames },
-        );
-        savePortfolioState(next);
-        setBalances(next.balances);
-        setVaultUsdc(next.vaultUsdc);
-        setHoldings(next.holdings);
-        setLastPurchase(next.lastPurchase);
-        setPortfolioRevision((r) => r + 1);
-        setPurchaseMsg(
-          t("msg.purchaseOffline", {
-            amount: purchaseAmount.toFixed(2),
-            tokens: tokenNames.join(" · "),
-          }),
-        );
-      } catch (error) {
-        setPurchaseMsg(
-          error instanceof Error ? error.message : t("msg.purchaseError"),
-        );
       }
     } finally {
       leaveManualBuy(buyInFlightRef);
@@ -548,6 +667,58 @@ export function OverviewView() {
     withdrawOverCap ||
     withdrawPresentation === "disabled";
   const showWithdraw = withdrawPresentation !== "hidden";
+  const restored = generated ? null : parseRankSession(sessionSnap.raw, rankPrefsKey());
+  const active = generated ?? (restored ? rankView(restored.rank, locale) : null);
+  const top3 = active?.top3 ?? [];
+  const top3Names = top3.map((row) => row.name).join("\u0001");
+  // previewBuy is a useCallback (no `this`). Depend on it, not the whole predca object.
+  const previewBuy = predca.previewBuy;
+  const previewNames = top3Names ? top3Names.split("\u0001") : [];
+  const previewGateOpen =
+    connected && onChainReady && previewNames.length >= 3;
+  // Hide the stored quote while the gate is closed, without writing state in the effect.
+  const shownBuyPreview = previewGateOpen ? buyPreview : null;
+  useEffect(() => {
+    const names = top3Names ? top3Names.split("\u0001") : [];
+    if (!connected || !onChainReady || names.length < 3) {
+      // Drop the stored quote after paint so a later reconnect does not flash it.
+      queueMicrotask(() => {
+        setBuyPreview((prev) => (prev == null ? prev : null));
+      });
+      return;
+    }
+    let cancel = false;
+    void previewBuy(names).then((legs) => {
+      if (cancel) return;
+      if (legs.length === 0) {
+        setBuyPreview(null);
+        return;
+      }
+      setBuyPreview(
+        t("buy.preview", {
+          legs: legs
+            .map((leg) =>
+              t("buy.previewLeg", {
+                tokens: formatGrouped(leg.tokens, { max: 6 }),
+                name: leg.name,
+                price: fmtUsdAmount(leg.priceUsd, locale) ?? "",
+              }),
+            )
+            .join(" · "),
+        }),
+      );
+    });
+    return () => {
+      cancel = true;
+    };
+  }, [connected, onChainReady, top3Names, previewBuy, locale, t]);
+  const top3Title = active?.title ?? null;
+  const top3Subtitle = active?.subtitle ?? null;
+  const premiumBasis = active?.premiumBasis ?? null;
+  const rankFlat = active?.rankFlat ?? false;
+  const restoredClock = restored
+    ? fmtPriceClock(restored.savedAt, priceNow, locale)
+    : "";
   const vaultTooLow =
     availableVaultUsdc == null ||
     !Number.isFinite(availableVaultUsdc) ||
@@ -558,6 +729,7 @@ export function OverviewView() {
     sigUnresolved ||
     buyInFlight ||
     top3.length === 0 ||
+    rankFlat ||
     predca.txPending ||
     (onChainReady
       ? vaultTooLow
@@ -567,29 +739,79 @@ export function OverviewView() {
 
   /** Why Purchase stays gray — shown next to the button (vault check kept). */
   const purchaseDisabledReason: string | null = (() => {
-    if (!purchaseDisabled) return null;
-    // The button label already says the buy is in flight. Do not claim vault-low.
-    if (sigUnresolved || buyInFlight) return null;
-    if (predca.txPending) return t("purchase.disabled.tx");
-    if (predca.status === "error") return t("purchase.disabled.rpcError");
-    if (top3.length === 0) return t("purchase.disabled.noRecs");
-    if (connected && !onChainReady) return t("purchase.disabled.notReady");
-    if (vaultTooLow) {
+    const key = purchaseDisabledReasonKey({
+      purchaseDisabled,
+      sigUnresolved,
+      buyInFlight,
+      txPending: predca.txPending,
+      statusError: predca.status === "error",
+      rankFlat,
+      top3Empty: top3.length === 0,
+      connected,
+      onChainReady,
+      vaultTooLow,
+    });
+    if (key == null) return null;
+    if (key === "purchase.disabled.rpcError") return t("purchase.disabled.rpcError");
+    if (key === "purchase.disabled.flatRanking") return t("purchase.disabled.flatRanking");
+    if (key === "purchase.disabled.noRecs") return t("purchase.disabled.noRecs");
+    if (key === "purchase.disabled.vaultLow") {
       return t("purchase.disabled.vaultLow", {
-        have: (availableVaultUsdc ?? 0).toFixed(2),
-        need: purchaseAmount.toFixed(2),
+        have: formatDollars(availableVaultUsdc ?? 0),
+        need: formatDollars(purchaseAmount),
       });
     }
-    return t("purchase.disabled.generic");
+    return t(key);
   })();
 
   function fmtTile(value: number | null, digits = 2): string {
     if (value == null || !Number.isFinite(value)) return "—";
-    return value.toLocaleString(locale === "en" ? "en-US" : "pl-PL", {
-      minimumFractionDigits: digits,
-      maximumFractionDigits: digits,
-    });
+    return formatGrouped(value, { min: digits, max: digits });
   }
+
+  function fmtMoney(value: number | null, digits = 2): string {
+    if (value == null || !Number.isFinite(value)) return "—";
+    return formatDollars(value, digits);
+  }
+
+  function premiumText(name: string): {
+    text: string;
+    tone: PremiumTone;
+    tooltipKey: string;
+    labelKey: string;
+  } {
+    const pct = livePremiumPct(name, predca.jupPrices);
+    const stale =
+      predca.jupPrices.source === "cache" ||
+      predca.jupPrices.carried.some(
+        (rowName) => canonicalName(rowName) === canonicalName(name),
+      );
+    const copy = premiumCopy(name, pct, stale, "inline");
+    const text =
+      copy.withPct && pct != null
+        ? t(copy.textKey, { pct: formatPremiumPct(pct, locale) })
+        : t(copy.textKey);
+    return {
+      text,
+      tone: copy.tone,
+      tooltipKey: copy.tooltipKey,
+      labelKey: copy.labelKey,
+    };
+  }
+
+  const pricesReady = predca.jupPrices.fetchedAt > 0;
+  const anyTokenPrice = Object.values(predca.jupPrices.quotes).some(
+    (q) => q.usdPrice != null,
+  );
+  const priceClock = pricesReady
+    ? fmtPriceClock(predca.jupPrices.fetchedAt, priceNow, locale)
+    : "";
+  const allAtCost =
+    predca.positions.length > 0 &&
+    predca.positions.every(
+      (row) => row.basis === "cost" && row.valueKnown !== false,
+    );
+  const showPnl = connected && predca.positions.length > 0;
 
   const vaultStat =
     predca.status === "error" && predca.vaultUsdc != null
@@ -604,6 +826,19 @@ export function OverviewView() {
         : predca.status === "disconnected"
           ? t("predca.status.disconnected")
           : t("predca.status.error");
+
+  const purchaseFromNotice =
+    purchaseNotice != null && purchaseMsg === purchaseNotice.expectMsg;
+  const purchaseText = purchaseFromNotice
+    ? renderPurchaseNotice(
+        purchaseNotice,
+        t,
+        purchaseNotice.withPreview ? shownBuyPreview : null,
+      )
+    : purchaseMsg;
+  const purchaseClass = purchaseMsgClass(
+    purchaseMsgTone(purchaseTone, purchaseText ?? ""),
+  );
 
   return (
     <div className="space-y-5">
@@ -691,8 +926,8 @@ export function OverviewView() {
             }
             unit={
               budgetDirty && predca.weeklyBudgetUsd != null
-                ? `USDC · chain ${formatUsd(predca.weeklyBudgetUsd)}`
-                : "USDC"
+                ? `chain ${formatUsd(predca.weeklyBudgetUsd)}`
+                : ""
             }
           />
           <Stat
@@ -700,8 +935,8 @@ export function OverviewView() {
             value={vaultStat != null ? formatUsd(vaultStat) : "—"}
             unit={
               predca.status === "error" && predca.vaultUsdc != null
-                ? `USDC · ${t("overview.rpcStale")}`
-                : "USDC"
+                ? t("overview.rpcStale")
+                : ""
             }
           />
           {depositPresentation !== "hidden" && (
@@ -725,6 +960,7 @@ export function OverviewView() {
                   value={depositAmt}
                   onChange={(e) => {
                     if (dupWarn?.kind === "deposit") setDupWarn(null);
+                    if (dupInfo?.kind === "deposit") setDupInfo(null);
                     const n = Number(e.target.value);
                     if (!Number.isFinite(n)) {
                       setDepositAmt(n);
@@ -756,6 +992,7 @@ export function OverviewView() {
                 </p>
               ) : null}
               {dupNotice("deposit", ownerUsdcCap != null ? Math.min(depositAmt, ownerUsdcCap) : depositAmt)}
+              {dupInfoNotice("deposit", ownerUsdcCap != null ? Math.min(depositAmt, ownerUsdcCap) : depositAmt)}
             </div>
           )}
           {showWithdraw && (
@@ -779,6 +1016,7 @@ export function OverviewView() {
                   value={withdrawAmt}
                   onChange={(e) => {
                     if (dupWarn?.kind === "withdraw") setDupWarn(null);
+                    if (dupInfo?.kind === "withdraw") setDupInfo(null);
                     const n = Number(e.target.value);
                     if (!Number.isFinite(n)) {
                       setWithdrawAmt(n);
@@ -814,6 +1052,10 @@ export function OverviewView() {
                 </p>
               ) : null}
               {dupNotice(
+                "withdraw",
+                vaultUsdcCap != null ? Math.min(withdrawAmt, vaultUsdcCap) : withdrawAmt,
+              )}
+              {dupInfoNotice(
                 "withdraw",
                 vaultUsdcCap != null ? Math.min(withdrawAmt, vaultUsdcCap) : withdrawAmt,
               )}
@@ -862,6 +1104,7 @@ export function OverviewView() {
           </p>
         )}
 
+        <PrivySignWaitNotice className="mt-3" />
         {predca.sessionCheckMsg ? (
           <TxNotice message={predca.sessionCheckMsg} tone="pending" className="mt-3" />
         ) : null}
@@ -907,10 +1150,7 @@ export function OverviewView() {
                 {t("predca.initBudget")}
               </span>
               <p className="mono-num text-sm text-[#2dd4bf]">
-                {formatUsd(purchaseAmount)}{" "}
-                <span className="text-[10px] uppercase tracking-wider text-[#8b95a8]">
-                  USDC
-                </span>
+                {formatUsd(purchaseAmount)}
               </p>
             </div>
             <p className="w-full text-[10px] text-[#fbbf24]">
@@ -938,15 +1178,24 @@ export function OverviewView() {
               {t("predca.lastRun")}
             </p>
             <ul className="grid gap-1 sm:grid-cols-3">
-              {predca.lastRun.mints.map((m, i) => (
+              {predca.lastRun.mints.map((m, i) => {
+                const fill = predca.runFills.find(
+                  (row) => row.runIndex === predca.lastRun!.runIndex.toString(),
+                );
+                const slot = fill?.slots?.[i] ?? null;
+                const tokens = rawToDollars(predca.lastRun!.amounts[i]);
+                const tokenText = formatGrouped(tokens, { max: 6 });
+                return (
                 <li
                   key={i}
+                  title={t("predca.runMintAddress", { mint: m.toBase58() })}
                   className="rounded border border-[#1e2633] bg-[#0c0e12] px-2 py-1.5 mono-num"
                 >
-                  {shortPk(m)} ·{" "}
-                  {formatUsd(rawToDollars(predca.lastRun!.amounts[i]))} USDC
+                  {mintLabel(m)} · {tokenText}
+                  {slot ? ` · ${formatUsd(slot.price)}` : ""}
                 </li>
-              ))}
+                );
+              })}
             </ul>
           </div>
         )}
@@ -961,13 +1210,15 @@ export function OverviewView() {
           },
           {
             label: t("tile.usdcWallet"),
-            value: fmtTile(displayOwnerUsdc),
-            unit: "USDC",
+            value: fmtMoney(displayOwnerUsdc),
+            unit: "",
           },
           {
             label: t("tile.portfolioPreStock"),
-            value: fmtTile(displayPortfolioUsd, 0),
-            unit: "USD",
+            value: portfolioUnknown
+              ? t("runPrice.unknown")
+              : fmtMoney(displayPortfolioUsd, 0),
+            unit: "",
           },
         ].map((c) => (
           <div
@@ -979,15 +1230,38 @@ export function OverviewView() {
             </p>
             <p className="mono-num mt-2 text-2xl text-[#2dd4bf]">
               {c.value}
-              <span className="ml-1 text-xs text-[#8b95a8]">{c.unit}</span>
+              {c.unit ? (
+                <span className="ml-1 text-xs text-[#8b95a8]">{c.unit}</span>
+              ) : null}
             </p>
           </div>
         ))}
       </div>
       {connected && (
-        <p className="text-[10px] text-[#8b95a8]">
-          {t("tile.portfolioHint")}
-        </p>
+        <div className="space-y-1 text-[10px] text-[#8b95a8]">
+          <p>{t("tile.portfolioHint")}</p>
+          {pricesReady && <p>{t("prices.source")}</p>}
+          {pricesReady && predca.jupPrices.source === "cache" && (
+            <p>{t("prices.stale", { time: priceClock })}</p>
+          )}
+          {pricesReady && !predca.pricesLoading && !anyTokenPrice && (
+            <p>{t("prices.unavailable")}</p>
+          )}
+          {portfolioPriceUnknown ? <p>{t("runPrice.loading")}</p> : null}
+          {portfolioBalanceStale && predca.balanceWarning ? (
+            <>
+              <p className="text-[#fbbf24]">{t(predca.balanceWarning)}</p>
+              <p className="text-[#fbbf24]">{t("portfolio.staleHint")}</p>
+            </>
+          ) : null}
+          {connected && predca.rpcWarning ? (
+            <p className="text-[#fbbf24]">{t(predca.rpcWarning)}</p>
+          ) : null}
+          {allAtCost &&
+            !(connected && predca.positions.length > 0 && !pnlSummary(predca.positions).hasPriced) && (
+              <p>{t("positions.legacyHint")}</p>
+            )}
+        </div>
       )}
 
       <div className="grid gap-4 lg:grid-cols-2 lg:items-stretch">
@@ -995,13 +1269,13 @@ export function OverviewView() {
           <h2 className="mb-4 text-[11px] uppercase tracking-[0.15em] text-[#a78bfa]">
             {connected
               ? t("holdings.titleOnChain")
-              : t("holdings.titleOffline")}
+              : t("holdings.titleDisconnected")}
           </h2>
           {displayHoldings.length === 0 ? (
             <p className="text-xs text-[#8b95a8]">
               {connected
                 ? t("holdings.emptyConnected")
-                : t("holdings.empty")}
+                : t("holdings.emptyDisconnected")}
             </p>
           ) : (
             <HoldingsPie holdings={displayHoldings} />
@@ -1018,6 +1292,11 @@ export function OverviewView() {
                 {top3Subtitle ? (
                   <p className="mt-0.5 text-[10px] normal-case tracking-normal text-[#8b95a8]">
                     {top3Subtitle}
+                  </p>
+                ) : null}
+                {restoredClock ? (
+                  <p className="mt-0.5 text-[10px] normal-case tracking-normal text-[#8b95a8]">
+                    {t("top3.restored", { time: restoredClock })}
                   </p>
                 ) : null}
               </div>
@@ -1061,41 +1340,94 @@ export function OverviewView() {
                     : t("empty.connectWallet")}
                 </li>
               )}
-              {top3.map((r, i) => (
+              {top3.map((r, i) => {
+                const premium = premiumText(r.name);
+                return (
                 <li
                   key={`${r.name}-${i}`}
-                  className="flex items-center justify-between rounded border border-[#1e2633] bg-[#0c0e12] px-3 py-2"
+                  className="rounded border border-[#1e2633] bg-[#0c0e12] px-3 py-2"
                 >
-                  <span className="flex items-center gap-3 text-sm">
-                    <span className="mono-num text-[#2dd4bf]">#{i + 1}</span>
-                    {r.name}
-                  </span>
-                  <span className="mono-num text-sm text-[#a78bfa]">
-                    {r.score.toFixed(1)}
-                  </span>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="flex items-center gap-3 text-sm">
+                      <span className="mono-num text-[#2dd4bf]">#{i + 1}</span>
+                      {r.name}
+                    </span>
+                    <span className="mono-num text-sm text-[#a78bfa]">
+                      {formatGrouped(r.score, { min: 1, max: 1 })}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-[10px] text-[#8b95a8]">
+                    <span className="mono-num">
+                      {t("positions.col.price")}{" "}
+                      {fmtUsdAmount(
+                        quoteByName(predca.jupPrices.quotes, r.name)?.usdPrice ??
+                          r.priceNow,
+                        locale,
+                      ) ?? t("positions.noData")}
+                    </span>
+                    {" · "}
+                    <span
+                      className={PREMIUM_TONE_CLASS[premium.tone]}
+                      title={t(premium.tooltipKey)}
+                      aria-label={`${t(premium.labelKey)}: ${premium.text}`}
+                    >
+                      {premium.text}
+                    </span>
+                  </p>
                 </li>
-              ))}
+                );
+              })}
             </ol>
+            {premiumBasis ? (
+              <p className="mt-3 text-[10px] normal-case leading-relaxed tracking-normal text-[#8b95a8]">
+                {t(`rank.premiumBasis.${premiumBasis}`)}
+              </p>
+            ) : null}
             {rankError && (
               <p className="mt-3 text-xs text-[#f87171]">{rankError}</p>
             )}
-            {purchaseDisabledReason && !purchaseMsg && (
+            {purchaseDisabledReason && !purchaseText && (
               <p className="mt-3 rounded border border-[#fbbf2433] bg-[#fbbf2411] px-3 py-2 text-xs text-[#fbbf24]">
                 {purchaseDisabledReason}
               </p>
             )}
+            {budgetPrompt ? (
+              <div className="mt-3 rounded border border-[#fbbf2433] bg-[#fbbf2411] px-3 py-2 text-xs text-[#fbbf24]">
+                <p>
+                  {t("purchase.confirmBudget", {
+                    from: formatUsd(budgetPrompt.from),
+                    to: formatUsd(budgetPrompt.to),
+                  })}
+                </p>
+                <div className="mt-2 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={acceptBudgetAndBuy}
+                    className="rounded border border-current px-2 py-1 text-[10px] uppercase tracking-wider"
+                  >
+                    {t("btn.confirm")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBudgetPrompt(null)}
+                    className="rounded border border-current px-2 py-1 text-[10px] uppercase tracking-wider"
+                  >
+                    {t("btn.cancel")}
+                  </button>
+                </div>
+              </div>
+            ) : null}
             {dupNotice("buy", resolvePurchaseAmount(predca.weeklyBudgetUsd, ownerBase58))}
-            {purchaseMsg && (
+            {dupInfoNotice("buy", resolvePurchaseAmount(predca.weeklyBudgetUsd, ownerBase58))}
+            {shownBuyPreview && (
+              <p className="mt-3 text-[10px] text-[#8b95a8]">{shownBuyPreview}</p>
+            )}
+            <PrivySignWaitNotice className="mt-3" />
+            {purchaseText && (
               <p
-                className={`mt-3 break-all rounded border px-3 py-2 text-xs ${
-                  purchaseTone === "pending"
-                    ? "border-[#fbbf2433] bg-[#fbbf2411] text-[#fbbf24]"
-                    : /nieudany|failed|Could not|Nie udało/i.test(purchaseMsg)
-                      ? "border-[#f8717133] bg-[#f8717111] text-[#fca5a5]"
-                      : "border-[#2dd4bf33] bg-[#2dd4bf11] text-[#2dd4bf]"
-                }`}
+                className={`mt-3 break-all rounded border px-3 py-2 text-xs ${purchaseClass}`}
               >
-                {txMessageWithLink(purchaseMsg)}
+                {txMessageWithLink(purchaseText)}
               </p>
             )}
           </section>
@@ -1106,14 +1438,14 @@ export function OverviewView() {
                 ? t("lastPurchase.titleOnChain")
                 : connected
                   ? t("lastPurchase.titleConnected")
-                  : t("lastPurchase.titleOffline")}
+                  : t("lastPurchase.titleDisconnected")}
             </h2>
-            <div className="flex-1 space-y-1 text-sm pb-5" key={portfolioRevision}>
+            <div className="flex-1 space-y-1 text-sm pb-5">
               {!displayLastPurchase || displayLastPurchase.tokens.length === 0 ? (
                 <p className="text-[#8b95a8]">
                   {connected
                     ? t("lastPurchase.emptyConnected")
-                    : t("lastPurchase.empty")}
+                    : t("lastPurchase.emptyDisconnected")}
                 </p>
               ) : (
                 <>
@@ -1123,33 +1455,423 @@ export function OverviewView() {
                   </p>
                   <p>
                     <span className="text-[#8b95a8]">{t("lastPurchase.budget")} </span>
-                    <span className="mono-num text-[#2dd4bf]">
-                      ${displayLastPurchase.amountUsd.toFixed(2)}
-                    </span>
-                    <span className="text-[#8b95a8]">
-                      {" "}
-                      {t("lastPurchase.perToken", {
-                        amount: Number(displayLastPurchase.perTokenUsd).toFixed(2),
-                      })}
-                    </span>
+                    {predca.lastPurchaseOnChain?.priceKnown === false ? (
+                      <span className="mono-num text-[#8b95a8]">
+                        {t("runPrice.unknown")}
+                      </span>
+                    ) : (
+                      <>
+                        <span className="mono-num text-[#2dd4bf]">
+                          {formatDollars(displayLastPurchase.amountUsd)}
+                        </span>
+                        <span className="text-[#8b95a8]">
+                          {" "}
+                          {t("lastPurchase.perToken", {
+                            amount: formatGrouped(
+                              Number(displayLastPurchase.perTokenUsd),
+                              { min: 2, max: 2 },
+                            ),
+                          })}
+                        </span>
+                      </>
+                    )}
                   </p>
+                  {predca.lastPurchaseOnChain?.priceKnown === false ? (
+                    <p className="text-[10px] text-[#8b95a8]">{t("runPrice.loading")}</p>
+                  ) : null}
                   <p>
                     <span className="text-[#8b95a8]">{t("lastPurchase.bought")} </span>
-                    {displayLastPurchase.tokens.join(" · ")}
+                    {displayLastPurchase.tokens
+                      .map((name, i) => {
+                        const amt = displayLastPurchase.tokenAmounts?.[i];
+                        if (amt == null || !Number.isFinite(amt)) return name;
+                        const text = formatGrouped(amt, { max: 6 });
+                        return `${name} × ${text}`;
+                      })
+                      .join(" · ")}
                   </p>
                 </>
               )}
             </div>
             <span
               className="pointer-events-none absolute bottom-2 right-3 mono-num text-[10px] tabular-nums text-[#5c6578]"
-              title="PreStocks DCA Noir"
+              title="noir 3.0"
             >
               v{APP_VERSION}
             </span>
           </section>
         </div>
       </div>
+
+      {showPnl && (
+        <PnlSection
+          rows={predca.positions}
+          locale={locale}
+          detailsOpen={detailsOpen}
+          onToggleDetails={() => setDetailsOpen((open) => !open)}
+          balancesStale={portfolioBalanceStale}
+        />
+      )}
+
+      {showPnl && detailsOpen && (
+        <PositionsCard
+          rows={predca.positions}
+          prices={predca.jupPrices}
+          fmt={fmtTile}
+          locale={locale}
+        />
+      )}
+
+      {showPnl && detailsOpen && (
+        <PricesPanel
+          prices={predca.jupPrices}
+          pricesLoading={predca.pricesLoading}
+          pricesReady={pricesReady}
+          locale={locale}
+          clock={priceClock}
+          now={priceNow}
+          onRefresh={() => {
+            setPriceNow(Date.now());
+            void predca.refreshPrices();
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+function statusLabel(
+  flag: PriceRowFlag,
+  t: (key: string, vars?: Record<string, string | number>) => string,
+  clock: string,
+): string {
+  if (flag === "cache") return t("prices.lastRead", { time: clock });
+  if (flag === "no-data") return t("positions.noData");
+  if (flag === "suspect") return t("prices.suspect");
+  if (flag === "low-liquidity") return t("prices.lowLiquidity");
+  return t("prices.multiplier");
+}
+
+function PricesPanel({
+  prices,
+  pricesLoading,
+  pricesReady,
+  locale,
+  clock,
+  now,
+  onRefresh,
+}: {
+  prices: JupPrices;
+  pricesLoading: boolean;
+  pricesReady: boolean;
+  locale: string;
+  clock: string;
+  now: number;
+  onRefresh: () => void;
+}) {
+  const { t } = useI18n();
+  const loading = !pricesReady;
+  const rows = priceRows(prices.quotes, prices.fetchedAt, prices);
+  const badgeClock = (name: string): string => {
+    const at = prices.carriedAt?.[name];
+    if (at != null && Number.isFinite(at)) return fmtPriceClock(at, now, locale);
+    return clock;
+  };
+  return (
+    <section className="rounded-lg border border-[#1e2633] bg-[#141820] p-5">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <h2 className="text-[11px] uppercase tracking-[0.15em] text-[#a78bfa]">
+          {t("prices.panelTitle")}
+        </h2>
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={pricesLoading}
+          title={t("prices.refresh")}
+          aria-label={t("prices.refresh")}
+          className="rounded border border-[#1e2633] px-2 py-1 text-[10px] uppercase tracking-wider text-[#8b95a8] hover:text-[#e8eef5] disabled:opacity-40"
+        >
+          ↻
+        </button>
+      </div>
+      {loading ? (
+        <p className="text-xs text-[#8b95a8]">{t("prices.loading")}</p>
+      ) : (
+        <>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="text-[10px] uppercase tracking-wider text-[#8b95a8]">
+                  <th className="py-1 pr-3 font-medium">{t("prices.col.company")}</th>
+                  <th className="py-1 pr-3 font-medium">{t("prices.col.price")}</th>
+                  <th className="py-1 pr-3 font-medium" title={t("premium.tooltip")}>
+                    {t("prices.col.premium")}
+                  </th>
+                  <th className="hidden py-1 font-medium sm:table-cell">
+                    {t("prices.col.status")}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => {
+                  const renderBadges = () =>
+                    row.flags.map((flag) => (
+                      <Badge key={flag}>{statusLabel(flag, t, badgeClock(row.name))}</Badge>
+                    ));
+                  const stale = row.flags.includes("cache");
+                  const copy = premiumCopy(row.name, row.premiumPct, stale, "cell");
+                  const tone = copy.tone;
+                  const phrase =
+                    copy.withPct && row.premiumPct != null
+                      ? t(copy.textKey, { pct: fmtPanelPct(row.premiumPct, locale) })
+                      : t(copy.textKey);
+                  return (
+                    <tr key={row.name} className="border-t border-[#1e2633] align-top">
+                      <td className="py-2 pr-3 text-[#c5cedb]">
+                        <div>{row.name}</div>
+                        {row.flags.length > 0 && (
+                          <div className="mt-1 flex flex-wrap gap-1 sm:hidden">{renderBadges()}</div>
+                        )}
+                      </td>
+                      <td className="mono-num py-2 pr-3">
+                        {fmtUsdAmount(row.usdPrice, locale) ?? t("positions.noData")}
+                      </td>
+                      <td
+                        className={`mono-num py-2 pr-3 ${PREMIUM_TONE_CLASS[tone]}`}
+                        title={t(copy.tooltipKey)}
+                      >
+                        {phrase}
+                      </td>
+                      <td className="hidden py-2 sm:table-cell">
+                        {row.flags.length > 0 ? (
+                          <div className="flex flex-wrap gap-1">{renderBadges()}</div>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-3 text-[10px] text-[#8b95a8]">{t("prices.source")}</p>
+        </>
+      )}
+    </section>
+  );
+}
+
+function fmtPanelPct(value: number, locale: string): string {
+  return formatPremiumPct(value, locale);
+}
+
+function PnlSection({
+  rows,
+  locale,
+  detailsOpen,
+  onToggleDetails,
+  balancesStale = false,
+}: {
+  rows: PositionRow[];
+  locale: string;
+  detailsOpen: boolean;
+  onToggleDetails: () => void;
+  /** Hide the USD total. It is summed from the previous token balances. */
+  balancesStale?: boolean;
+}) {
+  const { t } = useI18n();
+  const summary = pnlSummary(rows);
+  const pnl = summary.pnlUsd;
+  const pos = pnl != null && pnl > 0;
+  const neg = pnl != null && pnl < 0;
+  const pnlClass = pos ? "text-[#34d399]" : neg ? "text-[#f87171]" : "text-[#8b95a8]";
+  const money = summary.hasPriced ? fmtSignedPnl(pnl, summary.pnlPct, locale) : null;
+  const atCost = fmtUsdAmount(summary.unpricedCostUsd, locale);
+  return (
+    <section className="rounded-lg border border-[#1e2633] bg-[#141820] p-5">
+      <h2 className="mb-2 text-[11px] uppercase tracking-[0.15em] text-[#a78bfa]">
+        {t("pnl.title")}
+      </h2>
+      {balancesStale ? (
+        <p className="mono-num text-sm text-[#c5cedb]">{t("runPrice.unknown")}</p>
+      ) : money ? (
+        <p className={`mono-num text-lg ${pnlClass}`}>
+          {t("pnl.total")} {money}
+        </p>
+      ) : rows.some((row) => row.valueKnown === false) ? (
+        <p className="mono-num text-sm text-[#c5cedb]">
+          {t("runPrice.unknown")}
+          <span className="mt-1 block text-[10px] text-[#8b95a8]">
+            {t("runPrice.loading")}
+          </span>
+        </p>
+      ) : (
+        <p className="mono-num text-sm text-[#c5cedb]">
+          {t("pnl.atCostValue", { value: atCost ?? t("positions.noData") })}
+        </p>
+      )}
+      {summary.hasUnpricedV2 && (
+        <p className="mt-1 text-[10px] text-[#8b95a8]">{t("pnl.noPriceNote")}</p>
+      )}
+      {rows.some((row) => row.valueKnown === false) && money ? (
+        <p className="mt-1 text-[10px] text-[#8b95a8]">{t("runPrice.loading")}</p>
+      ) : null}
+      {!summary.hasPriced && summary.hasLegacy && (
+        <p className="mt-1 text-[10px] text-[#8b95a8]">{t("pnl.legacyNote")}</p>
+      )}
+      {summary.hasPriced && summary.hasLegacy && (
+        <p className="mt-1 text-[10px] text-[#8b95a8]">{t("pnl.partialNote")}</p>
+      )}
+      <button
+        type="button"
+        onClick={onToggleDetails}
+        aria-expanded={detailsOpen}
+        className="mt-3 rounded border border-[#1e2633] px-3 py-1 text-[10px] uppercase tracking-wider text-[#8b95a8] hover:text-[#e8eef5]"
+      >
+        {detailsOpen ? t("pnl.hideDetails") : t("pnl.details")}
+      </button>
+    </section>
+  );
+}
+
+function PositionsCard({
+  rows,
+  prices,
+  fmt,
+  locale,
+}: {
+  rows: PositionRow[];
+  prices: JupPrices;
+  fmt: (value: number | null, digits?: number) => string;
+  locale: string;
+}) {
+  const { t } = useI18n();
+  return (
+    <section className="rounded-lg border border-[#1e2633] bg-[#141820] p-5">
+      <h2 className="mb-3 text-[11px] uppercase tracking-[0.15em] text-[#a78bfa]">
+        {t("positions.title")}
+      </h2>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-xs">
+          <thead>
+            <tr className="text-[10px] uppercase tracking-wider text-[#8b95a8]">
+              <th className="py-1 pr-3 font-medium">{t("positions.col.asset")}</th>
+              <th className="hidden py-1 pr-3 font-medium sm:table-cell">
+                {t("positions.col.units")}
+              </th>
+              <th className="py-1 pr-3 font-medium">{t("positions.col.price")}</th>
+              <th className="py-1 pr-3 font-medium">{t("positions.col.value")}</th>
+              <th className="hidden py-1 pr-3 font-medium sm:table-cell">
+                {t("positions.col.avgBuy")}
+              </th>
+              <th className="py-1 font-medium">{t("positions.col.pnl")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => {
+              const quote = quoteByName(prices.quotes, row.name);
+              const suspect = prices.suspect.some(
+                (name) => canonicalName(name) === canonicalName(row.name),
+              );
+              const priceStale =
+                prices.source === "cache" ||
+                prices.carried.some(
+                  (name) => canonicalName(name) === canonicalName(row.name),
+                );
+              const discountPct = livePremiumPct(row.name, prices);
+              const discount = premiumCopy(row.name, discountPct, priceStale, "cell");
+              const discountText =
+                discount.withPct && discountPct != null
+                  ? t(discount.textKey, { pct: formatPremiumPct(discountPct, locale) })
+                  : t(discount.textKey);
+              const pnlPos = row.pnlUsd != null && row.pnlUsd > 0;
+              const pnlNeg = row.pnlUsd != null && row.pnlUsd < 0;
+              let pnlClass = "text-[#8b95a8]";
+              if (pnlPos) pnlClass = "text-[#34d399]";
+              else if (pnlNeg) pnlClass = "text-[#f87171]";
+              const lowLiq = Boolean(quote && isLowLiquidity(quote));
+              const valueUnknown = row.valueKnown === false;
+              const showBadges =
+                (row.basis === "cost" && !valueUnknown) ||
+                valueUnknown ||
+                suspect ||
+                lowLiq ||
+                Boolean(quote?.multiplierChange);
+              return (
+                <tr key={row.name} className="border-t border-[#1e2633] align-top">
+                  <td className="py-2 pr-3 text-[#c5cedb]">
+                    <div>{row.name}</div>
+                    {showBadges && (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {row.basis === "cost" && !valueUnknown && (
+                          <Badge>{t("positions.atCost")}</Badge>
+                        )}
+                        {valueUnknown && <Badge>{t("runPrice.loading")}</Badge>}
+                        {suspect && <Badge>{t("prices.suspect")}</Badge>}
+                        {lowLiq && <Badge>{t("prices.lowLiquidity")}</Badge>}
+                        {quote?.multiplierChange && (
+                          <Badge>{t("prices.multiplier")}</Badge>
+                        )}
+                      </div>
+                    )}
+                    {row.mismatch && (
+                      <p className="mt-1 text-[10px] text-[#fbbf24]">
+                        {t("positions.mismatch")}
+                      </p>
+                    )}
+                    {showsSpacexDiscount(row.name) && (
+                      <p
+                        className={`mt-1 ${PREMIUM_TONE_CLASS[discount.tone]}`}
+                        title={t(discount.tooltipKey)}
+                        aria-label={`${t(discount.labelKey)}: ${discountText}`}
+                      >
+                        {discountText}
+                      </p>
+                    )}
+                  </td>
+                  <td className="mono-num hidden py-2 pr-3 sm:table-cell">
+                    {fmt(row.units, 4)}
+                  </td>
+                  <td className="mono-num py-2 pr-3">
+                    {fmtUsdAmount(row.priceNow, locale) ?? t("positions.noData")}
+                  </td>
+                  <td className="mono-num py-2 pr-3 text-[#2dd4bf]">
+                    {valueUnknown
+                      ? t("runPrice.unknown")
+                      : (fmtUsdAmount(row.valueUsd, locale) ?? t("positions.noData"))}
+                  </td>
+                  <td className="mono-num hidden py-2 pr-3 sm:table-cell">
+                    {valueUnknown
+                      ? t("runPrice.unknown")
+                      : (fmtUsdAmount(row.avgBuyPrice, locale) ?? "—")}
+                  </td>
+                  <td className={`mono-num py-2 ${pnlClass}`}>
+                    {valueUnknown ? (
+                      t("runPrice.unknown")
+                    ) : positionPnlKind(row) === "legacy" ? (
+                      <span title={t("pnl.legacyNote")}>—</span>
+                    ) : positionPnlKind(row) === "nodata" ? (
+                      t("positions.noData")
+                    ) : (
+                      fmtSignedPnl(row.pnlUsd, row.pnlPct, locale)
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function Badge({ children }: { children: string }) {
+  return (
+    <span className="rounded border border-[#fbbf2444] px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-[#fbbf24]">
+      {children}
+    </span>
   );
 }
 

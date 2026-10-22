@@ -1,2 +1,2 @@
-/** App UI version shown on Overview. Bump +0.01 on every release. */
-export const APP_VERSION = "4.31";
+/** App UI version shown on Overview. noir 3.0 is the first predca 3.0 build. */
+export const APP_VERSION = "5.0.0";

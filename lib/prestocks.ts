@@ -4,16 +4,42 @@
  * prestocks.com. Then direct → DCA API → session → static snapshot.
  */
 
-import { dcaApiBase, SS_PRODUCTS } from "@/lib/keys";
+import {
+  applyCompanyData,
+  companyDataFromProducts,
+  rememberCompanyRecords,
+} from "@/lib/company-data";
+import {
+  canonicalName,
+  fetchJupPrices,
+  ipoPremiumPct,
+  premiumBasisUsd,
+  quoteByName,
+  readJupPriceCache,
+  type JupPrices,
+  type JupQuote,
+} from "@/lib/jup-prices";
+import { canUseSameOriginJevProxy, dcaApiBase, SS_PRODUCTS } from "@/lib/keys";
+import { ensureRuntimeConfig } from "@/lib/runtime-config";
 import {
   HARDCODED_PREMIUMS_PCT,
   MINTS,
+  NEAR_IPO_NAMES,
   SYMBOL_BY_NAME,
   XAI_MINT,
   type PrestocksProduct,
 } from "@/lib/universe";
 
+/** Static snapshot file date (`public/data/prestocks-snapshot.json`). */
+export const PRESTOCKS_SNAPSHOT_DATE = "19.09.2026";
+
 const ORIGIN = "https://prestocks.com";
+
+export type ProductNoticeVars = {
+  detail?: string;
+  detailKey?: string;
+  date?: string;
+};
 
 export type ProductsFetchResult = {
   products: PrestocksProduct[];
@@ -21,8 +47,24 @@ export type ProductsFetchResult = {
   premiumsSource: string;
   dataSource: "live" | "live_proxy" | "api_proxy" | "session" | "snapshot";
   corsError: boolean;
+  /** Older callers and a saved Polish sentence. New notes use errorKey. */
   errorPl: string | null;
+  errorKey?: string | null;
+  errorVars?: ProductNoticeVars;
 };
+
+/** Resolve a nested detail key when the note is shown. No locale import here. */
+export function fillNoticeVars(
+  vars: ProductNoticeVars | undefined,
+  t: (key: string, vars?: Record<string, string | number>) => string,
+): Record<string, string> {
+  if (!vars) return {};
+  const out: Record<string, string> = {};
+  if (vars.detailKey) out.detail = t(vars.detailKey);
+  else if (vars.detail != null) out.detail = vars.detail;
+  if (vars.date != null) out.date = vars.date;
+  return out;
+}
 
 function assetUrl(path: string): string {
   const base = (
@@ -82,10 +124,33 @@ export function deadlineInvalidFromMetrics(
   return false;
 }
 
-function buildProducts(
+function round6(n: number): number {
+  return Math.round(n * 1e6) / 1e6;
+}
+
+function round3(n: number): number {
+  return Math.round(n * 1000) / 1000;
+}
+
+function positivePrice(v: unknown): number | null {
+  if (typeof v === "boolean" || v == null || v === "") return null;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n;
+}
+
+/** Ranking still stores a number. The UI does not display `hardcoded_fallback`. */
+export function summarizePremiumSource(products: PrestocksProduct[]): string {
+  if (products.some((p) => p.premium_source === "jupiter_stockdata")) {
+    return "jupiter_stockdata";
+  }
+  return "hardcoded_fallback (no live jupiter premium)";
+}
+
+export function buildProducts(
   metrics: Array<Record<string, unknown>>,
-  markPrices: Record<string, number>,
-  jupPrices: Record<string, number>,
+  quotes: Record<string, JupQuote>,
+  now = Date.now(),
 ): PrestocksProduct[] {
   const byMint = new Map<string, Record<string, unknown>>();
   for (const m of metrics) {
@@ -98,15 +163,17 @@ function buildProducts(
     if (mint === XAI_MINT) continue;
     const m = byMint.get(mint) ?? {};
     const sym = SYMBOL_BY_NAME[name];
-    const tokenPrice = Number(m.tokenPrice ?? jupPrices[mint] ?? 0);
-    const mark = markPrices[sym];
+    const quote = quotes[name];
+    const tokenPrice = positivePrice(m.tokenPrice) ?? quote?.usdPrice ?? null;
+    const premium = quote ? ipoPremiumPct(quote, now) : null;
+    const basis = quote ? premiumBasisUsd(quote, now) : null;
     let premium_pct: number;
     let premium_source: string;
     let markOut: number | null = null;
-    if (mark != null && Number(mark) > 0 && tokenPrice > 0) {
-      premium_pct = (tokenPrice / Number(mark) - 1) * 100;
-      premium_source = "live";
-      markOut = Number(mark);
+    if (premium != null && basis != null) {
+      premium_pct = premium;
+      premium_source = "jupiter_stockdata";
+      markOut = basis;
     } else {
       premium_pct = HARDCODED_PREMIUMS_PCT[name] ?? 0;
       premium_source = "hardcoded_fallback";
@@ -115,19 +182,16 @@ function buildProducts(
       name,
       symbol: sym,
       mint,
-      token_price_usd: tokenPrice
-        ? Math.round(tokenPrice * 1e6) / 1e6
-        : null,
-      mark_price_usd:
-        markOut != null ? Math.round(markOut * 1e6) / 1e6 : null,
-      premium_pct: Math.round(premium_pct * 1000) / 1000,
+      token_price_usd: tokenPrice != null ? round6(tokenPrice) : null,
+      mark_price_usd: markOut != null ? round6(markOut) : null,
+      premium_pct: round3(premium_pct),
       premium_source,
       market_cap_usd: (m.marketCapUSD as number) ?? null,
       holders: (m.holderCount as number) ?? null,
       volume_cum_usd: (m.cumulativeVolumeUSD as number) ?? null,
       txn_count: (m.txnCount as number) ?? null,
       change_30d_pct: (m.thirtyDayChange as number) ?? null,
-      near_ipo: name === "SpaceX",
+      near_ipo: NEAR_IPO_NAMES.some((entry) => entry === name),
       ipo_completed: Boolean(
         m.ipo_completed ?? m.ipoCompleted ?? false,
       ),
@@ -135,6 +199,40 @@ function buildProducts(
     });
   }
   return out;
+}
+
+/**
+ * Overlay a Jupiter quote onto products that already exist (API proxy or snapshot).
+ * Premium and mark move only when `ipoPremiumPct` is a number.
+ * SpaceX mark is the post-IPO reference (SPCXx, else SPCX), not the frozen stock quote.
+ * `replaceTokenPrice` writes `usdPrice` even when the product already has one
+ * (snapshot cache restore). Otherwise token price is filled only when missing.
+ */
+export function applyJupPremiums(
+  products: PrestocksProduct[],
+  quotes: Record<string, JupQuote>,
+  now: number,
+  opts?: { replaceTokenPrice?: boolean },
+): PrestocksProduct[] {
+  return products.map((p) => {
+    const q = quoteByName(quotes, p.name);
+    if (!q) return p;
+    const next: PrestocksProduct = { ...p };
+    let changed = false;
+    if (q.usdPrice != null && (opts?.replaceTokenPrice || !(p.token_price_usd != null && p.token_price_usd > 0))) {
+      next.token_price_usd = round6(q.usdPrice);
+      changed = true;
+    }
+    const premium = ipoPremiumPct(q, now);
+    const basis = premiumBasisUsd(q, now);
+    if (premium != null && basis != null) {
+      next.mark_price_usd = round6(basis);
+      next.premium_pct = round3(premium);
+      next.premium_source = "jupiter_stockdata";
+      changed = true;
+    }
+    return changed ? next : p;
+  });
 }
 
 async function fetchJson(url: string, timeoutMs = 8000): Promise<unknown> {
@@ -161,53 +259,29 @@ async function fetchJson(url: string, timeoutMs = 8000): Promise<unknown> {
   }
 }
 
-/** Live fetch from prestocks.com (server or browser). Used by /api/prestocks/live. */
-export async function loadLivePrestocks(): Promise<{
+/** Live fetch from prestocks.com metrics + Jupiter Price API v3. Used by /api/prestocks/live. */
+export async function loadLivePrestocks(prices?: Promise<JupPrices>): Promise<{
   products: PrestocksProduct[];
   totals: unknown;
   premiumsSource: string;
 }> {
-  const metricsPayload = (await fetchJson(`${ORIGIN}/api/metrics`)) as {
-    metrics?: Array<Record<string, unknown>>;
-    totals?: unknown;
-  };
+  const [metricsPayload, jup] = await Promise.all([
+    fetchJson(`${ORIGIN}/api/metrics`) as Promise<{
+      metrics?: Array<Record<string, unknown>>;
+      totals?: unknown;
+    }>,
+    prices ?? fetchJupPrices(),
+  ]);
   const metrics = metricsPayload.metrics ?? [];
-  const symbols = Object.keys(MINTS).map((n) => SYMBOL_BY_NAME[n]);
-  let markPrices: Record<string, number> = {};
-  let premiumsSource = "live_mark_price_batch";
-  try {
-    const rawMarks = (await fetchJson(
-      `${ORIGIN}/api/mark-price/batch?symbols=${symbols.join(",")}`,
-    )) as Record<string, number | { markPrice?: number }>;
-    markPrices = {};
-    for (const [sym, v] of Object.entries(rawMarks ?? {})) {
-      if (v != null && typeof v === "object" && "markPrice" in v) {
-        const n = Number((v as { markPrice?: number }).markPrice);
-        if (Number.isFinite(n)) markPrices[sym] = n;
-      } else {
-        const n = Number(v);
-        if (Number.isFinite(n)) markPrices[sym] = n;
-      }
-    }
-  } catch (e) {
-    premiumsSource = `hardcoded_fallback (${e instanceof Error ? e.message : e})`;
-  }
-  let jupPrices: Record<string, number> = {};
-  try {
-    jupPrices = (await fetchJson(
-      `${ORIGIN}/api/jupiter/price?ids=${Object.values(MINTS).join(",")}`,
-    )) as Record<string, number>;
-  } catch {
-    jupPrices = {};
-  }
+  const products = buildProducts(metrics, jup.quotes, jup.fetchedAt);
   return {
-    products: buildProducts(metrics, markPrices, jupPrices),
+    products,
     totals: metricsPayload.totals,
-    premiumsSource,
+    premiumsSource: summarizePremiumSource(products),
   };
 }
 
-async function fetchViaApiProxy(): Promise<{
+async function fetchViaApiProxy(prices?: Promise<JupPrices>): Promise<{
   products: PrestocksProduct[];
   totals: unknown;
   premiumsSource: string;
@@ -219,11 +293,18 @@ async function fetchViaApiProxy(): Promise<{
     totals?: unknown;
     premiums_source?: string;
   };
-  return {
-    products: (data.products ?? []).filter((p) => p.mint !== XAI_MINT),
-    totals: data.totals,
-    premiumsSource: data.premiums_source ?? "api_proxy",
-  };
+  const products = (data.products ?? []).filter((p) => p.mint !== XAI_MINT);
+  let premiumsSource = data.premiums_source ?? "api_proxy";
+  try {
+    const jup = await (prices ?? fetchJupPrices());
+    const overlaid = applyJupPremiums(products, jup.quotes, jup.fetchedAt);
+    if (overlaid.some((p) => p.premium_source === "jupiter_stockdata")) {
+      premiumsSource = "jupiter_stockdata";
+    }
+    return { products: overlaid, totals: data.totals, premiumsSource };
+  } catch {
+    return { products, totals: data.totals, premiumsSource };
+  }
 }
 
 function readSession(): PrestocksProduct[] | null {
@@ -263,9 +344,44 @@ function localLiveProxyUrl(): string | null {
   return `${window.location.origin}${base}/api/prestocks/live/`;
 }
 
-/** Prefer same-origin live proxy → prestocks.com → DCA API → session → snapshot. */
-export async function fetchPrestocksProducts(): Promise<ProductsFetchResult> {
-  const proxyUrl = localLiveProxyUrl();
+function listedNearIpo(name: string): boolean {
+  const want = canonicalName(name);
+  return NEAR_IPO_NAMES.some((entry) => canonicalName(entry) === want);
+}
+
+function finishProducts(products: PrestocksProduct[]): PrestocksProduct[] {
+  const now = Date.now();
+  // Server and snapshot flags are not a source. Only the client list, then fresh company data.
+  const grounded = products.map((product) => ({
+    ...product,
+    near_ipo: listedNearIpo(product.name),
+  }));
+  const incoming = companyDataFromProducts(grounded, now);
+  const byName = rememberCompanyRecords(incoming, now);
+  return applyCompanyData(grounded, byName, now);
+}
+
+function skipDirectPrestocks(): boolean {
+  if (typeof window === "undefined") return false;
+  const host = window.location.hostname;
+  return host !== "localhost" && host !== "127.0.0.1" && host !== "::1";
+}
+
+/** Same-origin proxy only on localhost. Elsewhere skip prestocks.com and reuse one Jupiter read. */
+export async function fetchPrestocksProducts(
+  prices?: JupPrices,
+): Promise<ProductsFetchResult> {
+  await ensureRuntimeConfig();
+  let inflight: Promise<JupPrices> | null = null;
+  const pricesOnce = (): Promise<JupPrices> => {
+    if (!inflight) {
+      inflight =
+        prices && prices.fetchedAt > 0 ? Promise.resolve(prices) : fetchJupPrices();
+    }
+    return inflight;
+  };
+
+  const proxyUrl = canUseSameOriginJevProxy() ? localLiveProxyUrl() : null;
   if (proxyUrl) {
     try {
       const data = (await fetchJson(proxyUrl, 20000)) as {
@@ -275,9 +391,10 @@ export async function fetchPrestocksProducts(): Promise<ProductsFetchResult> {
         premiumsSource?: string;
       };
       if (data.ok && (data.products?.length ?? 0) >= 3) {
-        writeSession(data.products ?? []);
+        const products = finishProducts(data.products ?? []);
+        writeSession(products);
         return {
-          products: data.products ?? [],
+          products,
           totals: data.totals,
           premiumsSource: data.premiumsSource ?? "live_mark_price_batch",
           dataSource: "live_proxy",
@@ -286,79 +403,102 @@ export async function fetchPrestocksProducts(): Promise<ProductsFetchResult> {
         };
       }
     } catch {
-      /* fall through to direct prestocks.com */
+      /* fall through */
+    }
+  }
+
+  let directDetailKey: string | null = "prestocks.skippedDirect";
+  let directDetail = "";
+  let looksCors = false;
+  if (!skipDirectPrestocks()) {
+    try {
+      const live = await loadLivePrestocks(pricesOnce());
+      const products = finishProducts(live.products);
+      writeSession(products);
+      return {
+        products,
+        totals: live.totals,
+        premiumsSource: live.premiumsSource,
+        dataSource: "live",
+        corsError: false,
+        errorPl: null,
+      };
+    } catch (e) {
+      directDetailKey = null;
+      directDetail = e instanceof Error ? e.message : String(e);
+      looksCors =
+        /Failed to fetch|NetworkError|CORS|blocked|Load failed/i.test(directDetail) ||
+        directDetail === "Failed to fetch";
     }
   }
 
   try {
-    const live = await loadLivePrestocks();
-    writeSession(live.products);
+    const proxied = await fetchViaApiProxy(pricesOnce());
+    if (proxied && proxied.products.length) {
+      const products = finishProducts(proxied.products);
+      writeSession(products);
+      return {
+        products,
+        totals: proxied.totals,
+        premiumsSource: proxied.premiumsSource,
+        dataSource: "api_proxy",
+        corsError: looksCors,
+        errorPl: null,
+        errorKey: looksCors ? "prestocks.corsProxy" : null,
+      };
+    }
+  } catch {
+    /* continue */
+  }
+
+  const sess = readSession();
+  if (sess) {
     return {
-      products: live.products,
-      totals: live.totals,
-      premiumsSource: live.premiumsSource,
-      dataSource: "live",
-      corsError: false,
+      products: finishProducts(sess),
+      totals: null,
+      premiumsSource: "sessionStorage",
+      dataSource: "session",
+      corsError: looksCors,
       errorPl: null,
+      errorKey: "prestocks.sessionFallback",
     };
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    const looksCors =
-      /Failed to fetch|NetworkError|CORS|blocked|Load failed/i.test(msg) ||
-      msg === "Failed to fetch";
+  }
 
-    try {
-      const proxied = await fetchViaApiProxy();
-      if (proxied && proxied.products.length) {
-        writeSession(proxied.products);
-        return {
-          products: proxied.products,
-          totals: proxied.totals,
-          premiumsSource: proxied.premiumsSource,
-          dataSource: "api_proxy",
-          corsError: looksCors,
-          errorPl: looksCors
-            ? "CORS zablokował prestocks.com w przeglądarce — użyto proxy API."
-            : null,
-        };
+  try {
+    const snap = await fetchSnapshot();
+    let products = (snap.products ?? []).filter((p) => p.mint !== XAI_MINT);
+    let premiumsSource = "static_snapshot";
+    const cached = readJupPriceCache();
+    if (cached) {
+      products = applyJupPremiums(products, cached.quotes, cached.fetchedAt, {
+        replaceTokenPrice: true,
+      });
+      if (products.some((p) => p.premium_source === "jupiter_stockdata")) {
+        premiumsSource = "jupiter_stockdata";
       }
-    } catch {
-      /* continue */
     }
-
-    const sess = readSession();
-    if (sess) {
-      return {
-        products: sess,
-        totals: null,
-        premiumsSource: "sessionStorage",
-        dataSource: "session",
-        corsError: looksCors,
-        errorPl:
-          "Nie udało się pobrać live PreStocks (CORS/sieć). Pokazuję ostatni udany fetch z tej sesji.",
-      };
-    }
-
-    try {
-      const snap = await fetchSnapshot();
-      return {
-        products: snap.products,
-        totals: snap.totals,
-        premiumsSource: "static_snapshot",
-        dataSource: "snapshot",
-        corsError: looksCors,
-        errorPl:
-          "CORS/sieć: brak live PreStocks. Użyto statycznego snapshota (nie live).",
-      };
-    } catch {
-      return {
-        products: [],
-        totals: null,
-        premiumsSource: "none",
-        dataSource: "snapshot",
-        corsError: looksCors,
-        errorPl: `Błąd PreStocks: ${msg}. Brak snapshota.`,
-      };
-    }
+    return {
+      products: finishProducts(products),
+      totals: snap.totals,
+      premiumsSource,
+      dataSource: "snapshot",
+      corsError: looksCors,
+      errorPl: null,
+      errorKey: "prestocks.snapshotDated",
+      errorVars: { date: PRESTOCKS_SNAPSHOT_DATE },
+    };
+  } catch {
+    return {
+      products: finishProducts([]),
+      totals: null,
+      premiumsSource: "none",
+      dataSource: "snapshot",
+      corsError: looksCors,
+      errorPl: null,
+      errorKey: "prestocks.snapshotError",
+      errorVars: directDetailKey
+        ? { detailKey: directDetailKey }
+        : { detail: directDetail },
+    };
   }
 }
