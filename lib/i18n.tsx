@@ -32,7 +32,7 @@ export { DEFAULT_LOCALE, LOCALE_STORAGE_KEY };
 type Dict = Record<string, string>;
 
 const pl: Dict = {
-  "nav.brand": "noir 3.0",
+  "nav.brand": "PreStocks·DCA",
   "nav.overview": "Overview",
   "nav.settings": "Ustawienia",
   "nav.history": "Historia",
@@ -514,7 +514,7 @@ const pl: Dict = {
 };
 
 const en: Dict = {
-  "nav.brand": "noir 3.0",
+  "nav.brand": "PreStocks·DCA",
   "nav.overview": "Overview",
   "nav.settings": "Settings",
   "nav.history": "History",

@@ -1481,7 +1481,7 @@ export function OverviewView() {
         </div>
         <span
           className="pointer-events-none absolute bottom-2 right-3 mono-num text-[10px] tabular-nums text-[#5c6578]"
-          title="noir 3.0"
+          title={`v${APP_VERSION}`}
         >
           v{APP_VERSION}
         </span>

@@ -22,8 +22,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "PreStocks·DCA",
-  description:
-    "Weekly DCA na PreStocks SPL — noir 3.0 (predca 3.0, priced buys v2)",
+  description: "PreStocks·DCA",
 };
 
 export default function RootLayout({
