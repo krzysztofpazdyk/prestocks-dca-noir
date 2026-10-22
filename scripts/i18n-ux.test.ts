@@ -36,3 +36,108 @@ test("Polish deposit hints no longer say Deposit or Hint", () => {
   const nav = pl.match(/"nav\.selectWallet":\s*"([^"]+)"/);
   assert.equal(nav?.[1], "Zaloguj");
 });
+
+test("jupiter price and position keys exist in Polish and English", () => {
+  const keys = [
+    "positions.title",
+    "positions.col.asset",
+    "positions.col.units",
+    "positions.col.price",
+    "positions.col.value",
+    "positions.col.avgBuy",
+    "positions.col.pnl",
+    "positions.noData",
+    "positions.atCost",
+    "positions.legacyHint",
+    "positions.mismatch",
+    "prices.source",
+    "prices.stale",
+    "prices.unavailable",
+    "prices.suspect",
+    "prices.lowLiquidity",
+    "prices.multiplier",
+    "prices.panelTitle",
+    "prices.col.company",
+    "prices.col.price",
+    "prices.col.premium",
+    "prices.col.status",
+    "prices.loading",
+    "prices.lastRead",
+    "pnl.title",
+    "pnl.details",
+    "pnl.hideDetails",
+    "pnl.total",
+    "pnl.atCostValue",
+    "pnl.legacyNote",
+    "pnl.partialNote",
+    "history.legPnl",
+    "history.runPnl",
+    "premium.label",
+    "premium.noData",
+    "premium.estimate",
+    "history.buyPrice",
+    "prestocks.snapshotDated",
+  ];
+  for (const key of keys) {
+    assert.equal(values(key).length, 2, key);
+    for (const text of values(key)) assert.ok(text.length > 0, key);
+  }
+  assert.deepEqual(values("positions.title"), ["Pozycje", "Positions"]);
+  assert.deepEqual(values("positions.noData"), ["brak danych", "no data"]);
+  assert.deepEqual(values("premium.estimate"), ["szacunek", "estimate"]);
+  assert.equal(
+    values("prices.stale")[0],
+    "ceny: ostatni odczyt · {time}",
+  );
+  assert.equal(
+    values("prestocks.snapshotDated")[1],
+    "No live PreStocks. Using static snapshot from {date} (not live).",
+  );
+});
+
+test("stale portfolio and RPC timeout copy exists in Polish and English", () => {
+  for (const key of ["portfolio.staleHint", "rpc.timeoutWarning"]) {
+    const texts = values(key);
+    assert.equal(texts.length, 2, key);
+    for (const text of texts) assert.ok(text.length > 0, key);
+  }
+  assert.equal(
+    values("portfolio.staleHint")[0],
+    "Wartość portfela może być nieaktualna do czasu odczytu sald.",
+  );
+  assert.equal(
+    values("portfolio.staleHint")[1],
+    "Portfolio value may be out of date until balances load.",
+  );
+  assert.equal(
+    values("rpc.timeoutWarning")[0],
+    "RPC Devnet odpowiada zbyt wolno — pokazuję poprzednie dane. Spróbuję ponownie automatycznie.",
+  );
+  assert.equal(
+    values("rpc.timeoutWarning")[1],
+    "Devnet RPC is responding slowly — showing the previous data. Retrying automatically.",
+  );
+});
+
+test("Overview and Trading desk stay English in the Polish dictionary", () => {
+  const pl = src.slice(src.indexOf("const pl"), src.indexOf("const en"));
+  assert.match(pl, /"nav\.overview": "Overview"/);
+  assert.match(pl, /"overview\.title": "Overview"/);
+  assert.match(pl, /Trading desk/);
+  assert.doesNotMatch(pl, /"positions\.title": "[^"]*Hint/);
+  assert.equal(values("overview.rpcStale")[0], "ostatni odczyt");
+  assert.notEqual(values("prices.stale")[0], values("overview.rpcStale")[0]);
+  assert.match(pl, /on-chain/);
+  assert.equal(values("history.buyPrice")[0], "po {price} · {units} szt.");
+  assert.equal(values("history.buyPrice")[1], "at {price} · {units} units");
+  assert.equal(values("prices.panelTitle")[0], "Ceny tokenów vs wycena spółek");
+  assert.equal(values("prices.lastRead")[0], "ostatni odczyt · {time}");
+  assert.equal(values("pnl.legacyNote")[1], "PnL available for purchases at market price (coming soon).");
+  assert.deepEqual(values("pnl.details"), ["Dodatkowe informacje", "Additional Info"]);
+  assert.deepEqual(values("pnl.hideDetails"), ["Ukryj dodatkowe informacje", "Hide additional info"]);
+  const history = readFileSync(
+    new URL("../components/HistoryView.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(history, />\s*on-chain\s*</);
+});

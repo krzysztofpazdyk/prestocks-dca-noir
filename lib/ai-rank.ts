@@ -4,16 +4,15 @@
  * Hosted TYPESAFE must NEVER live in this bundle — only localStorage keys.
  */
 
+import { shown } from "@/lib/i18n";
 import { metricsRank } from "@/lib/metrics-rank";
+import { premiumBasisFor } from "@/lib/premium-view";
 import type { RankPrefs } from "@/lib/rank-prefs";
 import { readRankPrefs } from "@/lib/rank-prefs";
 import type { PrestocksProduct, RankResult, RankRow } from "@/lib/universe";
 
 const XAI_CHAT_URL = "https://api.x.ai/v1/chat/completions";
 const GROK_MODELS = ["grok-4.5", "grok-3-mini", "grok-2-latest"] as const;
-
-const JEV_PROXY_HINT =
-  "Jev niedostępny przez lokalny proxy /api/jev — uruchom npm run dev i sprawdź TYPESAFE_API_KEY.";
 
 function jevProxyUrl(): string {
   const base = (
@@ -40,7 +39,7 @@ function prefsLine(prefs: RankPrefs): string {
     : "deadlines_unimportant=false (exclude expired / invalid-deadline names)";
   const ipoBit = prefs.premiumsMatter
     ? prefs.premiumsEspeciallyNearIpo
-      ? "premiums_matter=true especially near IPO (SpaceX)"
+      ? "premiums_matter=true especially near IPO"
       : "premiums_matter=true but de-emphasize near-IPO premium"
     : "premiums_matter=false (ignore premium/discount vs valuation for ranking)";
   const postIpoBit = prefs.buyDespiteIpo
@@ -58,7 +57,7 @@ function scoringHint(prefs: RankPrefs): string {
     : "Do not pick PreStocks that are past expiry or have an invalid deadline.";
   const premHint = prefs.premiumsMatter
     ? prefs.premiumsEspeciallyNearIpo
-      ? "Weight premiums heavily (discount vs mark is good; rich premium needs strong thesis). Near-IPO (SpaceX) premium dynamics are especially important."
+      ? "Weight premiums heavily (discount vs mark is good; rich premium needs strong thesis). Near-IPO premium dynamics are especially important."
       : "Weight premiums heavily (discount vs mark is good; rich premium needs strong thesis). Do not overweight near-IPO premium dynamics."
     : "Do not treat premium/discount vs mark as a ranking signal (premium_pct is informational only). Near-IPO premium bonus is OFF.";
   const postIpoHint = prefs.buyDespiteIpo
@@ -178,7 +177,7 @@ function buildQuestions(
     : "skip expired / invalid-deadline names";
   const ipoPhrase = prefs.premiumsMatter
     ? prefs.premiumsEspeciallyNearIpo
-      ? "premiums matter especially near IPO/SpaceX"
+      ? "premiums matter especially near IPO"
       : "premiums matter but de-emphasize near-IPO premium"
     : "ignore premium/discount vs valuation for ranking";
   const postIpoPhrase = prefs.buyDespiteIpo
@@ -274,7 +273,7 @@ async function callGrok(
     premiums_matter: rankPrefs.premiumsMatter,
     premiums_especially_near_ipo: rankPrefs.premiumsEspeciallyNearIpo,
     buy_despite_ipo: rankPrefs.buyDespiteIpo,
-    near_ipo_examples: ["SpaceX"],
+    near_ipo_examples: [],
     exclude: rankPrefs.exclusions,
   };
   const rows = products.map((p) => ({
@@ -294,7 +293,7 @@ async function callGrok(
     : "do not pick names past expiry / with invalid deadline";
   const ipoSys = rankPrefs.premiumsMatter
     ? rankPrefs.premiumsEspeciallyNearIpo
-      ? "premiums matter especially near IPO (SpaceX)"
+      ? "premiums matter especially near IPO"
       : "premiums matter but de-emphasize near-IPO premium"
     : "ignore premium/discount vs valuation for ranking";
   const postIpoSys = rankPrefs.buyDespiteIpo
@@ -411,17 +410,13 @@ async function callJev(
     resp = await fetchWithTimeout(url, init);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    throw new Error(
-      `Jev proxy niedostępny (${msg}). Uruchom aplikację przez npm run dev.`,
-    );
+    throw new Error(shown("jev.proxyDown", { error: msg }));
   }
   if (resp.status === 404 || resp.status === 405) {
-    throw new Error(
-      "Brak proxy Jev (static Pages). Uruchom npm run dev, żeby Jev działał.",
-    );
+    throw new Error(shown("jev.noProxy"));
   }
   if (resp.status === 401) {
-    throw new Error("Nieprawidłowy TYPESAFE_API_KEY (Jev 401).");
+    throw new Error(shown("jev.badKey"));
   }
   if (!resp.ok) {
     const text = await resp.text();
@@ -439,6 +434,7 @@ function jevResultFromAnswers(
     summary?: string;
     model?: string;
   },
+  prefs: Pick<RankPrefs, "premiumsMatter">,
 ): RankResult {
   const scores: RankRow[] = products.map((p) => {
     const qid = `score_${p.symbol.toLowerCase()}`;
@@ -458,8 +454,8 @@ function jevResultFromAnswers(
   return {
     mode: "byok_ai",
     sourceLabel: grok.skipped
-      ? "Źródło: PreStocks + AI (BYOK · Jev)"
-      : "Źródło: PreStocks + AI (BYOK · Grok+Jev)",
+      ? shown("rank.source.jev")
+      : shown("rank.source.grokJev"),
     pipeline,
     top3: scores.slice(0, 3),
     scores,
@@ -474,6 +470,7 @@ function jevResultFromAnswers(
       summary: grok.summary,
     },
     fetchedAt: new Date().toISOString(),
+    premiumBasis: premiumBasisFor("client", prefs.premiumsMatter),
   };
 }
 
@@ -501,8 +498,7 @@ export async function runByokAiRank(opts: {
     const fallback = metricsRank(products, prefs.exclusions, prefs);
     return {
       ...fallback,
-      error:
-        "Brak TYPESAFE_API_KEY — Jev nie może wybrać top-3. Awaryjny ranking metryczny.",
+      error: shown("jev.noTypesafeKey"),
     };
   }
 
@@ -516,15 +512,15 @@ export async function runByokAiRank(opts: {
       ((jev.data as { answers?: Record<string, Record<string, unknown>> })
         ?.answers ??
         {});
-    return jevResultFromAnswers(products, answers, grok);
+    return jevResultFromAnswers(products, answers, grok, prefs);
   } catch (e) {
     const jevErr = e instanceof Error ? e.message : String(e);
     const fallback = metricsRank(products, prefs.exclusions, prefs);
     return {
       ...fallback,
       error: isBrowserNetworkError(jevErr)
-        ? JEV_PROXY_HINT
-        : `Jev niedostępny (${jevErr}). Awaryjny ranking metryczny.`,
+        ? shown("jev.proxyHint")
+        : shown("jev.unavailable", { error: jevErr }),
       grok: {
         skipped: !!grok.skipped,
         reason: grok.reason,

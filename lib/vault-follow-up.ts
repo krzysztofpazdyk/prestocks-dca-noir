@@ -1,3 +1,5 @@
+import { shown, translate } from "@/lib/i18n";
+
 /** Re-read the vault after the signature is confirmed or finalized. */
 export const POST_CONFIRM_VAULT_POLL_MS = 45_000;
 
@@ -7,9 +9,8 @@ export const POST_CONFIRM_VAULT_POLL_MS = 45_000;
  */
 export const CONFIRMED_VAULT_BACKGROUND_POLL_MS = 30_000;
 
-/** Shown when the signature landed but the vault balance has not moved yet. */
-export const CONFIRMED_VAULT_LAG_MSG =
-  "Potwierdzono on-chain; saldo odświeża się. Odśwież Overview albo sprawdź transakcję w explorerze.";
+/** Polish sentence. Display uses the active language; this stays for equality checks. */
+export const CONFIRMED_VAULT_LAG_MSG = translate("pl", "tx.vaultLag");
 
 /**
  * Confirmed signature + a flat vault is RPC lag, not a failed deposit.
@@ -21,10 +22,10 @@ export function outcomeAfterVaultCheck(input: {
   success: string;
 }): { ok: string | null; error: string | null } {
   if (input.increased) return { ok: input.success, error: null };
-  if (input.confirmed) return { ok: CONFIRMED_VAULT_LAG_MSG, error: null };
+  if (input.confirmed) return { ok: shown("tx.vaultLag"), error: null };
   return {
     ok: null,
-    error: "Nie potwierdzono podpisu transakcji. Sprawdź explorer.",
+    error: shown("tx.sigUnconfirmed"),
   };
 }
 
@@ -35,12 +36,10 @@ export const TX_SIGNATURE_RE = /[1-9A-HJ-NP-Za-km-z]{80,90}/;
  * Shown when sendAndConfirm hit the ~30s confirm timeout but the signature
  * was already broadcast. Not a failure and not a prompt to send again.
  */
-export const UNCONFIRMED_TIMEOUT_MSG =
-  "Transakcja wysłana. Devnet jeszcze nie potwierdził — nie wysyłaj jej drugi raz. Sprawdź podpis w explorerze.";
+export const UNCONFIRMED_TIMEOUT_MSG = translate("pl", "tx.unconfirmedTimeout");
 
 /** confirmLanded gave up. No second-send nudge. */
-export const CONFIRM_STILL_PENDING_MSG =
-  "Brak potwierdzenia transakcji na Devnet.";
+export const CONFIRM_STILL_PENDING_MSG = translate("pl", "tx.confirmStillPending");
 
 /** Status poll after confirmLanded gives up. Then the amber note stays. */
 export const UNRESOLVED_WATCH_MS = 60_000;
@@ -48,7 +47,7 @@ export const UNRESOLVED_WATCH_POLL_MS = 3_000;
 
 /** Amber copy: full signature and explorer URL, no second-send nudge. */
 export function pendingTxMessage(signature: string, explorerUrl: string): string {
-  return `${UNCONFIRMED_TIMEOUT_MSG} ${signature} ${explorerUrl}`;
+  return `${shown("tx.unconfirmedTimeout")} ${signature} ${explorerUrl}`;
 }
 
 /**
@@ -68,7 +67,7 @@ export function unresolvedSignatureBlocksTx(
 
 /** Red copy when the signature landed with an on-chain error. */
 export function rejectedTxMessage(signature: string, explorerUrl: string): string {
-  return `Transakcja odrzucona przez Devnet. ${signature} ${explorerUrl}`;
+  return `${shown("tx.err.rejected", { signature })} ${explorerUrl}`;
 }
 
 function errorName(err: unknown): string {
@@ -130,9 +129,17 @@ export function isUnconfirmedTimeout(err: unknown): { signature: string } | null
   return { signature };
 }
 
-/** confirmLanded throws this when the signature status has `err`. */
+/**
+ * On-chain rejection. New errors carry `onChainReject` / `SignatureFailedError`.
+ * The Polish sentence remains for messages already saved in an earlier session.
+ */
 export function isOnChainSignatureReject(err: unknown): boolean {
-  return /odrzucona przez Devnet/i.test(errorMessage(err));
+  if (err != null && typeof err === "object") {
+    if ((err as { onChainReject?: unknown }).onChainReject === true) return true;
+    if (errorName(err) === "SignatureFailedError") return true;
+  }
+  // Polish sentence saved earlier, and the English sentence from tx.err.rejected.
+  return /odrzucona przez Devnet|rejected by Devnet/i.test(errorMessage(err));
 }
 
 /**

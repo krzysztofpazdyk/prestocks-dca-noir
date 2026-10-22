@@ -1,6 +1,7 @@
 /**
- * Devnet mock PreStock mint registry — copied from /workspace/predca/devnet-mock-mints.json.
- * 1 token unit (raw/1e6) ≈ $1 USD for Overview valuation (mock only).
+ * Devnet mock PreStock mint registry for predca 3.0.
+ * v2 buys mint floor(usdcRaw * 10^priceDecimals / price) base units (6 decimals).
+ * Runs with no RunPrice stay at cost in position-value.ts.
  */
 import { PublicKey } from "@solana/web3.js";
 import raw from "@/lib/devnet-mock-mints.json";

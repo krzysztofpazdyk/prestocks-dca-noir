@@ -1,8 +1,8 @@
 name: Deploy GitHub Pages
 
+# noir 3.0: deploy only by hand (Actions → Run workflow on main), so a merge
+# to main does not publish the site by itself.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -37,6 +37,20 @@ jobs:
           NEXT_PUBLIC_PRIVY_APP_ID: cmuf3rgpj01rb0cjpl6ked6f4
           # Demo TypeSafe key (M5): inlined into the client bundle on purpose until mainnet.
           NEXT_PUBLIC_TYPESAFE_DEFAULT_KEY: ${{ secrets.NEXT_PUBLIC_TYPESAFE_DEFAULT_KEY }}
+          # Build-time fallback; the live address comes from out/config.json below.
+          NEXT_PUBLIC_DCA_API_URL: https://predca-api.onrender.com
+          NEXT_PUBLIC_KEEPER_URL: https://predca-api.onrender.com/keeper
+
+      - name: Write runtime config.json
+        run: node scripts/write-runtime-config.mjs https://predca-api.onrender.com out/config.json
+
+      - name: Check export paths
+        run: |
+          test -f out/index.html
+          test -f out/config.json
+          grep -q '/prestocks-dca-noir/_next/' out/index.html
+          if grep -rqs 'prestocks-dca-noir3\.0' out; then echo 'old basePath in export'; exit 1; fi
+          grep -q 'predca-api.onrender.com/keeper' out/config.json
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

@@ -13,6 +13,19 @@ export const MINTS: Record<string, string> = {
   SpaceX: "PreANxuXjsy2pvisWWMNB6YaJNzr7681wJJr2rHsfTh",
 };
 
+/**
+ * Post-IPO reference tokens for the premium denominator.
+ * Not part of `MINTS`: they do not create products, price-panel rows, or ranks.
+ * SpaceX primary is xStocks SPCXx; backup is Backpack SPCX.
+ * Jupiter `usdPrice` is already on the post 5:1 split scale.
+ */
+export const REFERENCE_MINTS: Record<string, { primary: string; backup: string }> = {
+  SpaceX: {
+    primary: "Xs3oZwbHvqis4NYcf4YKWmEia2eC84wSiVrcYcTqpH8",
+    backup: "SPCXxcqXj6e5dJDVNovHN8744zkbhM2bYudU45BimGb",
+  },
+};
+
 export const SYMBOL_BY_NAME: Record<string, string> = {
   Anthropic: "ANTHROPIC",
   OpenAI: "OPENAI",
@@ -24,7 +37,14 @@ export const SYMBOL_BY_NAME: Record<string, string> = {
   SpaceX: "SPACEX",
 };
 
-/** Last-known premiums if mark API fails */
+/**
+ * Names treated as near an IPO for the +8 ranking bonus.
+ * SpaceX has been listed since 2026-06-12, so the list stays empty until
+ * company data says a name is `announced` inside the next 90 days.
+ */
+export const NEAR_IPO_NAMES: readonly string[] = [];
+
+/** Last-known premiums if mark API fails. The UI does not display these numbers. */
 export const HARDCODED_PREMIUMS_PCT: Record<string, number> = {
   Anthropic: -1.6,
   OpenAI: 16.1,
@@ -87,4 +107,9 @@ export type RankResult = {
   grok?: { skipped: boolean; reason?: string; summary?: string };
   error?: string;
   fetchedAt: string;
+  /**
+   * What premium the ranking actually scored on.
+   * Hosted /rank does not accept the client's live premium.
+   */
+  premiumBasis: "server_estimate" | "live" | "none";
 };

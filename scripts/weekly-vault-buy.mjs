@@ -64,8 +64,8 @@ import {
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const TICK_MS = 15 * 60 * 1000;
-const DEFAULT_PROGRAM = "HajLzgcp6fyHVgVLFtwujnU53re47PSMJcQZZes8ZvbU";
-const DEFAULT_USDC = "AxKxf1jMaDHLMoqqEUsnvmJyWu7EtzyWyvU63rgwuTm7";
+const DEFAULT_PROGRAM = "Eb3TFLeYi3dHZwoKCBvvUpx3gMnP2XdmMXX3rstUpdwC";
+const DEFAULT_USDC = "3xtTBfHRf8AKEmhbFYqRoXfi9RaxxiqG9YfifjCjD4qm";
 const STATUS_DIR = join(homedir(), ".grok", "long-running-background-tasks");
 const STATUS_PATH = join(STATUS_DIR, "weekly_vault_buy_status.json");
 
@@ -177,9 +177,8 @@ function assertOwnerPubkey(pk) {
   if (!s) throw new Error("missing owner pubkey");
   // Validate base58 pubkey length / Solana PublicKey parse
   try {
-    // eslint-disable-next-line no-new
     new PublicKey(s);
-  } catch (e) {
+  } catch {
     throw new Error(`invalid owner pubkey: ${s}`);
   }
   return s;
@@ -493,19 +492,6 @@ function loadOwnerPubkey() {
   );
 }
 
-/** Crank IDL: owner is the vault's user, not a signer. Bot is tx fee payer. */
-function crankIdl(base) {
-  const copy = JSON.parse(JSON.stringify(base));
-  for (const ix of copy.instructions ?? []) {
-    if (ix.name === "simulate_buy" || ix.name === "execute_buy") {
-      for (const acc of ix.accounts ?? []) {
-        if (acc.name === "owner") acc.signer = false;
-      }
-    }
-  }
-  return copy;
-}
-
 function normKey(s) {
   return String(s).trim().toLowerCase().replace(/\s+/g, "");
 }
@@ -556,6 +542,21 @@ function runRecordPda(owner, runIndex, pid) {
   const idx = BN.isBN(runIndex) ? runIndex : new BN(runIndex);
   return PublicKey.findProgramAddressSync(
     [Buffer.from("run"), owner.toBuffer(), idx.toArrayLike(Buffer, "le", 8)],
+    pid,
+  );
+}
+
+function priceFeedPda(mint, pid) {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("price"), mint.toBuffer()],
+    pid,
+  );
+}
+
+function runPricePda(owner, runIndex, pid) {
+  const idx = BN.isBN(runIndex) ? runIndex : new BN(runIndex);
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("run_price"), owner.toBuffer(), idx.toArrayLike(Buffer, "le", 8)],
     pid,
   );
 }
@@ -1197,7 +1198,7 @@ async function runOnce(opts) {
   let sig;
   try {
     sig = await program.methods
-      .executeBuy(new BN(runIndex), mints, Array.from({ length: 32 }, () => 0), force)
+      .executeBuyV2(new BN(runIndex), mints, Array.from({ length: 32 }, () => 0), force)
       .accounts({
         keeper: keeper.publicKey,
         config: configPda(pid)[0],
@@ -1206,6 +1207,10 @@ async function runOnce(opts) {
         mintA: mints[0],
         mintB: mints[1],
         mintC: mints[2],
+        priceFeedA: priceFeedPda(mints[0], pid)[0],
+        priceFeedB: priceFeedPda(mints[1], pid)[0],
+        priceFeedC: priceFeedPda(mints[2], pid)[0],
+        runPrice: runPricePda(owner, runIndex, pid)[0],
       })
       .rpc();
   } catch (e) {

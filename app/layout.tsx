@@ -9,6 +9,7 @@ import {
   AutoWeeklyBuyProvider,
 } from "@/lib/hooks/useAutoWeeklyBuy";
 import { Nav } from "@/components/Nav";
+import { APP_VERSION } from "@/lib/app-version";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -21,8 +22,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "PreStocks DCA · Noir",
-  description: "Weekly DCA na PreStocks SPL — wariant noir (localnet + Predca)",
+  title: "PreStocks DCA · noir 3.0",
+  description:
+    "Weekly DCA na PreStocks SPL — noir 3.0 (predca 3.0, priced buys v2)",
 };
 
 export default function RootLayout({
@@ -45,6 +47,9 @@ export default function RootLayout({
                 <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8">
                   {children}
                 </main>
+                <footer className="border-t border-[#1e2633] px-4 py-3 text-center text-[10px] tracking-wider text-[#5c6578]">
+                  noir 3.0 · v{APP_VERSION}
+                </footer>
               </AutoWeeklyBuyProvider>
             </I18nProvider>
           </SolanaWalletProvider>

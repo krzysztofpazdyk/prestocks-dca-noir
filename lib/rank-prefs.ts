@@ -16,9 +16,9 @@ import {
 } from "@/lib/exclusions";
 import { DEFAULT_SETTINGS } from "@/lib/mock-data";
 
-export const LS_DEADLINE_INVALID = "prestocks.deadlineInvalid";
-export const LS_IPO_PREMIUM = "prestocks.ipoPremiumMatters";
-export const LS_BUY_DESPITE_IPO = "prestocks.buyDespiteIpo";
+export const LS_DEADLINE_INVALID = "noir3.prestocks.deadlineInvalid";
+export const LS_IPO_PREMIUM = "noir3.prestocks.ipoPremiumMatters";
+export const LS_BUY_DESPITE_IPO = "noir3.prestocks.buyDespiteIpo";
 
 export {
   LS_EXCLUSIONS,

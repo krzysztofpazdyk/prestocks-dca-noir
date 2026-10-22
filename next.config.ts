@@ -10,11 +10,14 @@ const optionalPrivyModule = path.join(
  *  Node server so we can proxy Jev (TypeSafe blocks browser CORS). */
 const isDev = process.env.NODE_ENV !== "production";
 
+const basePath =
+  process.env.NEXT_PUBLIC_BASE_PATH?.trim() || "/prestocks-dca-noir";
+
 const nextConfig: NextConfig = {
   ...(!isDev ? { output: "export" as const } : {}),
   images: { unoptimized: true },
-  basePath: "/prestocks-dca-noir",
-  assetPrefix: "/prestocks-dca-noir",
+  basePath,
+  assetPrefix: basePath,
   trailingSlash: true,
   reactStrictMode: true,
   turbopack: {

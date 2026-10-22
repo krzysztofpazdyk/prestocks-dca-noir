@@ -1,6 +1,8 @@
 "use client";
 
 import { Component, type ReactNode } from "react";
+import { translate } from "@/lib/i18n";
+import { getLocaleSnapshot } from "@/lib/locale-store";
 
 type Props = { children: ReactNode };
 type State = { error: Error | null };
@@ -23,15 +25,14 @@ export class PrivyErrorBoundary extends Component<Props, State> {
 
   render() {
     if (!this.state.error) return this.props.children;
+    const locale = getLocaleSnapshot();
     return (
       <div className="mx-auto flex min-h-[50vh] w-full max-w-md flex-col justify-center gap-3 px-4">
         <h1 className="text-sm font-semibold text-[#e8eef5]">
-          Privy przerwało ładowanie
+          {translate(locale, "privy.boundary.title")}
         </h1>
         <p className="text-xs leading-relaxed text-[#c5cedb]">
-          Strona została na miejscu. Sesja logowania mogła się zapisać — po
-          ponowieniu wybierz Privy jeszcze raz, bez nowego kodu, jeśli e-mail
-          jest już zalogowany.
+          {translate(locale, "privy.boundary.body")}
         </p>
         <p className="text-[10px] text-[#fca5a5]">{this.state.error.message}</p>
         <button
@@ -39,7 +40,7 @@ export class PrivyErrorBoundary extends Component<Props, State> {
           className="w-fit rounded border border-[#2dd4bf66] px-3 py-2 text-[11px] uppercase tracking-wider text-[#2dd4bf]"
           onClick={() => this.setState({ error: null })}
         >
-          Spróbuj ponownie
+          {translate(locale, "privy.boundary.retry")}
         </button>
       </div>
     );

@@ -1,18 +1,35 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { useKeeperSignMessage } from "@/components/PrivyWalletBridge";
+import {
+  PrivySignWaitNotice,
+  useKeeperSignMessage,
+} from "@/components/PrivyWalletBridge";
+import {
+  companyDataClientSnapshot,
+  companyDataNeedsRefresh,
+  companyDataServerSnapshot,
+  formatCompanyDate,
+  refreshStaleCompanyData,
+  subscribeCompanyData,
+  toggleAvailability,
+  type CompanyData,
+  type ToggleBucket,
+} from "@/lib/company-data";
 import { DEFAULT_SETTINGS } from "@/lib/mock-data";
 import { usePredca } from "@/lib/hooks/usePredca";
 import { TxNotice } from "@/components/TxNotice";
 import { explorerTxUrl, formatUsd } from "@/lib/predca";
+import { formatGrouped } from "@/lib/number-format";
 import { UNRESOLVED_MSG } from "@/lib/pending-tx";
+import { presentAutoBuyError } from "@/lib/auto-buy-error";
 import { autoToggleBlocked } from "@/lib/auto-weekly-buy";
 import { useI18n } from "@/lib/i18n";
 import {
   parseExclusions,
   readExclusionsRaw,
+  userExclusions,
   writeExclusionsRaw,
 } from "@/lib/exclusions";
 import {
@@ -32,11 +49,31 @@ import {
   type KeeperPrefsPayload,
 } from "@/lib/keeper-client";
 import {
-  readWeeklyBudgetUsd,
+  readStoredWeeklyBudgetUsd,
   writeWeeklyBudgetUsd,
 } from "@/lib/auto-weekly-buy";
+import {
+  adoptWeeklyDraft,
+  adoptWeeklyDraftForOwner,
+  budgetsDiffer,
+  parseWeeklyDraft,
+  readWeeklyDraft,
+  subscribeWeeklyBudget,
+  weeklyBudgetRevision,
+  weeklyBudgetServerRevision,
+  writeWeeklyDraft,
+} from "@/lib/weekly-budget";
 import { useAutoWeeklyBuy } from "@/lib/hooks/useAutoWeeklyBuy";
-import { LS_TYPESAFE, LS_XAI, readTypesafeKey } from "@/lib/keys";
+import { useIsClient } from "@/lib/hooks/useIsClient";
+import {
+  commitLatestRef,
+  useIsomorphicLayoutEffect,
+} from "@/lib/hooks/useLatestRef";
+import { dcaApiBase, LS_TYPESAFE, LS_XAI, readTypesafeKey } from "@/lib/keys";
+import {
+  formatWeeklyDraft,
+  settingsWeeklyFromStorage,
+} from "@/lib/settings-weekly";
 
 /** Keeper-synced ranking prefs snapshot for dirty detection. */
 type PrefsBaseline = {
@@ -68,6 +105,17 @@ function makeBaseline(
   };
 }
 
+function budgetTxNotice(
+  message: string | null,
+  tone: "pending" | "error" | "ok",
+) {
+  if (!message) return null;
+  if (tone === "ok") {
+    return <p className="text-[10px] text-[#2dd4bf]">{message}</p>;
+  }
+  return <TxNotice message={message} tone={tone} />;
+}
+
 function baselinesEqual(a: PrefsBaseline | null, b: PrefsBaseline): boolean {
   if (!a) return false;
   return (
@@ -83,13 +131,14 @@ export function SettingsView() {
   const autoBuy = useAutoWeeklyBuy();
   const { connected, publicKey } = useWallet();
   const signMessage = useKeeperSignMessage();
+  // Read in the prefs effect below, after this layout update. The first
+  // render's ref is already `signMessage`, so the first fetch is not empty.
   const signMessageRef = useRef(signMessage);
-  signMessageRef.current = signMessage;
+  useIsomorphicLayoutEffect(() => {
+    commitLatestRef(signMessageRef, signMessage);
+  });
   const { t } = useI18n();
-  const [weekly, setWeekly] = useState(DEFAULT_SETTINGS.weeklyAmountUsd);
-  const [exclusions, setExclusions] = useState(
-    DEFAULT_SETTINGS.exclusions.join(", "),
-  );
+  const [exclusions, setExclusions] = useState("");
   const [deadlineInvalid, setDeadlineInvalid] = useState(
     DEFAULT_SETTINGS.deadlineInvalid,
   );
@@ -106,35 +155,115 @@ export function SettingsView() {
   const [showTypesafe, setShowTypesafe] = useState(false);
   const [showXai, setShowXai] = useState(false);
   const [byokSaved, setByokSaved] = useState(false);
-  const [prefsReady, setPrefsReady] = useState(false);
+  const [hydratedOwner, setHydratedOwner] = useState<string | null>(null);
   const [autoConfirmOpen, setAutoConfirmOpen] = useState(false);
   const [syncedBaseline, setSyncedBaseline] = useState<PrefsBaseline | null>(
     null,
   );
   const [prefsSaving, setPrefsSaving] = useState(false);
   const [prefsSaveMsg, setPrefsSaveMsg] = useState<string | null>(null);
+  const [prefsOk, setPrefsOk] = useState(false);
+  const prefsOkTimer = useRef<number | null>(null);
   const prevAutoPhase = useRef(autoBuy.phase);
+  useEffect(() => {
+    return () => {
+      if (prefsOkTimer.current != null) window.clearTimeout(prefsOkTimer.current);
+    };
+  }, []);
 
   // Settings weekly amount is SoT for init-on-deposit (Overview reads same LS key).
-  // Hydrate from per-wallet LS; do not keep syncing from on-chain (that stomped LS saves).
-  const [weeklyReady, setWeeklyReady] = useState(false);
+  // Read per-wallet LS during render. Do not copy chain into this state (that stomped LS saves).
   const ownerBase58 = publicKey?.toBase58() ?? null;
+  const isClient = useIsClient();
+  const weeklyTick = useSyncExternalStore(
+    subscribeWeeklyBudget,
+    weeklyBudgetRevision,
+    weeklyBudgetServerRevision,
+  );
+  // Server and hydration stay on the default. After that, storage is the
+  // value: a pre-connect draft fills a wallet that has nothing saved.
+  // adoptWeeklyDraft is the same read settingsWeeklyFromStorage uses; the
+  // chain value is never copied over localStorage.
+  const adoptedWeekly = adoptWeeklyDraft(
+    isClient && ownerBase58 ? readStoredWeeklyBudgetUsd(ownerBase58) : null,
+    isClient ? readWeeklyDraft() : null,
+  );
+  const storedWeekly = isClient ? settingsWeeklyFromStorage(ownerBase58) : null;
+  const fallbackAmount =
+    adoptedWeekly.value ?? DEFAULT_SETTINGS.weeklyAmountUsd;
+  const hydratedWeekly = storedWeekly ?? {
+    amount: fallbackAmount,
+    draft: formatWeeklyDraft(fallbackAmount),
+  };
+  const [weeklyEdit, setWeeklyEdit] = useState<{
+    owner: string | null;
+    rev: number;
+    weekly: number;
+    draft: string;
+  } | null>(null);
+  const weeklyLive =
+    weeklyEdit != null &&
+    weeklyEdit.owner === ownerBase58 &&
+    weeklyEdit.rev === weeklyTick
+      ? weeklyEdit
+      : null;
+  const weekly = weeklyLive ? weeklyLive.weekly : hydratedWeekly.amount;
+  const weeklyDraft = weeklyLive ? weeklyLive.draft : hydratedWeekly.draft;
+  function setWeekly(value: number) {
+    setWeeklyEdit((prev) => {
+      const live =
+        prev != null && prev.owner === ownerBase58 && prev.rev === weeklyTick
+          ? prev
+          : null;
+      return {
+        owner: ownerBase58,
+        rev: weeklyTick,
+        weekly: value,
+        draft: live ? live.draft : hydratedWeekly.draft,
+      };
+    });
+  }
+  function setWeeklyDraft(next: string) {
+    setWeeklyEdit((prev) => {
+      const live =
+        prev != null && prev.owner === ownerBase58 && prev.rev === weeklyTick
+          ? prev
+          : null;
+      return {
+        owner: ownerBase58,
+        rev: weeklyTick,
+        weekly: live ? live.weekly : hydratedWeekly.amount,
+        draft: next,
+      };
+    });
+  }
   useEffect(() => {
-    setWeekly(
-      readWeeklyBudgetUsd(DEFAULT_SETTINGS.weeklyAmountUsd, ownerBase58),
-    );
-    setWeeklyReady(true);
+    adoptWeeklyDraftForOwner(ownerBase58);
   }, [ownerBase58]);
+
+  const companySnap = useSyncExternalStore(
+    subscribeCompanyData,
+    companyDataClientSnapshot,
+    companyDataServerSnapshot,
+  );
+  const availability = toggleAvailability(companySnap.byName, companySnap.readAt);
+  useEffect(() => {
+    const snap = companyDataClientSnapshot();
+    if (!companyDataNeedsRefresh(snap.byName, snap.readAt)) return;
+    const base = dcaApiBase();
+    if (!base) return;
+    void refreshStaleCompanyData(base);
+  }, []);
 
   // Hydrate ranking toggles from keeper GET /prefs (authoritative for buys).
   // prefsReady stays false until hydrate finishes so we never push stale local
   // over keeper. Prefs file is global on the demo daemon; still skip apply when
   // a connected wallet differs from the registered owner.
+  const ownerKey = publicKey?.toBase58() ?? "";
+  const prefsReady = hydratedOwner === ownerKey;
   useEffect(() => {
     let cancelled = false;
-    setPrefsReady(false);
-    setSyncedBaseline(null);
-    setPrefsSaveMsg(null);
+    const ownerKeyAtStart = publicKey?.toBase58() ?? "";
     void (async () => {
       try {
         const seeded = readTypesafeKey();
@@ -178,14 +307,16 @@ export function SettingsView() {
       }
 
       if (cancelled) return;
-      setExclusions(exclusionsRaw);
+      const shown = userExclusions(exclusionsRaw).join(", ");
+      setExclusions(shown);
       setDeadlineInvalid(deadline);
       setIpoPremium(ipo);
       setBuyDespiteIpo(buyDespite);
       setSyncedBaseline(
-        makeBaseline(exclusionsRaw, deadline, ipo, buyDespite),
+        makeBaseline(shown, deadline, ipo, buyDespite),
       );
-      setPrefsReady(true);
+      setPrefsSaveMsg(null);
+      setHydratedOwner(ownerKeyAtStart);
     })();
     return () => {
       cancelled = true;
@@ -196,7 +327,7 @@ export function SettingsView() {
   useEffect(() => {
     if (!prefsReady) return;
     const id = window.setTimeout(() => {
-      writeExclusionsRaw(exclusions);
+      writeExclusionsRaw(userExclusions(exclusions).join(", "));
     }, 300);
     return () => window.clearTimeout(id);
   }, [exclusions, prefsReady]);
@@ -239,13 +370,19 @@ export function SettingsView() {
 
   // Persist weekly to this wallet's key. Disconnected edits stay in React state.
   // On-chain budget is a separate step, and only after UserConfig exists.
+  // `weekly` changes only after parseWeeklyDraft succeeds, so an empty or
+  // partial draft never replaces the last valid amount.
   useEffect(() => {
-    if (!weeklyReady || !ownerBase58) return;
+    // Stay on the server default until the client snapshot has the stored amount.
+    if (!isClient) return;
+    const parsed = parseWeeklyDraft(String(weekly));
+    if (!parsed.ok) return;
     const id = window.setTimeout(() => {
-      writeWeeklyBudgetUsd(weekly, ownerBase58);
+      if (ownerBase58) writeWeeklyBudgetUsd(parsed.value, ownerBase58);
+      else writeWeeklyDraft(parsed.value);
     }, 300);
     return () => window.clearTimeout(id);
-  }, [weekly, weeklyReady, ownerBase58]);
+  }, [weekly, isClient, ownerBase58]);
 
   useEffect(() => {
     if (!autoConfirmOpen) return;
@@ -267,21 +404,22 @@ export function SettingsView() {
     syncedBaseline != null &&
     !baselinesEqual(syncedBaseline, currentBaseline);
 
-  const BUDGET_EPS = 0.000001;
   const onChainWeekly = predca.weeklyBudgetUsd;
+  const weeklyParsed = parseWeeklyDraft(weeklyDraft);
   // Hide Save until UserConfig exists. A null on-chain budget is "no account",
   // not a dirty value — that used to send initialize_user with no deposit.
   const budgetDirtyOnChain =
-    onChainWeekly != null &&
-    Math.abs(weekly - onChainWeekly) > BUDGET_EPS;
+    onChainWeekly != null && budgetsDiffer(weekly, onChainWeekly);
 
   async function saveWeeklyBudgetOnChain() {
+    const parsed = parseWeeklyDraft(weeklyDraft);
+    if (!parsed.ok) return;
     if (predca.pendingSignature != null || predca.pendingSignatureNow()) return;
     if (predca.status === "error") return;
-    writeWeeklyBudgetUsd(weekly, ownerBase58);
+    writeWeeklyBudgetUsd(parsed.value, ownerBase58);
     predca.clearMessages();
     if (!connected || !predca.mint || !predca.config) return;
-    await predca.setWeeklyBudget(weekly);
+    await predca.setWeeklyBudget(parsed.value);
   }
 
   const budgetBtnLabel = predca.txPending
@@ -298,7 +436,9 @@ export function SettingsView() {
     }
     setPrefsSaving(true);
     try {
-      writeExclusionsRaw(exclusions);
+      const shown = userExclusions(exclusions).join(", ");
+      writeExclusionsRaw(shown);
+      if (shown !== exclusions) setExclusions(shown);
       writeDeadlineInvalid(deadlineInvalid);
       writeIpoPremiumMatters(ipoPremium);
       writeBuyDespiteIpo(buyDespiteIpo);
@@ -308,6 +448,8 @@ export function SettingsView() {
         signMessage,
       );
       if (!res.ok) {
+        setPrefsOk(false);
+        if (prefsOkTimer.current != null) window.clearTimeout(prefsOkTimer.current);
         setPrefsSaveMsg(
           res.error
             ? `${t("settings.prefsSignFailed")}: ${res.error}`
@@ -316,10 +458,18 @@ export function SettingsView() {
         return;
       }
       setSyncedBaseline(
-        makeBaseline(exclusions, deadlineInvalid, ipoPremium, buyDespiteIpo),
+        makeBaseline(shown, deadlineInvalid, ipoPremium, buyDespiteIpo),
       );
-      setPrefsSaveMsg(t("settings.prefsSignOk"));
+      setPrefsSaveMsg(null);
+      if (prefsOkTimer.current != null) window.clearTimeout(prefsOkTimer.current);
+      setPrefsOk(true);
+      prefsOkTimer.current = window.setTimeout(() => {
+        prefsOkTimer.current = null;
+        setPrefsOk(false);
+      }, 4000);
     } catch {
+      setPrefsOk(false);
+      if (prefsOkTimer.current != null) window.clearTimeout(prefsOkTimer.current);
       setPrefsSaveMsg(t("settings.prefsSignFailed"));
     } finally {
       setPrefsSaving(false);
@@ -344,6 +494,10 @@ export function SettingsView() {
   }
 
   const canSign = !!publicKey && !!signMessage;
+  const autoBuyError =
+    autoBuy.phase === "error" && autoBuy.message
+      ? presentAutoBuyError(autoBuy.message, t)
+      : null;
 
   return (
     <div className="mx-auto max-w-xl space-y-5">
@@ -375,48 +529,59 @@ export function SettingsView() {
       {predca.visibleUnresolvedTxs.length > 2 ? (
         <p className="text-[10px] text-[#fbbf24]">+{predca.visibleUnresolvedTxs.length - 2}</p>
       ) : null}
-      {predca.pendingMsg && (
-        <TxNotice message={predca.pendingMsg} tone="pending" />
-      )}
-      {predca.error && (
-        <TxNotice message={predca.error} tone="error" />
-      )}
-      {predca.okMsg && (
-        <p className="rounded border border-[#2dd4bf33] bg-[#2dd4bf11] px-3 py-2 text-xs text-[#2dd4bf]">
-          {predca.okMsg}
-        </p>
-      )}
 
       <label className="block space-y-2 rounded-lg border border-[#1e2633] bg-[#141820] p-5">
         <span className="text-[11px] uppercase tracking-[0.15em] text-[#8b95a8]">
           {t("settings.exclusions")}
         </span>
+        <p className="text-xs text-[#8b95a8]">{t("settings.fixedExclusion")}</p>
         <input
           type="text"
           value={exclusions}
+          disabled={!prefsReady}
+          title={!prefsReady ? t("settings.prefsLoading") : undefined}
           onChange={(e) => setExclusions(e.target.value)}
-          onBlur={() => writeExclusionsRaw(exclusions)}
-          placeholder="xAI, OpenAI"
-          className="w-full rounded border border-[#1e2633] bg-[#0c0e12] px-3 py-2 text-sm outline-none focus:border-[#a78bfa66]"
+          onBlur={() => {
+            const shown = userExclusions(exclusions).join(", ");
+            setExclusions(shown);
+            writeExclusionsRaw(shown);
+          }}
+          placeholder="OpenAI, Kalshi"
+          className="w-full rounded border border-[#1e2633] bg-[#0c0e12] px-3 py-2 text-sm outline-none focus:border-[#a78bfa66] disabled:opacity-40"
         />
       </label>
 
       <div className="space-y-3 rounded-lg border border-[#1e2633] bg-[#141820] p-5">
-        <Toggle
+        <CompanyToggle
           label={t("settings.buyDespiteIpo")}
           checked={buyDespiteIpo}
           onChange={setBuyDespiteIpo}
+          disabled={!availability.buyDespiteIpo.enabled}
+          prefsReady={prefsReady}
+          bucket={availability.buyDespiteIpo}
+          kind="ipo"
+          byName={companySnap.byName}
         />
-        <Toggle
+        <CompanyToggle
           label={t("settings.deadlineInvalid")}
           checked={deadlineInvalid}
           onChange={setDeadlineInvalid}
+          disabled={!availability.deadlinesUnimportant.enabled}
+          prefsReady={prefsReady}
+          bucket={availability.deadlinesUnimportant}
+          kind="deadline"
+          byName={companySnap.byName}
         />
         <Toggle
           label={t("settings.ipoPremium")}
           checked={ipoPremium}
           onChange={setIpoPremium}
+          disabled={!prefsReady}
+          title={!prefsReady ? t("settings.prefsLoading") : undefined}
         />
+        {prefsOk ? (
+          <p className="text-[10px] text-[#2dd4bf]">{t("settings.prefsSignOk")}</p>
+        ) : null}
         {prefsDirty ? (
           <div className="space-y-2 border-t border-[#fbbf2433] pt-3">
             <p className="text-xs leading-relaxed text-[#fbbf24]">
@@ -443,15 +608,7 @@ export function SettingsView() {
               ) : null}
             </div>
             {prefsSaveMsg ? (
-              <p
-                className={`text-[10px] ${
-                  prefsSaveMsg === t("settings.prefsSignOk")
-                    ? "text-[#2dd4bf]"
-                    : "text-[#fca5a5]"
-                }`}
-              >
-                {prefsSaveMsg}
-              </p>
+              <p className="text-[10px] text-[#fca5a5]">{prefsSaveMsg}</p>
             ) : null}
           </div>
         ) : null}
@@ -463,22 +620,31 @@ export function SettingsView() {
             {t("settings.weeklyAmount")}
           </span>
           <input
-            type="number"
-            min={1}
-            step={1}
-            value={weekly}
+            type="text"
+            inputMode="decimal"
+            value={weeklyDraft}
             onChange={(e) => {
-              const n = Number(e.target.value);
-              setWeekly(Number.isFinite(n) ? Math.max(1, n) : 1);
+              const next = e.target.value;
+              setWeeklyDraft(next);
+              const parsed = parseWeeklyDraft(next);
+              if (parsed.ok) setWeekly(parsed.value);
               predca.clearToasts();
             }}
             onBlur={() => {
-              if (ownerBase58) writeWeeklyBudgetUsd(weekly, ownerBase58);
+              const parsed = parseWeeklyDraft(weeklyDraft);
+              if (!parsed.ok) return;
+              if (ownerBase58) writeWeeklyBudgetUsd(parsed.value, ownerBase58);
+              else writeWeeklyDraft(parsed.value);
             }}
             className="mono-num w-full rounded border border-[#1e2633] bg-[#0c0e12] px-3 py-2.5 text-base text-[#2dd4bf] outline-none focus:border-[#2dd4bf66]"
           />
+          {weeklyParsed.ok ? null : (
+            <p className="text-xs text-[#fbbf24]">{t("settings.weeklyInvalid")}</p>
+          )}
           <p className="text-xs text-[#8b95a8]">
-            {t("settings.weeklySplit", { amount: (weekly / 3).toFixed(2) })}
+            {t("settings.weeklySplit", {
+              amount: formatGrouped(weekly / 3, { min: 2, max: 2 }),
+            })}
             {" "}
             {t("settings.weeklyAtEnable")}
             {onChainWeekly != null && (
@@ -486,7 +652,7 @@ export function SettingsView() {
                 {" "}
                 {t("settings.onChainBudget")}{" "}
                 <span className="mono-num text-[#2dd4bf]">
-                  {formatUsd(onChainWeekly)} USDC
+                  {formatUsd(onChainWeekly)}
                 </span>
               </>
             )}
@@ -500,7 +666,7 @@ export function SettingsView() {
         {budgetDirtyOnChain && connected && predca.mint ? (
           <button
             type="button"
-            disabled={chainBusy || predca.status === "error"}
+            disabled={chainBusy || predca.status === "error" || !weeklyParsed.ok}
             onClick={() => void saveWeeklyBudgetOnChain()}
             className="w-full rounded border border-[#2dd4bf44] bg-[#0c0e12] py-2 text-[10px] uppercase tracking-wider text-[#2dd4bf] hover:bg-[#2dd4bf11] disabled:opacity-40"
           >
@@ -512,15 +678,10 @@ export function SettingsView() {
             {t("settings.connectForBudget")}
           </p>
         ) : null}
-        {predca.pendingMsg && (
-          <TxNotice message={predca.pendingMsg} tone="pending" />
-        )}
-        {predca.error && (
-          <TxNotice message={predca.error} tone="error" />
-        )}
-        {predca.okMsg && (
-          <p className="text-[10px] text-[#2dd4bf]">{predca.okMsg}</p>
-        )}
+        <PrivySignWaitNotice />
+        {budgetTxNotice(predca.pendingMsg, "pending")}
+        {budgetTxNotice(predca.error, "error")}
+        {budgetTxNotice(predca.okMsg, "ok")}
         <div className="border-t border-[#1e2633] pt-4">
           <Toggle
             label={t("settings.autoWeekly")}
@@ -565,6 +726,7 @@ export function SettingsView() {
           ) : null}
           {autoBuy.message && autoBuy.phase !== "idle" ? (
             <p
+              title={autoBuyError?.title}
               className={`mt-2 text-[10px] ${
                 autoBuy.phase === "error"
                   ? "text-[#fca5a5]"
@@ -573,7 +735,7 @@ export function SettingsView() {
                     : "text-[#8b95a8]"
               }`}
             >
-              {autoBuy.message}
+              {autoBuyError?.text ?? autoBuy.message}
             </p>
           ) : null}
         </div>
@@ -599,8 +761,8 @@ export function SettingsView() {
             </h2>
             <p className="mt-3 text-sm leading-relaxed text-[#c5cedb] text-justify">
               {t("settings.autoWeeklyConfirmBody", {
-                amount: weekly.toFixed(2),
-                each: (weekly / 3).toFixed(2),
+                amount: formatGrouped(weekly, { min: 2, max: 2 }),
+                each: formatGrouped(weekly / 3, { min: 2, max: 2 }),
               })}
             </p>
             <div className="mt-5 flex flex-wrap justify-end gap-2">
@@ -724,17 +886,20 @@ function Toggle({
   checked,
   onChange,
   disabled = false,
+  title,
 }: {
   label: string;
   checked: boolean;
   onChange: (v: boolean) => void;
   disabled?: boolean;
+  title?: string;
 }) {
   return (
     <button
       type="button"
       aria-pressed={checked}
       disabled={disabled}
+      title={title}
       onClick={() => {
         if (disabled) return;
         onChange(!checked);
@@ -756,5 +921,134 @@ function Toggle({
         />
       </span>
     </button>
+  );
+}
+
+function CompanyFacts({
+  bucket,
+  kind,
+  byName,
+}: {
+  bucket: ToggleBucket;
+  kind: "ipo" | "deadline";
+  byName: Record<string, CompanyData>;
+}) {
+  const { t, locale } = useI18n();
+  const known = bucket.known.map((name, index) => {
+    const data = byName[name];
+    if (!data) return null;
+    let phrase = name;
+    if (kind === "ipo" && data.ipoStatus === "listed" && data.ipoDate != null) {
+      phrase = `${name} — ${t("settings.ipoListed", {
+        date: formatCompanyDate(data.ipoDate, locale, "full"),
+      })}`;
+    } else if (
+      kind === "ipo" &&
+      data.ipoStatus === "announced" &&
+      data.ipoDate != null
+    ) {
+      phrase = `${name} — ${t("settings.ipoAnnounced", {
+        date: formatCompanyDate(data.ipoDate, locale, "full"),
+      })}`;
+    } else if (kind === "deadline" && data.deadline != null) {
+      phrase = `${name} — ${t("settings.deadlineOn", {
+        date: formatCompanyDate(data.deadline, locale, "full"),
+      })}`;
+    }
+    const checked = t("settings.checkedOn", {
+      date: formatCompanyDate(data.checkedAt, locale, "short"),
+    });
+    return (
+      <span key={name}>
+        {index > 0 ? ", " : null}
+        <a
+          href={data.source}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-[#a78bfa] underline"
+        >
+          {phrase}
+        </a>
+        {` ${checked}`}
+      </span>
+    );
+  });
+  const knownTemplate = t("settings.dataKnown");
+  const knownAt = knownTemplate.indexOf("{list}");
+  const staleNames = bucket.stale
+    .map((name) => {
+      const data = byName[name];
+      if (!data) return name;
+      const checked = t("settings.checkedOn", {
+        date: formatCompanyDate(data.checkedAt, locale, "short"),
+      });
+      return `${name} (${checked})`;
+    })
+    .join(", ");
+  return (
+    <div className="space-y-1 text-[10px] normal-case leading-relaxed tracking-normal text-[#8b95a8]">
+      {bucket.known.length > 0 ? (
+        <p>
+          {knownAt < 0 ? knownTemplate : knownTemplate.slice(0, knownAt)}
+          {known}
+          {knownAt < 0 ? null : knownTemplate.slice(knownAt + "{list}".length)}
+        </p>
+      ) : null}
+      {bucket.unknown.length > 0 ? (
+        <p>{t("settings.dataUnknown", { names: bucket.unknown.join(", ") })}</p>
+      ) : null}
+      {bucket.stale.length > 0 ? (
+        <p>{t("settings.dataStale", { names: staleNames })}</p>
+      ) : null}
+    </div>
+  );
+}
+
+function CompanyToggle({
+  label,
+  checked,
+  onChange,
+  disabled,
+  prefsReady,
+  bucket,
+  kind,
+  byName,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  disabled: boolean;
+  prefsReady: boolean;
+  bucket: ToggleBucket;
+  kind: "ipo" | "deadline";
+  byName: Record<string, CompanyData>;
+}) {
+  const { t } = useI18n();
+  const blocked = disabled || !prefsReady;
+  const title = !prefsReady
+    ? t("settings.prefsLoading")
+    : disabled
+      ? t("settings.noDataTooltip")
+      : undefined;
+  return (
+    <div className="space-y-1">
+      <Toggle
+        label={label}
+        checked={checked}
+        onChange={onChange}
+        disabled={blocked}
+        title={title}
+      />
+      {disabled ? (
+        <p
+          className="text-[10px] normal-case tracking-normal text-[#8b95a8]"
+          title={title}
+        >
+          {t("settings.noData")}
+        </p>
+      ) : (
+        <CompanyFacts bucket={bucket} kind={kind} byName={byName} />
+      )}
+    </div>
   );
 }

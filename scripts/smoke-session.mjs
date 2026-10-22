@@ -15,7 +15,12 @@ const message = [
 const seed = kp.secretKey.slice(0, 32);
 const signature = bs58.encode(ed25519.sign(new TextEncoder().encode(message), seed));
 const body = { wallet, owner: wallet, message, signature };
-const r = await fetch('https://predca-api.onrender.com/keeper/status', {
+const KEEPER = (process.env.NEXT_PUBLIC_KEEPER_URL || "").replace(/\/$/, "");
+if (!KEEPER) {
+  console.error("Set NEXT_PUBLIC_KEEPER_URL. It is empty in the repo and injected only at build time.");
+  process.exit(1);
+}
+const r = await fetch(`${KEEPER}/status`, {
   method: 'POST',
   headers: {
     'Content-Type': 'application/json',
@@ -38,7 +43,7 @@ console.log(JSON.stringify({
   detail: data.detail,
 }, null, 2));
 if (!data.sessionToken) process.exit(2);
-const r2 = await fetch(`https://predca-api.onrender.com/keeper/status?owner=${encodeURIComponent(wallet)}`, {
+const r2 = await fetch(`${KEEPER}/status?owner=${encodeURIComponent(wallet)}`, {
   headers: {
     Authorization: `Bearer ${data.sessionToken}`,
     'X-Keeper-Session': data.sessionToken,

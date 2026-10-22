@@ -16,6 +16,8 @@ export type Purchase = {
   amountUsd: number;
   tokens: string[];
   perTokenUsd: number;
+  /** Minted amounts aligned with `tokens`. Absent on offline mocks. */
+  tokenAmounts?: number[];
   signature: string;
 };
 

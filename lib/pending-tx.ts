@@ -1,3 +1,6 @@
+import { translate } from "@/lib/i18n";
+import { getLocaleSnapshot } from "@/lib/locale-store";
+
 export type PendingTxKind = "deposit" | "init_deposit" | "withdraw" | "budget" | "buy";
 
 export type PendingTxRecord = {
@@ -20,14 +23,29 @@ export const EXPIRY_MARGIN_BLOCKS = 10;
 export const EXPIRY_TIME_FALLBACK_MS = 5 * 60_000;
 export const UNRESOLVED_POLL_MS = 10_000;
 export const UNRESOLVED_POLL_MAX_MS = 3 * 60_000;
-export const PENDING_TX_LS_PREFIX = "predca.pendingTx.v1.";
+export const PENDING_TX_LS_PREFIX = "noir3.predca.pendingTx.v1.";
 export const PENDING_TX_MAX_AGE_MS = 24 * 60 * 60_000;
 export const PENDING_TX_MAX_RECORDS = 5;
 
-export const FAILED_EXPIRED_MSG =
-  "Transakcja nie dotarła do sieci (blockhash wygasł) — możesz spróbować ponownie.";
-export const UNRESOLVED_MSG =
-  "Transakcja niepotwierdzona — sprawdź w explorerze. Nie wysyłaj tej samej operacji, dopóki status się nie wyjaśni.";
+/**
+ * Language is chosen when the value is read in a template.
+ * Overview keeps using these names directly, including the lines that must stay put.
+ */
+class LiveCopy {
+  private readonly key: string;
+  constructor(key: string) {
+    this.key = key;
+  }
+  toString(): string {
+    return translate(getLocaleSnapshot(), this.key);
+  }
+  valueOf(): string {
+    return this.toString();
+  }
+}
+
+export const FAILED_EXPIRED_MSG = new LiveCopy("tx.failedExpired");
+export const UNRESOLVED_MSG = new LiveCopy("tx.unresolved");
 
 export type StorageLike = {
   getItem(key: string): string | null;

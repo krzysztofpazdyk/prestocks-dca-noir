@@ -4,8 +4,15 @@
  * spend server TYPESAFE. Optional XAI BYOK enables Grok.
  */
 
+import {
+  companyDataFromRankMap,
+  rememberCompanyRecords,
+} from "@/lib/company-data";
+import { shown } from "@/lib/i18n";
 import { dcaApiBase, readTypesafeKey, readXaiKey } from "@/lib/keys";
+import { ensureRuntimeConfig } from "@/lib/runtime-config";
 import { metricsRank } from "@/lib/metrics-rank";
+import { premiumBasisFor } from "@/lib/premium-view";
 import {
   filterProducts,
   filterTop3,
@@ -14,7 +21,12 @@ import {
   readRankPrefs,
   type RankPrefs,
 } from "@/lib/rank-prefs";
-import type { PrestocksProduct, RankResult, RankRow } from "@/lib/universe";
+import {
+  NEAR_IPO_NAMES,
+  type PrestocksProduct,
+  type RankResult,
+  type RankRow,
+} from "@/lib/universe";
 
 export type LatestRunJson = {
   pipeline?: string[];
@@ -28,6 +40,7 @@ export type LatestRunJson = {
   finished_at_utc?: string;
   mode?: string;
   error?: string;
+  company_data?: Record<string, unknown>;
 };
 
 const API_TIMEOUT_MS = 8000;
@@ -59,7 +72,7 @@ async function fetchWithTimeout(
       /* keep url */
     }
     if (/Failed to fetch|Load failed|NetworkError/i.test(msg)) {
-      throw new Error(`Hosted Jev (${host}) nieosiągalny`);
+      throw new Error(shown("rank.err.hostedUnreachable", { host }));
     }
     throw e;
   } finally {
@@ -86,11 +99,10 @@ function mapRunToRank(
   const pipeline = run.pipeline ?? ["prestocks", "jev"];
   const isMetrics =
     pipeline.includes("metrics_rank") && !pipeline.includes("jev");
+  const premiumsMatter = readRankPrefs().premiumsMatter;
   return {
     mode: isMetrics ? "metrics_fallback" : mode,
-    sourceLabel: isMetrics
-      ? "Źródło: metryki (bez AI — Jev niedostępny)"
-      : sourceLabel,
+    sourceLabel: isMetrics ? shown("rank.source.metricsNoJev") : sourceLabel,
     pipeline,
     top3: filled,
     scores: scores.length ? scores : filled,
@@ -104,10 +116,12 @@ function mapRunToRank(
         }
       : undefined,
     fetchedAt: run.finished_at_utc ?? new Date().toISOString(),
+    premiumBasis: premiumBasisFor("server", premiumsMatter),
   };
 }
 
 export async function fetchLatestRun(): Promise<RankResult | null> {
+  await ensureRuntimeConfig();
   const base = dcaApiBase();
   if (!base) return null;
   const resp = await fetchWithTimeout(`${base}/run/latest`, {
@@ -121,8 +135,8 @@ export async function fetchLatestRun(): Promise<RankResult | null> {
     run,
     byok ? "byok_ai" : "metrics_fallback",
     byok
-      ? "Źródło: cache serwera (/run/latest) · masz TypeSafe BYOK"
-      : "Źródło: cache serwera (/run/latest) — bez TypeSafe BYOK (nie Jev klienta)",
+      ? shown("rank.source.cacheByok")
+      : shown("rank.source.cacheNoByok"),
     readExclusions(),
   );
 }
@@ -132,11 +146,10 @@ export async function triggerDryRun(
   exclusions?: string[],
   prefs?: RankPrefs,
 ): Promise<RankResult> {
+  await ensureRuntimeConfig();
   const base = dcaApiBase();
   if (!base) {
-    throw new Error(
-      "Brak NEXT_PUBLIC_DCA_API_URL — nie można wywołać API /run/dry.",
-    );
+    throw new Error(shown("rank.err.noDryApi"));
   }
   const headers: Record<string, string> = {
     Accept: "application/json",
@@ -181,15 +194,22 @@ export async function triggerDryRun(
     throw new Error(errMsg || `API /run/dry HTTP ${resp.status}`);
   }
   const run = data.run ?? (data as LatestRunJson);
+  const companyRaw =
+    run.company_data ??
+    (data as { company_data?: Record<string, unknown> }).company_data;
+  if (companyRaw) {
+    rememberCompanyRecords(companyDataFromRankMap(companyRaw, Date.now()));
+  }
   const byok = !!ts;
+  const grok = (run.pipeline ?? []).includes("grok");
   return mapRunToRank(
     run,
     byok ? "byok_ai" : "metrics_fallback",
     byok
-      ? xai
-        ? "Źródło: PreStocks + AI (BYOK · Grok+Jev)"
-        : "Źródło: PreStocks + AI (BYOK · Jev)"
-      : "Źródło: /run/dry bez TypeSafe BYOK (nie Jev klienta)",
+      ? grok
+        ? shown("rank.source.grokJev")
+        : shown("rank.source.jev")
+      : shown("rank.source.dryNoByok"),
     apiPrefs.exclusions,
   );
 }
@@ -206,7 +226,7 @@ export async function fetchSampleRun(): Promise<RankResult | null> {
     return mapRunToRank(
       run,
       "metrics_fallback",
-      "Źródło: przykładowy wynik (sample) — nie live Jev",
+      shown("rank.source.sample"),
       readExclusions(),
     );
   } catch {
@@ -220,6 +240,7 @@ export type RankProxyResponse = {
   top3: Array<{ name: string; score: number }>;
   pipeline?: string[];
   error?: string;
+  company_data?: Record<string, unknown>;
 };
 
 /**
@@ -230,9 +251,10 @@ export type RankProxyResponse = {
 export async function postRank(
   prefs?: RankPrefs,
 ): Promise<RankProxyResponse> {
+  await ensureRuntimeConfig();
   const base = dcaApiBase();
   if (!base) {
-    throw new Error("Brak NEXT_PUBLIC_DCA_API_URL — nie można użyć proxy /rank.");
+    throw new Error(shown("rank.err.noRankProxy"));
   }
   const headers: Record<string, string> = {
     Accept: "application/json",
@@ -272,6 +294,9 @@ export async function postRank(
   }
   const excl = (prefs ?? readRankPrefs()).exclusions;
   data.top3 = filterTop3(data.top3 ?? [], excl);
+  if (data.company_data) {
+    rememberCompanyRecords(companyDataFromRankMap(data.company_data, Date.now()));
+  }
   return data;
 }
 
@@ -279,10 +304,12 @@ export async function postRank(
 export function rankResultFromProxy(
   data: RankProxyResponse,
   products: PrestocksProduct[],
+  prefs?: Pick<RankPrefs, "premiumsMatter">,
 ): RankResult {
   const byName = new Map(products.map((p) => [p.name.toLowerCase(), p]));
   const rows: RankRow[] = (data.top3 ?? []).map((r) => {
     const p = byName.get(r.name.toLowerCase());
+    const folded = r.name.replace(/\s+/g, "").toLowerCase();
     const base: PrestocksProduct = p ?? {
       name: r.name,
       symbol: r.name.replace(/\s+/g, "").toUpperCase(),
@@ -291,7 +318,9 @@ export function rankResultFromProxy(
       mark_price_usd: null,
       premium_pct: 0,
       premium_source: "proxy",
-      near_ipo: r.name.replace(/\s+/g, "").toLowerCase() === "spacex",
+      near_ipo: NEAR_IPO_NAMES.some(
+        (entry) => entry.replace(/\s+/g, "").toLowerCase() === folded,
+      ),
     };
     return {
       ...base,
@@ -303,20 +332,23 @@ export function rankResultFromProxy(
   const pipeline = data.pipeline ?? ["prestocks", "jev"];
   const isMetrics =
     pipeline.includes("metrics_rank") && !pipeline.includes("jev");
-  const xaiPresent = readXaiKey().length > 0;
+  const premiumsMatter =
+    prefs?.premiumsMatter ?? readRankPrefs().premiumsMatter;
+  const grok = pipeline.includes("grok");
   return {
     mode: isMetrics ? "metrics_fallback" : "byok_ai",
     sourceLabel: isMetrics
-      ? "Źródło: metryki (bez AI — Jev niedostępny)"
-      : xaiPresent
-        ? "Źródło: PreStocks + AI (BYOK · Grok+Jev)"
-        : "Źródło: PreStocks + AI (BYOK · Jev)",
+      ? shown("rank.source.metricsNoJev")
+      : grok
+        ? shown("rank.source.grokJev")
+        : shown("rank.source.jev"),
     pipeline,
     top3: rows.slice(0, 3),
     scores: rows,
     products,
     error: data.error,
     fetchedAt: new Date().toISOString(),
+    premiumBasis: premiumBasisFor("server", premiumsMatter),
   };
 }
 
@@ -349,11 +381,10 @@ export type FaucetUsdcResponse = {
 export async function claimFaucetUsdc(
   wallet: string,
 ): Promise<FaucetUsdcResponse> {
+  await ensureRuntimeConfig();
   const base = dcaApiBase();
   if (!base) {
-    throw new Error(
-      "Brak NEXT_PUBLIC_DCA_API_URL — nie można użyć faucet /faucet/usdc.",
-    );
+    throw new Error(shown("rank.err.noFaucet"));
   }
   const resp = await fetchWithTimeout(
     `${base}/faucet/usdc`,
@@ -371,7 +402,7 @@ export async function claimFaucetUsdc(
   try {
     data = (await resp.json()) as FaucetUsdcResponse & { detail?: unknown };
   } catch {
-    throw new Error(`API /faucet/usdc HTTP ${resp.status} (nie-JSON)`);
+    throw new Error(shown("rank.err.faucetNotJson", { status: resp.status }));
   }
   if (!resp.ok || !data.ok) {
     const detail = data.detail ?? data.error;
