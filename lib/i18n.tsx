@@ -32,7 +32,7 @@ export { DEFAULT_LOCALE, LOCALE_STORAGE_KEY };
 type Dict = Record<string, string>;
 
 const pl: Dict = {
-  "nav.brand": "noir 3.0",
+  "nav.brand": "PreStocks·DCA",
   "nav.overview": "Overview",
   "nav.settings": "Ustawienia",
   "nav.history": "Historia",
@@ -78,6 +78,9 @@ const pl: Dict = {
 
   "faucet.button": "Weź 1000 USDC + 0.1 SOL (demo)",
   "faucet.busy": "Wysyłam USDC + SOL…",
+  "faucet.confirming": "Czekam na potwierdzenie…",
+  "faucet.arrived": "Środki dotarły.",
+  "faucet.unconfirmed": "Nie potwierdzono w czasie — sprawdź saldo za chwilę, nie klikaj ponownie.",
   "faucet.success": "Wysłano 1000 USDC + 0.1 SOL do portfela (demo) · sig {sig}.",
   "faucet.nextSteps": "Następnie: Wpłać do vaulta (≥ budżet tygodniowy) + Wygeneruj rekomendacje — wtedy Dokonaj zakupu się odblokuje.",
   "faucet.error": "Faucet: {error}",
@@ -511,7 +514,7 @@ const pl: Dict = {
 };
 
 const en: Dict = {
-  "nav.brand": "noir 3.0",
+  "nav.brand": "PreStocks·DCA",
   "nav.overview": "Overview",
   "nav.settings": "Settings",
   "nav.history": "History",
@@ -557,6 +560,9 @@ const en: Dict = {
 
   "faucet.button": "Get 1000 USDC + 0.1 SOL (demo)",
   "faucet.busy": "Sending USDC + SOL…",
+  "faucet.confirming": "Waiting for confirmation…",
+  "faucet.arrived": "Funds arrived.",
+  "faucet.unconfirmed": "Not confirmed in time — check the balance in a moment, do not click again.",
   "faucet.success": "Sent 1000 USDC + 0.1 SOL to wallet (demo) · sig {sig}.",
   "faucet.nextSteps": "Next: Deposit into vault (≥ weekly budget) + Generate recommendations — then Purchase unlocks.",
   "faucet.error": "Faucet: {error}",

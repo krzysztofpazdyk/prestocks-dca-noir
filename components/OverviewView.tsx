@@ -237,6 +237,7 @@ export function OverviewView() {
     }
   }, [predca.pendingSignature, predca.error, predca.lastVerdict, purchaseTone, t]);
   const [faucetBusy, setFaucetBusy] = useState(false);
+  const [faucetConfirming, setFaucetConfirming] = useState(false);
   const [faucetMsg, setFaucetMsg] = useState<string | null>(null);
   const [faucetErr, setFaucetErr] = useState<string | null>(null);
 
@@ -247,31 +248,41 @@ export function OverviewView() {
       return;
     }
     setFaucetBusy(true);
+    setFaucetConfirming(false);
     setFaucetMsg(null);
     setFaucetErr(null);
     try {
-      const res = await claimFaucetUsdc(publicKey.toBase58());
-      const sigShort =
-        res.signature.length > 16
-          ? `${res.signature.slice(0, 8)}…${res.signature.slice(-8)}`
-          : res.signature;
-      const solPart =
-        res.solSkipped
-          ? " (SOL skipped)"
-          : res.solSignature
-            ? ` · SOL ${res.solSignature.length > 16 ? `${res.solSignature.slice(0, 8)}…${res.solSignature.slice(-8)}` : res.solSignature}`
-            : "";
-      setFaucetMsg(
-        t("faucet.success", { sig: `${sigShort}${solPart}` }) +
-          " " +
-          t("faucet.nextSteps"),
-      );
+      const res = await claimFaucetUsdc(publicKey.toBase58(), {
+        onConfirming: () => setFaucetConfirming(true),
+        refresh: () => predca.refresh(),
+      });
+      if (res.fundsArrived) {
+        setFaucetMsg(t("faucet.arrived") + " " + t("faucet.nextSteps"));
+      } else {
+        const sigShort =
+          res.signature.length > 16
+            ? `${res.signature.slice(0, 8)}…${res.signature.slice(-8)}`
+            : res.signature;
+        const solPart =
+          res.solSkipped
+            ? " (SOL skipped)"
+            : res.solSignature
+              ? ` · SOL ${res.solSignature.length > 16 ? `${res.solSignature.slice(0, 8)}…${res.solSignature.slice(-8)}` : res.solSignature}`
+              : "";
+        setFaucetMsg(
+          t("faucet.success", { sig: `${sigShort}${solPart}` }) +
+            " " +
+            t("faucet.nextSteps"),
+        );
+      }
       await predca.refresh();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setFaucetErr(t("faucet.error", { error: msg }));
+      await predca.refresh();
     } finally {
       setFaucetBusy(false);
+      setFaucetConfirming(false);
     }
   }
 
@@ -874,10 +885,16 @@ export function OverviewView() {
               <button
                 type="button"
                 onClick={() => void onClaimFaucet()}
-                disabled={faucetBusy || predca.txPending || sigUnresolved}
+                disabled={
+                  faucetBusy || faucetConfirming || predca.txPending || sigUnresolved
+                }
                 className="rounded border border-[#fbbf2444] bg-[#0c0e12] px-2.5 py-1 text-[10px] uppercase tracking-wider text-[#fbbf24] hover:bg-[#fbbf2411] disabled:opacity-40"
               >
-                {faucetBusy ? t("faucet.busy") : t("faucet.button")}
+                {faucetConfirming
+                  ? t("faucet.confirming")
+                  : faucetBusy
+                    ? t("faucet.busy")
+                    : t("faucet.button")}
               </button>
             )}
             <button
@@ -1464,7 +1481,7 @@ export function OverviewView() {
         </div>
         <span
           className="pointer-events-none absolute bottom-2 right-3 mono-num text-[10px] tabular-nums text-[#5c6578]"
-          title="noir 3.0"
+          title={`v${APP_VERSION}`}
         >
           v{APP_VERSION}
         </span>
