@@ -54,9 +54,7 @@ export function Nav() {
           <Link href="/" className="flex items-center gap-2">
             <span className="inline-block h-2 w-2 rounded-full bg-[#2dd4bf] shadow-[0_0_10px_#2dd4bf]" />
             <span className="text-sm font-semibold tracking-widest text-[#e8eef5]">
-              <span className="uppercase">PreStocks</span>
-              <span className="text-[#a78bfa]">·</span>
-              {t("nav.brand")}
+              PRESTOCKS DCA
             </span>
           </Link>
           <nav className="flex flex-wrap gap-1">

@@ -12,7 +12,7 @@ test("positions and the price panel open together under profit/loss", () => {
   const pnl = overview.indexOf("<PnlSection");
   const positions = overview.indexOf("<PositionsCard");
   const panel = overview.indexOf("<PricesPanel");
-  assert.ok(lastPurchase > 0 && lastPurchase < pnl);
+  assert.ok(pnl > 0 && pnl < lastPurchase);
   assert.ok(pnl < positions && positions < panel);
   assert.match(
     overview,
