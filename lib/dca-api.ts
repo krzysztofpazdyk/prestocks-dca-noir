@@ -4,15 +4,22 @@
  * spend server TYPESAFE. Optional XAI BYOK enables Grok.
  */
 
+import { Connection, PublicKey } from "@solana/web3.js";
 import {
   companyDataFromRankMap,
   rememberCompanyRecords,
 } from "@/lib/company-data";
-import { shown } from "@/lib/i18n";
+import { shown, translate } from "@/lib/i18n";
 import { dcaApiBase, readTypesafeKey, readXaiKey } from "@/lib/keys";
 import { ensureRuntimeConfig } from "@/lib/runtime-config";
 import { metricsRank } from "@/lib/metrics-rank";
 import { premiumBasisFor } from "@/lib/premium-view";
+import {
+  fetchOwnerUsdcBalance,
+  fetchSolBalance,
+  rpcUrl,
+  usdcMintOrNull,
+} from "@/lib/predca";
 import {
   filterProducts,
   filterTop3,
@@ -375,45 +382,313 @@ export type FaucetUsdcResponse = {
   solSkipReason?: string;
   error?: string;
   detail?: string;
+  /** Set when the POST never confirmed but the wallet balance moved. */
+  fundsArrived?: boolean;
 };
+
+/** The mint takes up to 90s server-side. Stay past that so the browser is not first to give up. */
+export const FAUCET_POST_TIMEOUT_MS = 150_000;
+/** How often to re-read the wallet after an ambiguous faucet failure. */
+export const FAUCET_CONFIRM_POLL_MS = 3_000;
+/** Stop looking for a landed mint after this long. */
+export const FAUCET_CONFIRM_MAX_MS = 120_000;
+/** Demo faucet mints this many mock USDC. */
+export const FAUCET_USDC_MIN_INCREASE = 1_000;
+
+const FAUCET_GATEWAY_STATUSES = new Set([502, 504, 524]);
+
+export type FaucetBalanceRead = {
+  usdc: number | null;
+  sol: number | null;
+  /** False when that leg threw. A missing USDC account is null with ok left true. */
+  usdcOk?: boolean;
+  solOk?: boolean;
+};
+
+export type ClaimFaucetOptions = {
+  readBalances?: (wallet: string) => Promise<FaucetBalanceRead>;
+  sleep?: (ms: number) => Promise<void>;
+  now?: () => number;
+  /** Fires once, when the claim starts re-reading the wallet. */
+  onConfirming?: () => void;
+  /** Called after a balance increase is accepted as a landed mint. */
+  refresh?: () => void | Promise<unknown>;
+  postTimeoutMs?: number;
+  confirmPollMs?: number;
+  confirmMaxMs?: number;
+};
+
+type FaucetJson = {
+  ok?: boolean;
+  signature?: string;
+  amountUi?: number;
+  mint?: string;
+  wallet?: string;
+  ata?: string;
+  solSignature?: string | null;
+  solAmountUi?: number;
+  solSkipped?: boolean;
+  solSkipReason?: string;
+  error?: unknown;
+  detail?: unknown;
+};
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function balanceKnown(flag: boolean | undefined): boolean {
+  return flag !== false;
+}
+
+/** USDC up by at least the demo mint, or any SOL increase, against the pre-POST read. */
+export function faucetFundsArrived(
+  before: FaucetBalanceRead,
+  after: FaucetBalanceRead,
+): boolean {
+  if (balanceKnown(before.usdcOk) && balanceKnown(after.usdcOk)) {
+    const from = before.usdc ?? 0;
+    const to = after.usdc ?? 0;
+    if (to - from >= FAUCET_USDC_MIN_INCREASE) return true;
+  }
+  if (
+    balanceKnown(before.solOk) &&
+    balanceKnown(after.solOk) &&
+    before.sol != null &&
+    after.sol != null &&
+    after.sol > before.sol
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function faucetBodyText(data: FaucetJson | null): string {
+  if (!data) return "";
+  return [data.detail, data.error]
+    .map((value) => {
+      if (typeof value === "string") return value;
+      if (value == null) return "";
+      try {
+        return JSON.stringify(value);
+      } catch {
+        return String(value);
+      }
+    })
+    .join("\n");
+}
+
+function faucetFailure(status: number, data: FaucetJson | null): Error {
+  if (!data) {
+    return new Error(shown("rank.err.faucetNotJson", { status }));
+  }
+  const detail = data.detail ?? data.error;
+  const msg =
+    typeof detail === "string"
+      ? detail
+      : detail != null
+        ? JSON.stringify(detail)
+        : `API /faucet/usdc HTTP ${status}`;
+  return new Error(msg);
+}
+
+function isAmbiguousFaucetTransport(err: unknown, url: string): boolean {
+  if (!(err instanceof Error)) return false;
+  if (err.name === "AbortError") return true;
+  if (/^API timeout \(\d+s\)$/.test(err.message)) return true;
+  if (
+    /Failed to fetch|Load failed|NetworkError|ECONNRESET|ETIMEDOUT|socket hang up/i.test(
+      err.message,
+    )
+  ) {
+    return true;
+  }
+  let host = url;
+  try {
+    host = new URL(url).host;
+  } catch {
+    /* keep the raw url */
+  }
+  return (
+    err.message === translate("pl", "rank.err.hostedUnreachable", { host }) ||
+    err.message === translate("en", "rank.err.hostedUnreachable", { host })
+  );
+}
+
+function shouldConfirmFaucet(status: number, data: FaucetJson | null): boolean {
+  if (status === 429) return false;
+  if (FAUCET_GATEWAY_STATUSES.has(status)) return true;
+  return faucetBodyText(data).includes("Faucet mint timed out");
+}
+
+/** One connection for the whole claim. Missing ATA is a known zero, not a failure. */
+export async function readFaucetBalances(
+  wallet: string,
+  connection: Connection,
+): Promise<FaucetBalanceRead> {
+  const owner = new PublicKey(wallet);
+  const mint = usdcMintOrNull();
+  const read: FaucetBalanceRead = {
+    usdc: null,
+    sol: null,
+    usdcOk: false,
+    solOk: false,
+  };
+  if (mint) {
+    try {
+      read.usdc = await fetchOwnerUsdcBalance(connection, owner, mint);
+      read.usdcOk = true;
+    } catch {
+      read.usdcOk = false;
+    }
+  }
+  try {
+    read.sol = await fetchSolBalance(connection, owner);
+    read.solOk = true;
+  } catch {
+    read.solOk = false;
+  }
+  return read;
+}
+
+function defaultBalanceReader(): (wallet: string) => Promise<FaucetBalanceRead> {
+  const connection = new Connection(rpcUrl(), "confirmed");
+  return (wallet) => readFaucetBalances(wallet, connection);
+}
+
+function arrivedResponse(wallet: string): FaucetUsdcResponse {
+  return {
+    ok: true,
+    signature: "",
+    amountUi: FAUCET_USDC_MIN_INCREASE,
+    mint: "",
+    wallet,
+    fundsArrived: true,
+  };
+}
+
+async function confirmFaucetByBalance(
+  wallet: string,
+  before: FaucetBalanceRead,
+  read: (wallet: string) => Promise<FaucetBalanceRead>,
+  options: {
+    sleep: (ms: number) => Promise<void>;
+    now: () => number;
+    pollMs: number;
+    maxMs: number;
+    onConfirming?: () => void;
+    refresh?: () => void | Promise<unknown>;
+  },
+): Promise<FaucetUsdcResponse> {
+  options.onConfirming?.();
+  const started = options.now();
+  const pollMs = Math.max(1, options.pollMs);
+  const maxChecks = Math.floor(options.maxMs / pollMs) + 1;
+  let checks = 0;
+  while (checks < maxChecks) {
+    checks += 1;
+    let after: FaucetBalanceRead;
+    try {
+      after = await read(wallet);
+    } catch {
+      after = { usdc: null, sol: null, usdcOk: false, solOk: false };
+    }
+    if (faucetFundsArrived(before, after)) {
+      try {
+        await options.refresh?.();
+      } catch {
+        /* a landed mint still counts if the follow-up refresh fails */
+      }
+      return arrivedResponse(wallet);
+    }
+    const elapsed = options.now() - started;
+    if (elapsed >= options.maxMs) break;
+    const wait = Math.min(pollMs, options.maxMs - elapsed);
+    if (wait <= 0) break;
+    await options.sleep(wait);
+  }
+  throw new Error(shown("faucet.unconfirmed"));
+}
 
 /** Devnet demo faucet: mint 1000 mock USDC + 0.1 SOL (if needed) to the wallet. */
 export async function claimFaucetUsdc(
   wallet: string,
+  options: ClaimFaucetOptions = {},
 ): Promise<FaucetUsdcResponse> {
   await ensureRuntimeConfig();
   const base = dcaApiBase();
   if (!base) {
     throw new Error(shown("rank.err.noFaucet"));
   }
-  const resp = await fetchWithTimeout(
-    `${base}/faucet/usdc`,
-    {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ wallet }),
-    },
-    90_000,
-  );
-  let data: FaucetUsdcResponse & { detail?: unknown };
+  const read = options.readBalances ?? defaultBalanceReader();
+  const sleep = options.sleep ?? delay;
+  const now = options.now ?? Date.now;
+  const postTimeoutMs = options.postTimeoutMs ?? FAUCET_POST_TIMEOUT_MS;
+  const confirmPollMs = options.confirmPollMs ?? FAUCET_CONFIRM_POLL_MS;
+  const confirmMaxMs = options.confirmMaxMs ?? FAUCET_CONFIRM_MAX_MS;
+
+  let before: FaucetBalanceRead;
   try {
-    data = (await resp.json()) as FaucetUsdcResponse & { detail?: unknown };
+    before = await read(wallet);
   } catch {
+    before = { usdc: null, sol: null, usdcOk: false, solOk: false };
+  }
+
+  const url = `${base}/faucet/usdc`;
+  let resp: Response;
+  try {
+    resp = await fetchWithTimeout(
+      url,
+      {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ wallet }),
+      },
+      postTimeoutMs,
+    );
+  } catch (err) {
+    if (!isAmbiguousFaucetTransport(err, url)) throw err;
+    return confirmFaucetByBalance(wallet, before, read, {
+      sleep,
+      now,
+      pollMs: confirmPollMs,
+      maxMs: confirmMaxMs,
+      onConfirming: options.onConfirming,
+      refresh: options.refresh,
+    });
+  }
+
+  let data: FaucetJson | null = null;
+  try {
+    data = (await resp.json()) as FaucetJson;
+  } catch {
+    data = null;
+  }
+
+  if (resp.ok && data?.ok === true) {
+    return data as FaucetUsdcResponse;
+  }
+  if (resp.status === 429) {
+    throw faucetFailure(resp.status, data);
+  }
+  if (shouldConfirmFaucet(resp.status, data)) {
+    return confirmFaucetByBalance(wallet, before, read, {
+      sleep,
+      now,
+      pollMs: confirmPollMs,
+      maxMs: confirmMaxMs,
+      onConfirming: options.onConfirming,
+      refresh: options.refresh,
+    });
+  }
+  if (!data) {
     throw new Error(shown("rank.err.faucetNotJson", { status: resp.status }));
   }
-  if (!resp.ok || !data.ok) {
-    const detail = data.detail ?? data.error;
-    const msg =
-      typeof detail === "string"
-        ? detail
-        : detail != null
-          ? JSON.stringify(detail)
-          : `API /faucet/usdc HTTP ${resp.status}`;
-    throw new Error(msg);
-  }
-  return data;
+  throw faucetFailure(resp.status, data);
 }
 
