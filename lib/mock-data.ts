@@ -115,7 +115,7 @@ export const DEFAULT_SETTINGS = {
   weeklyAmountUsd: 150,
   exclusions: ["xAI"],
   deadlineInvalid: false,
-  ipoPremiumMatters: false,
+  ipoPremiumMatters: true,
   buyDespiteIpo: false,
   /** Opt-in: enabling starts the weekly vault-buy cycle (first buy immediately). */
   autoWeeklyBuy: false,

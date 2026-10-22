@@ -7,6 +7,7 @@
 
 import { filterProducts, readExclusions } from "@/lib/exclusions";
 import { shown } from "@/lib/i18n";
+import { DEFAULT_SETTINGS } from "@/lib/mock-data";
 import { premiumBasisFor } from "@/lib/premium-view";
 import type { RankPrefs } from "@/lib/rank-prefs";
 import {
@@ -31,9 +32,11 @@ export function metricsRank(
     exclusions ??
     (typeof window !== "undefined" ? readExclusions() : ["xAI"]);
   const full = typeof window !== "undefined" ? readRankPrefs() : null;
-  // Default false matches DEFAULT_SETTINGS.ipoPremiumMatters
+  // Unset value matches DEFAULT_SETTINGS.ipoPremiumMatters (on).
   const premiumsMatter =
-    prefs?.premiumsMatter ?? full?.premiumsMatter ?? false;
+    prefs?.premiumsMatter ??
+    full?.premiumsMatter ??
+    DEFAULT_SETTINGS.ipoPremiumMatters;
   const nearIpoBoost =
     premiumsMatter &&
     (prefs?.premiumsEspeciallyNearIpo ??
