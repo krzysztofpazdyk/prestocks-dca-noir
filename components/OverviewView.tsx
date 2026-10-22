@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { claimFaucetUsdc } from "@/lib/dca-api";
 import { HoldingsPie } from "./HoldingsPie";
+import { HistoryRunEntry } from "@/components/HistoryRunEntry";
 import { fmtPriceClock, fmtSignedPnl, fmtUsdAmount } from "@/lib/format-usd";
 import { formatDollars, formatGrouped } from "@/lib/number-format";
 import {
@@ -27,7 +28,6 @@ import {
 import {
   DEFAULT_SETTINGS,
   type Holding,
-  type Purchase,
 } from "@/lib/mock-data";
 import { purchaseDisabledReasonKey } from "@/lib/purchase-reason";
 import { readWeeklyBudgetUsd } from "@/lib/auto-weekly-buy";
@@ -55,7 +55,6 @@ import {
 import { PrivySignWaitNotice } from "@/components/PrivyWalletBridge";
 import { TxNotice, txMessageWithLink } from "@/components/TxNotice";
 import {
-  clusterShortPl,
   explorerTxUrl,
   formatUsd,
   rpcHost,
@@ -317,20 +316,12 @@ export function OverviewView() {
   // Disconnected: holdings stay empty; never render the mock allocation pie.
   const displayHoldings: Holding[] = connected ? predca.holdingsOnChain : [];
 
-  const displayLastPurchase: Purchase | null = (() => {
-    if (!connected || !onChainReady || !predca.lastPurchaseOnChain) {
-      return null;
-    }
-    const lp = predca.lastPurchaseOnChain;
-    return {
-      date: lp.date,
-      amountUsd: lp.amountUsd,
-      tokens: lp.tokens,
-      perTokenUsd: lp.perTokenUsd,
-      tokenAmounts: lp.tokenAmounts,
-      signature: `run#${lp.runIndex}`,
-    };
-  })();
+  const lastRunEntry =
+    connected &&
+    predca.lastRun &&
+    (predca.status === "ready" || predca.status === "error")
+      ? predca.lastRun
+      : null;
 
   async function handleGenerateRecommendations() {
     setRankError(null);
@@ -851,7 +842,7 @@ export function OverviewView() {
         </div>
         {!connected && (
           <p className="text-xs text-[#8b95a8]">
-            {t("overview.disconnectedHint", { cluster: clusterShortPl() })}
+            {t("overview.disconnectedHint")}
           </p>
         )}
         {connected && predca.status === "no_mint" && (
@@ -861,7 +852,7 @@ export function OverviewView() {
         )}
         {connected && onChainReady && (
           <p className="text-xs text-[#2dd4bf]">
-            {t("overview.onChainHint", { cluster: clusterShortPl() })}
+            {t("overview.onChainHint")}
           </p>
         )}
       </div>
@@ -871,7 +862,7 @@ export function OverviewView() {
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 className="text-[11px] uppercase tracking-[0.15em] text-[#2dd4bf]">
-              {t("predca.title", { cluster: clusterShortPl() })}
+              {t("predca.title")}
             </h2>
             <p className="mt-0.5 text-[10px] text-[#8b95a8]">
               {t("predca.rpc")}{" "}
@@ -1236,11 +1227,23 @@ export function OverviewView() {
 
       <div className="grid gap-4 lg:grid-cols-2 lg:items-stretch">
         <section className="rounded-lg border border-[#1e2633] bg-[#141820] p-5 lg:h-full">
-          <h2 className="mb-4 text-[11px] uppercase tracking-[0.15em] text-[#a78bfa]">
-            {connected
-              ? t("holdings.titleOnChain")
-              : t("holdings.titleDisconnected")}
-          </h2>
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-[11px] uppercase tracking-[0.15em] text-[#a78bfa]">
+              {connected
+                ? t("holdings.titleOnChain")
+                : t("holdings.titleDisconnected")}
+            </h2>
+            {showPnl && (
+              <button
+                type="button"
+                onClick={() => setDetailsOpen((open) => !open)}
+                aria-expanded={detailsOpen}
+                className="rounded border border-[#1e2633] px-3 py-1 text-[10px] uppercase tracking-wider text-[#8b95a8] hover:text-[#e8eef5]"
+              >
+                {detailsOpen ? t("pnl.hideDetails") : t("pnl.details")}
+              </button>
+            )}
+          </div>
           {displayHoldings.length === 0 ? (
             <p className="text-xs text-[#8b95a8]">
               {connected
@@ -1406,82 +1409,11 @@ export function OverviewView() {
             <PnlSection
               rows={predca.positions}
               locale={locale}
-              detailsOpen={detailsOpen}
-              onToggleDetails={() => setDetailsOpen((open) => !open)}
               balancesStale={portfolioBalanceStale}
             />
           )}
         </div>
       </div>
-
-      <section className="relative flex min-h-[11rem] flex-1 flex-col rounded-lg border border-[#1e2633] bg-[#141820] p-5">
-        <h2 className="mb-3 text-[11px] uppercase tracking-[0.15em] text-[#a78bfa]">
-          {connected && onChainReady
-            ? t("lastPurchase.titleOnChain")
-            : connected
-              ? t("lastPurchase.titleConnected")
-              : t("lastPurchase.titleDisconnected")}
-        </h2>
-        <div className="flex-1 space-y-1 text-sm pb-5">
-          {!displayLastPurchase || displayLastPurchase.tokens.length === 0 ? (
-            <p className="text-[#8b95a8]">
-              {connected
-                ? t("lastPurchase.emptyConnected")
-                : t("lastPurchase.emptyDisconnected")}
-            </p>
-          ) : (
-            <>
-              <p>
-                <span className="text-[#8b95a8]">{t("lastPurchase.date")} </span>
-                <span className="mono-num">{displayLastPurchase.date}</span>
-              </p>
-              <p>
-                <span className="text-[#8b95a8]">{t("lastPurchase.budget")} </span>
-                {predca.lastPurchaseOnChain?.priceKnown === false ? (
-                  <span className="mono-num text-[#8b95a8]">
-                    {t("runPrice.unknown")}
-                  </span>
-                ) : (
-                  <>
-                    <span className="mono-num text-[#2dd4bf]">
-                      {formatDollars(displayLastPurchase.amountUsd)}
-                    </span>
-                    <span className="text-[#8b95a8]">
-                      {" "}
-                      {t("lastPurchase.perToken", {
-                        amount: formatGrouped(
-                          Number(displayLastPurchase.perTokenUsd),
-                          { min: 2, max: 2 },
-                        ),
-                      })}
-                    </span>
-                  </>
-                )}
-              </p>
-              {predca.lastPurchaseOnChain?.priceKnown === false ? (
-                <p className="text-[10px] text-[#8b95a8]">{t("runPrice.loading")}</p>
-              ) : null}
-              <p>
-                <span className="text-[#8b95a8]">{t("lastPurchase.bought")} </span>
-                {displayLastPurchase.tokens
-                  .map((name, i) => {
-                    const amt = displayLastPurchase.tokenAmounts?.[i];
-                    if (amt == null || !Number.isFinite(amt)) return name;
-                    const text = formatGrouped(amt, { max: 6 });
-                    return `${name} × ${text}`;
-                  })
-                  .join(" · ")}
-              </p>
-            </>
-          )}
-        </div>
-        <span
-          className="pointer-events-none absolute bottom-2 right-3 mono-num text-[10px] tabular-nums text-[#5c6578]"
-          title="noir 3.0"
-        >
-          v{APP_VERSION}
-        </span>
-      </section>
 
       {showPnl && detailsOpen && (
         <PositionsCard
@@ -1506,6 +1438,37 @@ export function OverviewView() {
           }}
         />
       )}
+
+      <section className="relative flex min-h-[11rem] flex-1 flex-col rounded-lg border border-[#1e2633] bg-[#141820] p-5">
+        <h2 className="mb-3 text-[11px] uppercase tracking-[0.15em] text-[#a78bfa]">
+          {connected && onChainReady
+            ? t("lastPurchase.titleOnChain")
+            : connected
+              ? t("lastPurchase.titleConnected")
+              : t("lastPurchase.titleDisconnected")}
+        </h2>
+        <div className="flex-1 pb-5">
+          {lastRunEntry ? (
+            <HistoryRunEntry
+              run={lastRunEntry}
+              fills={predca.runFills}
+              quotes={predca.jupPrices.quotes}
+            />
+          ) : (
+            <p className="text-sm text-[#8b95a8]">
+              {connected
+                ? t("lastPurchase.emptyConnected")
+                : t("lastPurchase.emptyDisconnected")}
+            </p>
+          )}
+        </div>
+        <span
+          className="pointer-events-none absolute bottom-2 right-3 mono-num text-[10px] tabular-nums text-[#5c6578]"
+          title="noir 3.0"
+        >
+          v{APP_VERSION}
+        </span>
+      </section>
     </div>
   );
 }
@@ -1639,14 +1602,10 @@ function fmtPanelPct(value: number, locale: string): string {
 function PnlSection({
   rows,
   locale,
-  detailsOpen,
-  onToggleDetails,
   balancesStale = false,
 }: {
   rows: PositionRow[];
   locale: string;
-  detailsOpen: boolean;
-  onToggleDetails: () => void;
   /** Hide the USD total. It is summed from the previous token balances. */
   balancesStale?: boolean;
 }) {
@@ -1693,14 +1652,6 @@ function PnlSection({
       {summary.hasPriced && summary.hasLegacy && (
         <p className="mt-1 text-[10px] text-[#8b95a8]">{t("pnl.partialNote")}</p>
       )}
-      <button
-        type="button"
-        onClick={onToggleDetails}
-        aria-expanded={detailsOpen}
-        className="mt-3 rounded border border-[#1e2633] px-3 py-1 text-[10px] uppercase tracking-wider text-[#8b95a8] hover:text-[#e8eef5]"
-      >
-        {detailsOpen ? t("pnl.hideDetails") : t("pnl.details")}
-      </button>
     </section>
   );
 }

@@ -2,18 +2,20 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-test("positions and the price panel open together under profit/loss", () => {
+test("allocation toggles positions and the price panel above the last purchase", () => {
   const overview = readFileSync(
     new URL("../components/OverviewView.tsx", import.meta.url),
     "utf8",
   );
   assert.equal(overview.split("<PricesPanel").length - 1, 1);
-  const lastPurchase = overview.lastIndexOf('t("lastPurchase.');
+  const holdings = overview.indexOf('t("holdings.titleOnChain")');
+  const detailsBtn = overview.indexOf('t("pnl.details")');
   const pnl = overview.indexOf("<PnlSection");
   const positions = overview.indexOf("<PositionsCard");
   const panel = overview.indexOf("<PricesPanel");
-  assert.ok(pnl > 0 && pnl < lastPurchase);
-  assert.ok(pnl < positions && positions < panel);
+  const lastPurchase = overview.lastIndexOf('t("lastPurchase.');
+  assert.ok(holdings > 0 && holdings < detailsBtn && detailsBtn < pnl);
+  assert.ok(pnl < positions && positions < panel && panel < lastPurchase);
   assert.match(
     overview,
     /const showPnl = connected && predca\.positions\.length > 0;/,
@@ -30,9 +32,12 @@ test("positions and the price panel open together under profit/loss", () => {
     overview.indexOf("function PnlSection"),
     overview.indexOf("function PositionsCard"),
   );
-  assert.match(pnlFn, /aria-expanded=\{detailsOpen\}/);
+  assert.doesNotMatch(pnlFn, /pnl\.details/);
+  assert.doesNotMatch(pnlFn, /aria-expanded/);
+  const allocation = overview.slice(holdings, pnl);
+  assert.match(allocation, /aria-expanded=\{detailsOpen\}/);
   assert.match(
-    pnlFn,
+    allocation,
     /detailsOpen \? t\("pnl\.hideDetails"\) : t\("pnl\.details"\)/,
   );
   assert.match(overview, /^      <div className="grid gap-4 lg:grid-cols-2/m);

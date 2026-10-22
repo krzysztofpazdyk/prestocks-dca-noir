@@ -179,7 +179,7 @@ test("a failed signature uses Anchor logs, and keeps the old text without them",
       (err: unknown) => {
         assert.equal(err instanceof SignatureFailedError, true);
         if (!(err instanceof SignatureFailedError)) return false;
-        assert.equal(err.message, `Transakcja odrzucona przez Devnet. ${SIG}`);
+        assert.equal(err.message, `Transakcja odrzucona. ${SIG}`);
         assert.equal(isOnChainSignatureReject(err), true);
         return true;
       },
@@ -189,7 +189,7 @@ test("a failed signature uses Anchor logs, and keeps the old text without them",
 
 test("rejection is recognized from the class and from the old Polish sentence", () => {
   const english = signatureFailedError(SIG, null, "en");
-  assert.equal(english.message, `Transaction rejected by Devnet. ${SIG}`);
+  assert.equal(english.message, `Transaction rejected. ${SIG}`);
   assert.equal(isOnChainSignatureReject(english), true);
   assert.equal(isOnChainSignatureReject(new Error(`Transakcja odrzucona przez Devnet. ${SIG}`)), true);
   assert.equal(isOnChainSignatureReject(new Error(`Transaction rejected by Devnet. ${SIG}`)), true);
@@ -265,9 +265,9 @@ test("transaction copy has the same keys in Polish and English", () => {
   assert.equal(translate("pl", "tx.err.noBuyIx"), "Brak instrukcji zakupu.");
   assert.equal(
     translate("pl", "tx.err.rejected", { signature: SIG }),
-    `Transakcja odrzucona przez Devnet. ${SIG}`,
+    `Transakcja odrzucona. ${SIG}`,
   );
-  assert.equal(translate("pl", "tx.err.rejectedShort"), "Transakcja odrzucona przez Devnet.");
+  assert.equal(translate("pl", "tx.err.rejectedShort"), "Transakcja odrzucona.");
   assert.equal(formatCount("pl", 10.5, { min: 2, max: 2 }), "10.50");
   assert.equal(formatCount("en", 10.5, { min: 2, max: 2 }), "10.50");
   assert.equal(

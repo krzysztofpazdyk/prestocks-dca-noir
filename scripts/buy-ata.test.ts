@@ -92,7 +92,7 @@ test("polling confirms, rejects a failed signature, and times out", async () => 
         SIG,
         { sleep: async () => {}, now: () => 0 },
       ),
-    /Transakcja odrzucona przez Devnet/,
+    /Transakcja odrzucona\./,
   );
 
   let now = 0;
