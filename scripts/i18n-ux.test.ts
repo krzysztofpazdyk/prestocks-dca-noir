@@ -148,5 +148,5 @@ test("Overview and Trading desk stay English in the Polish dictionary", () => {
     "utf8",
   );
   assert.match(history, /HistoryRunEntry/);
-  assert.match(entry, />\s*on-chain\s*</);
+  assert.doesNotMatch(entry, />\s*on-chain\s*</);
 });
