@@ -179,7 +179,7 @@ test("settings weekly amount comes from storage without setState in the load eff
 
 test("buy preview hides when the gate is closed and the mount refresh is deferred", () => {
   assert.match(overview, /const shownBuyPreview = previewGateOpen \? buyPreview : null/);
-  assert.match(overview, /\{shownBuyPreview &&/);
+  assert.doesNotMatch(overview, /\{shownBuyPreview &&/);
   const effect = overview.slice(
     overview.indexOf("const previewBuy = predca.previewBuy;"),
     overview.indexOf("const top3Title"),
