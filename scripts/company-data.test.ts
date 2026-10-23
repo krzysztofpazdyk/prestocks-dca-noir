@@ -40,8 +40,8 @@ function product(name: string, extra: Partial<PrestocksProduct> = {}): Prestocks
     mint: MINTS[name] ?? "",
     token_price_usd: 1,
     mark_price_usd: 1,
-    premium_pct: 0,
-    premium_source: "hardcoded_fallback",
+    premium_pct: null,
+    premium_source: "no_data",
     near_ipo: false,
     ...extra,
   };
@@ -108,7 +108,7 @@ test("livePremiumPct matches the price panel, and stale SpaceX stock data is nul
   assert.equal(livePremiumPct("SpaceX", stale), null);
 });
 
-test("metricsRank ignores hardcoded premiums and does not give SpaceX a near-IPO bonus", () => {
+test("metricsRank ignores a missing premium and does not give SpaceX a near-IPO bonus", () => {
   const liveRaw: Record<string, unknown> = Object.fromEntries(
     Object.values(MINTS).map((mint) => [
       mint,
@@ -139,15 +139,14 @@ test("metricsRank ignores hardcoded premiums and does not give SpaceX a near-IPO
   assert.ok(sx && anth);
   assert.equal(sx.near_ipo, false);
   assert.equal(sx.score, anth.score);
-  assert.equal(ranked.premiumBasis, "live");
 
   const sample = live[0];
-  const hard = metricsRank(
-    [{ ...sample, premium_pct: -21.7, premium_source: "hardcoded_fallback", near_ipo: false }],
+  const missing = metricsRank(
+    [{ ...sample, premium_pct: null, premium_source: "no_data", near_ipo: false }],
     [],
     PREFS_ON,
   );
-  assert.equal(hard.scores[0].score, 50);
+  assert.equal(missing.scores[0].score, 50);
   const used = metricsRank(
     [{ ...sample, premium_pct: -20, premium_source: "jupiter_stockdata", near_ipo: false }],
     [],
@@ -155,27 +154,26 @@ test("metricsRank ignores hardcoded premiums and does not give SpaceX a near-IPO
   );
   assert.equal(used.scores[0].score, 70);
   const off = metricsRank(live, [], { ...PREFS_ON, premiumsMatter: false });
-  assert.equal(off.premiumBasis, "none");
   assert.equal(off.scores.every((row) => row.score === 50), true);
 });
 
-test("rankResultFromProxy reports the server premium basis and does not mark unknown SpaceX near IPO", () => {
+test("rankResultFromProxy accepts a null premium and does not mark unknown SpaceX near IPO", () => {
   const result = rankResultFromProxy(
     { ok: true, top3: [{ name: "SpaceX", score: 12 }] },
     [],
     { premiumsMatter: true },
   );
-  assert.equal(result.premiumBasis, "server_estimate");
+  assert.equal(result.top3[0].premium_pct, null);
   assert.equal(result.top3[0].near_ipo, false);
   const ignored = rankResultFromProxy(
     { ok: true, top3: [{ name: "OpenAI", score: 1 }] },
     [],
     { premiumsMatter: false },
   );
-  assert.equal(ignored.premiumBasis, "none");
+  assert.equal(ignored.top3[0].premium_pct, null);
 });
 
-test("a server metrics fallback is a server estimate, and the client fallback is live", () => {
+test("a server metrics fallback stays metrics mode, and a missing premium scores as zero", () => {
   const server = rankResultFromProxy(
     {
       ok: true,
@@ -186,14 +184,14 @@ test("a server metrics fallback is a server estimate, and the client fallback is
     { premiumsMatter: true },
   );
   assert.equal(server.mode, "metrics_fallback");
-  assert.equal(server.premiumBasis, "server_estimate");
   const client = metricsRank([product("OpenAI")], [], {
     premiumsMatter: true,
     premiumsEspeciallyNearIpo: false,
     buyDespiteIpo: false,
     deadlinesUnimportant: false,
   });
-  assert.equal(client.premiumBasis, "live");
+  assert.equal(client.mode, "metrics_fallback");
+  assert.equal(client.scores[0].score, 50);
   const off = rankResultFromProxy(
     {
       ok: true,
@@ -203,7 +201,7 @@ test("a server metrics fallback is a server estimate, and the client fallback is
     [],
     { premiumsMatter: false },
   );
-  assert.equal(off.premiumBasis, "none");
+  assert.equal(off.mode, "metrics_fallback");
 });
 
 test("Top-3 premium text uses the live helper and Settings disables both data toggles", () => {
@@ -213,7 +211,7 @@ test("Top-3 premium text uses the live helper and Settings disables both data to
   assert.match(fn, /livePremiumPct/);
   assert.doesNotMatch(fn, /premium\.estimate/);
   assert.doesNotMatch(overview, /premium\.estimate/);
-  assert.match(overview, /rank\.premiumBasis\.\$\{premiumBasis\}/);
+  assert.doesNotMatch(overview, /rank\.premiumBasis/);
 
   const settings = readFileSync(new URL("../components/SettingsView.tsx", import.meta.url), "utf8");
   assert.match(settings, /disabled=\{!availability\.buyDespiteIpo\.enabled\}/);
@@ -437,9 +435,6 @@ test("company dates use Warsaw day-month order and the IPO copy stays put", () =
     return [...src.matchAll(re)].map((match) => match[1]);
   }
   const keys = [
-    "rank.premiumBasis.server_estimate",
-    "rank.premiumBasis.live",
-    "rank.premiumBasis.none",
     "settings.noData",
     "settings.noDataTooltip",
     "settings.dataKnown",
@@ -465,8 +460,11 @@ test("company dates use Warsaw day-month order and the IPO copy stays put", () =
     "Premia IPO ma znaczenie (uwzględniaj różnicę wyceny tokenu względem rynku, np. −20% / +34%).",
     "IPO premium matters (factor in token vs market pricing gap, e.g. −20% / +34%).",
   ]);
-  assert.deepEqual(values("rank.premiumBasis.none"), [
-    "Ranking bez premii (przełącznik wyłączony).",
-    "Ranking ignores premiums (toggle off).",
-  ]);
+  for (const key of [
+    "rank.premiumBasis.server_estimate",
+    "rank.premiumBasis.live",
+    "rank.premiumBasis.none",
+  ]) {
+    assert.equal(values(key).length, 0, key);
+  }
 });

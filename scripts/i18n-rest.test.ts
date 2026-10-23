@@ -87,6 +87,19 @@ const NEW_KEYS = [
   "prestocks.snapshotError",
 ];
 
+test("prestocks failure copy has no snapshot wording", () => {
+  assert.equal(
+    translate("pl", "prestocks.snapshotError", { detail: "sieć" }),
+    "Błąd PreStocks: sieć. Brak danych.",
+  );
+  assert.equal(
+    translate("en", "prestocks.snapshotError", { detail: "network" }),
+    "PreStocks error: network. No data.",
+  );
+  assert.equal(translate("pl", "prestocks.snapshotDated"), "prestocks.snapshotDated");
+  assert.equal(translate("en", "prestocks.snapshotDated"), "prestocks.snapshotDated");
+});
+
 function dictKeys(which: "pl" | "en"): string[] {
   const src = readFileSync(new URL("../lib/i18n.tsx", import.meta.url), "utf8");
   const start = src.indexOf(which === "pl" ? "const pl: Dict" : "const en: Dict");

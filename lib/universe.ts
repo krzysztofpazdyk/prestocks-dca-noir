@@ -44,18 +44,6 @@ export const SYMBOL_BY_NAME: Record<string, string> = {
  */
 export const NEAR_IPO_NAMES: readonly string[] = [];
 
-/** Last-known premiums if mark API fails. The UI does not display these numbers. */
-export const HARDCODED_PREMIUMS_PCT: Record<string, number> = {
-  Anthropic: -1.6,
-  OpenAI: 16.1,
-  Anduril: -1.9,
-  Neuralink: 24.1,
-  FigureAI: -2.6,
-  Kalshi: -0.3,
-  Polymarket: -0.6,
-  SpaceX: -21.7,
-};
-
 export const HOLDING_COLORS: Record<string, string> = {
   Anthropic: "#14b8a6",
   OpenAI: "#8b5cf6",
@@ -73,7 +61,7 @@ export type PrestocksProduct = {
   mint: string;
   token_price_usd: number | null;
   mark_price_usd: number | null;
-  premium_pct: number;
+  premium_pct: number | null;
   premium_source: string;
   market_cap_usd?: number | null;
   holders?: number | null;
@@ -107,9 +95,4 @@ export type RankResult = {
   grok?: { skipped: boolean; reason?: string; summary?: string };
   error?: string;
   fetchedAt: string;
-  /**
-   * What premium the ranking actually scored on.
-   * Hosted /rank does not accept the client's live premium.
-   */
-  premiumBasis: "server_estimate" | "live" | "none";
 };

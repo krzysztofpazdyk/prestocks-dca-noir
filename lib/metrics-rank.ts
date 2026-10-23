@@ -8,7 +8,6 @@
 import { filterProducts, readExclusions } from "@/lib/exclusions";
 import { shown } from "@/lib/i18n";
 import { DEFAULT_SETTINGS } from "@/lib/mock-data";
-import { premiumBasisFor } from "@/lib/premium-view";
 import type { RankPrefs } from "@/lib/rank-prefs";
 import {
   filterExpired,
@@ -79,6 +78,5 @@ export function metricsRank(
     products: filtered,
     grok: { skipped: true, reason: "metrics_fallback" },
     fetchedAt: new Date().toISOString(),
-    premiumBasis: premiumBasisFor("client", premiumsMatter),
   };
 }

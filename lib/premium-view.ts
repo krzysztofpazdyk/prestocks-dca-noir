@@ -4,7 +4,7 @@
 
 import { canonicalName, ipoPremiumPct, quoteByName, type JupPrices } from "@/lib/jup-prices";
 import { formatPercent } from "@/lib/number-format";
-import { REFERENCE_MINTS, type RankResult } from "@/lib/universe";
+import { REFERENCE_MINTS } from "@/lib/universe";
 
 export function livePremiumPct(name: string, prices: JupPrices): number | null {
   const quote = quoteByName(prices.quotes, name);
@@ -105,11 +105,3 @@ export const PREMIUM_TONE_CLASS: Record<PremiumTone, string> = {
   premium: "text-[#f87171]",
   neutral: "text-[#8b95a8]",
 };
-
-export function premiumBasisFor(
-  where: "server" | "client",
-  premiumsMatter: boolean,
-): RankResult["premiumBasis"] {
-  if (!premiumsMatter) return "none";
-  return where === "server" ? "server_estimate" : "live";
-}

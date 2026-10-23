@@ -6,7 +6,6 @@
 
 import { shown } from "@/lib/i18n";
 import { metricsRank } from "@/lib/metrics-rank";
-import { premiumBasisFor } from "@/lib/premium-view";
 import type { RankPrefs } from "@/lib/rank-prefs";
 import { readRankPrefs } from "@/lib/rank-prefs";
 import type { PrestocksProduct, RankResult, RankRow } from "@/lib/universe";
@@ -30,6 +29,12 @@ function fmt(v: unknown): string {
     return Number(v).toPrecision(4).replace(/\.?0+$/, "");
   }
   return String(v);
+}
+
+/** Missing premium is "na" in the Jev prompt, never the word null. */
+function premiumPrompt(pct: number | null): number | string {
+  if (pct == null || !Number.isFinite(pct)) return "na";
+  return pct;
 }
 
 function prefsLine(prefs: RankPrefs): string {
@@ -145,7 +150,7 @@ function buildState(
       mint: p.mint,
       token_usd: p.token_price_usd,
       mark_usd: p.mark_price_usd,
-      premium_pct: p.premium_pct,
+      premium_pct: premiumPrompt(p.premium_pct),
       mcap_usd: p.market_cap_usd ?? null,
       holders: p.holders ?? null,
       vol_cum_usd: p.volume_cum_usd ?? null,
@@ -168,7 +173,7 @@ function buildQuestions(
   for (const p of products) {
     const g = grokRowForProduct(grok, p);
     choiceCriteria[p.name] =
-      `${p.name} PreStock mint=${p.mint}; premium_pct=${p.premium_pct}; ` +
+      `${p.name} PreStock mint=${p.mint}; premium_pct=${premiumPrompt(p.premium_pct)}; ` +
       `near_ipo=${p.near_ipo ? "yes" : "no"}; chg30d=${fmt(p.change_30d_pct)}` +
       (g ? `; grok_signal=${g.signal}` : "");
   }
@@ -219,7 +224,7 @@ function buildQuestions(
       type: "score",
       instructions:
         `Score how suitable \`${p.name}\` (mint ${p.mint}) is as a weekly PreStocks DCA allocation ` +
-        `this week. Premium_pct=${p.premium_pct} (negative=discount). near_ipo=` +
+        `this week. Premium_pct=${premiumPrompt(p.premium_pct)} (negative=discount). near_ipo=` +
         `${p.near_ipo ? "yes" : "no"}. ipo_completed=` +
         `${p.ipo_completed ? "yes" : "no"}. deadline_invalid=` +
         `${p.deadline_invalid ? "yes" : "no"}. ` +
@@ -279,7 +284,7 @@ async function callGrok(
   const rows = products.map((p) => ({
     name: p.name,
     mint: p.mint,
-    premium_pct: p.premium_pct,
+    premium_pct: premiumPrompt(p.premium_pct),
     token_usd: p.token_price_usd,
     mark_usd: p.mark_price_usd,
     near_ipo: !!p.near_ipo,
@@ -434,7 +439,6 @@ function jevResultFromAnswers(
     summary?: string;
     model?: string;
   },
-  prefs: Pick<RankPrefs, "premiumsMatter">,
 ): RankResult {
   const scores: RankRow[] = products.map((p) => {
     const qid = `score_${p.symbol.toLowerCase()}`;
@@ -470,7 +474,6 @@ function jevResultFromAnswers(
       summary: grok.summary,
     },
     fetchedAt: new Date().toISOString(),
-    premiumBasis: premiumBasisFor("client", prefs.premiumsMatter),
   };
 }
 
@@ -512,7 +515,7 @@ export async function runByokAiRank(opts: {
       ((jev.data as { answers?: Record<string, Record<string, unknown>> })
         ?.answers ??
         {});
-    return jevResultFromAnswers(products, answers, grok, prefs);
+    return jevResultFromAnswers(products, answers, grok);
   } catch (e) {
     const jevErr = e instanceof Error ? e.message : String(e);
     const fallback = metricsRank(products, prefs.exclusions, prefs);

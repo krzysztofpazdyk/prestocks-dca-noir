@@ -13,7 +13,6 @@ import { shown, translate } from "@/lib/i18n";
 import { dcaApiBase, readTypesafeKey, readXaiKey } from "@/lib/keys";
 import { ensureRuntimeConfig } from "@/lib/runtime-config";
 import { metricsRank } from "@/lib/metrics-rank";
-import { premiumBasisFor } from "@/lib/premium-view";
 import {
   fetchOwnerUsdcBalance,
   fetchSolBalance,
@@ -106,7 +105,6 @@ function mapRunToRank(
   const pipeline = run.pipeline ?? ["prestocks", "jev"];
   const isMetrics =
     pipeline.includes("metrics_rank") && !pipeline.includes("jev");
-  const premiumsMatter = readRankPrefs().premiumsMatter;
   return {
     mode: isMetrics ? "metrics_fallback" : mode,
     sourceLabel: isMetrics ? shown("rank.source.metricsNoJev") : sourceLabel,
@@ -123,7 +121,6 @@ function mapRunToRank(
         }
       : undefined,
     fetchedAt: run.finished_at_utc ?? new Date().toISOString(),
-    premiumBasis: premiumBasisFor("server", premiumsMatter),
   };
 }
 
@@ -323,7 +320,7 @@ export function rankResultFromProxy(
       mint: "",
       token_price_usd: null,
       mark_price_usd: null,
-      premium_pct: 0,
+      premium_pct: null,
       premium_source: "proxy",
       near_ipo: NEAR_IPO_NAMES.some(
         (entry) => entry.replace(/\s+/g, "").toLowerCase() === folded,
@@ -339,8 +336,8 @@ export function rankResultFromProxy(
   const pipeline = data.pipeline ?? ["prestocks", "jev"];
   const isMetrics =
     pipeline.includes("metrics_rank") && !pipeline.includes("jev");
-  const premiumsMatter =
-    prefs?.premiumsMatter ?? readRankPrefs().premiumsMatter;
+  // Callers still pass premiumsMatter. The ranking note that used it is gone.
+  void prefs;
   const grok = pipeline.includes("grok");
   return {
     mode: isMetrics ? "metrics_fallback" : "byok_ai",
@@ -355,7 +352,6 @@ export function rankResultFromProxy(
     products,
     error: data.error,
     fetchedAt: new Date().toISOString(),
-    premiumBasis: premiumBasisFor("server", premiumsMatter),
   };
 }
 

@@ -75,7 +75,7 @@ test("jupiter price and position keys exist in Polish and English", () => {
     "premium.noData",
     "premium.estimate",
     "history.buyPrice",
-    "prestocks.snapshotDated",
+    "prestocks.snapshotError",
   ];
   for (const key of keys) {
     assert.equal(values(key).length, 2, key);
@@ -89,9 +89,14 @@ test("jupiter price and position keys exist in Polish and English", () => {
     "ceny: ostatni odczyt · {time}",
   );
   assert.equal(
-    values("prestocks.snapshotDated")[1],
-    "No live PreStocks. Using static snapshot from {date} (not live).",
+    values("prestocks.snapshotError")[0],
+    "Błąd PreStocks: {detail}. Brak danych.",
   );
+  assert.equal(
+    values("prestocks.snapshotError")[1],
+    "PreStocks error: {detail}. No data.",
+  );
+  assert.equal(values("prestocks.snapshotDated").length, 0);
 });
 
 test("stale portfolio and RPC timeout copy exists in Polish and English", () => {
