@@ -433,12 +433,6 @@ const pl: Dict = {
   "premium.spacex.tooltip":
     "Wartość dodatnia to premia vs SPCXx, ujemna to zniżka vs SPCXx. Różnica obejmuje 6-miesięczny lockup akcji bazowych (do ok. 12.12.2026) i opłatę konwersji ok. 1%, więc nie jest czystą premią IPO. Token PreStocks SPACEX wygasa 12.03.2027 23:59 UTC.",
   "premium.estimate": "szacunek",
-  "rank.premiumBasis.server_estimate": "Ranking AI użył premii szacunkowych serwera (nie live). Token vs wycena przy spółkach: live z Jupitera.",
-  "rank.premiumBasis.live": "Ranking użył premii live z Jupitera; spółki bez danych liczone bez premii.",
-  "rank.premiumBasis.none": "Ranking bez premii (przełącznik wyłączony).",
-
-  "prestocks.snapshotDated":
-    "Brak live PreStocks. Użyto statycznego snapshota z {date} (nie live).",
 
   "tx.priorSession": "Transakcja z poprzedniej sesji weszła: {kind} {tail}",
   "tx.kind.budget": "zmiana budżetu",
@@ -507,7 +501,7 @@ const pl: Dict = {
   "prestocks.skippedDirect": "pominięto bezpośrednie prestocks.com",
   "prestocks.corsProxy": "CORS zablokował prestocks.com w przeglądarce — użyto proxy API.",
   "prestocks.sessionFallback": "Nie udało się pobrać live PreStocks (CORS/sieć). Pokazuję ostatni udany fetch z tej sesji.",
-  "prestocks.snapshotError": "Błąd PreStocks: {detail}. Brak snapshota.",
+  "prestocks.snapshotError": "Błąd PreStocks: {detail}. Brak danych.",
 };
 
 const en: Dict = {
@@ -912,12 +906,6 @@ const en: Dict = {
   "premium.spacex.tooltip":
     "A positive value is a premium vs SPCXx; a negative value is a discount vs SPCXx. The difference includes a 6-month lockup of the underlying shares (until about 12 Dec 2026) and a conversion fee of about 1%, so it is not a pure IPO premium. The PreStocks SPACEX token expires 12 Mar 2027 23:59 UTC.",
   "premium.estimate": "estimate",
-  "rank.premiumBasis.server_estimate": "AI ranking used the server's estimated premiums (not live). Token vs valuation shown next to each name is live from Jupiter.",
-  "rank.premiumBasis.live": "Ranking used live Jupiter premiums; names without data scored without a premium.",
-  "rank.premiumBasis.none": "Ranking ignores premiums (toggle off).",
-
-  "prestocks.snapshotDated":
-    "No live PreStocks. Using static snapshot from {date} (not live).",
 
   "tx.priorSession": "Transaction from the previous session landed: {kind} {tail}",
   "tx.kind.budget": "budget change",
@@ -986,7 +974,7 @@ const en: Dict = {
   "prestocks.skippedDirect": "skipped direct prestocks.com",
   "prestocks.corsProxy": "CORS blocked prestocks.com in the browser — used the API proxy.",
   "prestocks.sessionFallback": "Could not fetch live PreStocks (CORS/network). Showing the last successful fetch from this session.",
-  "prestocks.snapshotError": "PreStocks error: {detail}. No snapshot.",
+  "prestocks.snapshotError": "PreStocks error: {detail}. No data.",
 };
 
 const dictionaries: Record<Locale, Dict> = { pl, en };

@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { rankResultFromProxy } from "../lib/dca-api";
-import { emptyJupPrices } from "../lib/jup-prices";
+import { emptyJupPrices, JUP_CACHE_KEY, parseJupResponse } from "../lib/jup-prices";
 import { dcaApiBase, LS_XAI } from "../lib/keys";
 import { metricsRank } from "../lib/metrics-rank";
 import { fetchPrestocksProducts } from "../lib/prestocks";
 import { isFlatFallback } from "../lib/ranking";
-import { MINTS, type PrestocksProduct, type RankResult, type RankRow } from "../lib/universe";
+import { MINTS, REFERENCE_MINTS, type PrestocksProduct, type RankResult, type RankRow } from "../lib/universe";
 
 function rank(partial: Partial<RankResult>): RankResult {
   return {
@@ -18,7 +18,6 @@ function rank(partial: Partial<RankResult>): RankResult {
     scores: [],
     products: [],
     fetchedAt: "2026-10-10T12:00:00Z",
-    premiumBasis: "none",
     ...partial,
   };
 }
@@ -197,8 +196,8 @@ function hostedProduct(name: string, nearIpo: boolean): PrestocksProduct {
     mint: MINTS[name] ?? "",
     token_price_usd: 2,
     mark_price_usd: null,
-    premium_pct: -21.7,
-    premium_source: "hardcoded_fallback",
+    premium_pct: null,
+    premium_source: "no_data",
     near_ipo: nearIpo,
   };
 }
@@ -216,7 +215,7 @@ function withBrowser(run: () => Promise<void>): Promise<void> {
   });
 }
 
-test("hosted products and the snapshot do not keep a server near-IPO flag", async () => {
+test("hosted products do not keep a server near-IPO flag", async () => {
   await withBrowser(async () => {
     process.env.NEXT_PUBLIC_DCA_API_URL = "https://predca-api.example/";
     (globalThis as { window?: Window }).window = {
@@ -249,7 +248,52 @@ test("hosted products and the snapshot do not keep a server near-IPO flag", asyn
   });
 });
 
-test("a static snapshot drops SpaceX near IPO, and fresh announced data can set it", async () => {
+function jupPrices(now: number) {
+  const freshAt = new Date(now - 3_600_000).toISOString();
+  const raw: Record<string, unknown> = {};
+  for (const [name, mint] of Object.entries(MINTS)) {
+    raw[mint] = {
+      usdPrice: 80,
+      liquidity: 80_000,
+      ...(name === "Kalshi"
+        ? {}
+        : {
+            stockData: { id: "prestocks", price: 100, updatedAt: freshAt },
+          }),
+    };
+  }
+  raw[REFERENCE_MINTS.SpaceX.primary] = {
+    usdPrice: 144.46,
+    stockData: { id: "xstocks", price: 167.16, updatedAt: freshAt },
+  };
+  return {
+    quotes: parseJupResponse(raw, now),
+    fetchedAt: now,
+    source: "live" as const,
+    suspect: [] as string[],
+    carried: [] as string[],
+  };
+}
+
+function emptyStorage(): Storage {
+  const data = new Map<string, string>();
+  return {
+    getItem: (key: string) => data.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      data.set(key, String(value));
+    },
+    removeItem: (key: string) => {
+      data.delete(key);
+    },
+    clear: () => data.clear(),
+    key: (index: number) => [...data.keys()][index] ?? null,
+    get length() {
+      return data.size;
+    },
+  } as Storage;
+}
+
+test("jupiter alone lists the eight names, and no jupiter or cache is an empty error", async () => {
   await withBrowser(async () => {
     delete process.env.NEXT_PUBLIC_DCA_API_URL;
     (globalThis as { window?: Window }).window = {
@@ -258,21 +302,88 @@ test("a static snapshot drops SpaceX near IPO, and fresh announced data can set 
         origin: "https://krzysztofpazdyk.github.io",
       },
     } as Window;
+    const calls: string[] = [];
     globalThis.fetch = (async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.includes("prestocks-snapshot")) {
-        return new Response(
-          JSON.stringify({
-            products: [hostedProduct("SpaceX", true), hostedProduct("Kalshi", false)],
-          }),
-          { status: 200 },
-        );
-      }
+      calls.push(String(input));
       return new Response("{}", { status: 404 });
     }) as typeof fetch;
-    const snap = await fetchPrestocksProducts(emptyJupPrices(1_700_000_000_000));
-    assert.equal(snap.dataSource, "snapshot");
-    assert.equal(snap.products.find((row) => row.name === "SpaceX")?.near_ipo, false);
+    const now = Date.parse("2026-10-10T12:00:00Z");
+    const listed = await fetchPrestocksProducts(jupPrices(now));
+    assert.equal(listed.dataSource, "jupiter_only");
+    assert.equal(listed.products.length, 8);
+    assert.equal(listed.products.find((row) => row.name === "SpaceX")?.near_ipo, false);
+    assert.equal(
+      listed.products.find((row) => row.name === "SpaceX")?.premium_source,
+      "jupiter_stockdata",
+    );
+    const anth = listed.products.find((row) => row.name === "Anthropic");
+    assert.equal(anth?.token_price_usd, 80);
+    assert.equal(anth?.premium_pct, -20);
+    assert.equal(anth?.market_cap_usd, null);
+    assert.equal(anth?.holders, null);
+    const kalshi = listed.products.find((row) => row.name === "Kalshi");
+    assert.equal(kalshi?.token_price_usd, 80);
+    assert.equal(kalshi?.premium_pct, null);
+    assert.equal(kalshi?.premium_source, "no_data");
+    assert.equal(calls.some((url) => url.includes("prestocks-snapshot")), false);
+
+    const prevStorage = globalThis.localStorage;
+    const store = emptyStorage();
+    const cachedAt = Date.now();
+    store.setItem(
+      JUP_CACHE_KEY,
+      JSON.stringify({
+        quotes: jupPrices(cachedAt).quotes,
+        fetchedAt: cachedAt,
+        priceAt: {},
+      }),
+    );
+    globalThis.localStorage = store;
+    try {
+      const fromCache = await fetchPrestocksProducts(emptyJupPrices(cachedAt));
+      assert.equal(fromCache.dataSource, "jupiter_only");
+      assert.equal(fromCache.products.length, 8);
+      assert.equal(
+        fromCache.products.find((row) => row.name === "Anthropic")?.token_price_usd,
+        80,
+      );
+      assert.equal(
+        fromCache.products.find((row) => row.name === "Kalshi")?.premium_pct,
+        null,
+      );
+    } finally {
+      if (prevStorage === undefined) {
+        delete (globalThis as { localStorage?: Storage }).localStorage;
+      } else {
+        globalThis.localStorage = prevStorage;
+      }
+    }
+  });
+
+  await withBrowser(async () => {
+    delete process.env.NEXT_PUBLIC_DCA_API_URL;
+    (globalThis as { window?: Window }).window = {
+      location: {
+        hostname: "krzysztofpazdyk.github.io",
+        origin: "https://krzysztofpazdyk.github.io",
+      },
+    } as Window;
+    const prevStorage = globalThis.localStorage;
+    globalThis.localStorage = emptyStorage();
+    globalThis.fetch = (async () => new Response("{}", { status: 404 })) as typeof fetch;
+    try {
+      const none = await fetchPrestocksProducts();
+      assert.equal(none.dataSource, "none");
+      assert.equal(none.products.length, 0);
+      assert.equal(none.premiumsSource, "none");
+      assert.equal(none.errorKey, "prestocks.snapshotError");
+    } finally {
+      if (prevStorage === undefined) {
+        delete (globalThis as { localStorage?: Storage }).localStorage;
+      } else {
+        globalThis.localStorage = prevStorage;
+      }
+    }
   });
 
   await withBrowser(async () => {

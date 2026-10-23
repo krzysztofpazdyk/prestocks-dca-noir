@@ -104,10 +104,9 @@ test("token-vs-valuation copy replaces premium vs market", () => {
     "Różnica między ceną tokena a wyceną spółki z PreStocks",
     "Difference between the token price and the company valuation from PreStocks",
   ]);
-  assert.deepEqual(values(i18n, "rank.premiumBasis.server_estimate"), [
-    "Ranking AI użył premii szacunkowych serwera (nie live). Token vs wycena przy spółkach: live z Jupitera.",
-    "AI ranking used the server's estimated premiums (not live). Token vs valuation shown next to each name is live from Jupiter.",
-  ]);
+  assert.deepEqual(values(i18n, "rank.premiumBasis.server_estimate"), []);
+  assert.equal(i18n.includes("premii szacunkowych"), false);
+  assert.equal(i18n.includes("estimated premiums"), false);
   assert.deepEqual(values(i18n, "settings.ipoPremium"), [
     "Premia IPO ma znaczenie (uwzględniaj różnicę wyceny tokenu względem rynku, np. −20% / +34%).",
     "IPO premium matters (factor in token vs market pricing gap, e.g. −20% / +34%).",

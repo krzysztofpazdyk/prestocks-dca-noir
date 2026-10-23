@@ -6,7 +6,7 @@ import {
   buildProducts,
   summarizePremiumSource,
 } from "../lib/prestocks";
-import { HARDCODED_PREMIUMS_PCT, MINTS, REFERENCE_MINTS, XAI_MINT } from "../lib/universe";
+import { MINTS, REFERENCE_MINTS, XAI_MINT } from "../lib/universe";
 
 const NOW = Date.parse("2026-10-10T12:00:00Z");
 
@@ -45,7 +45,7 @@ test("buildProducts prefers jupiter stock premium and ignores OURA and xAI", () 
   assert.equal(spacex?.near_ipo, false);
 });
 
-test("token price falls back to usdPrice, and a dead premium uses the hardcoded estimate", () => {
+test("token price falls back to usdPrice, and a dead premium is no data", () => {
   const fresh = buildProducts([], quotes(80, 100), NOW);
   const openai = fresh.find((p) => p.name === "OpenAI");
   assert.equal(openai?.token_price_usd, 80);
@@ -58,21 +58,23 @@ test("token price falls back to usdPrice, and a dead premium uses the hardcoded 
   );
   const sx = stale.find((p) => p.name === "SpaceX");
   assert.ok(sx);
-  assert.equal(sx.premium_source, "hardcoded_fallback");
-  assert.equal(sx.premium_pct, HARDCODED_PREMIUMS_PCT.SpaceX);
+  assert.equal(sx.premium_source, "no_data");
+  assert.equal(sx.premium_pct, null);
   assert.equal(sx.mark_price_usd, null);
   assert.equal(sx.token_price_usd, 80);
-  assert.equal(summarizePremiumSource(stale), "hardcoded_fallback (no live jupiter premium)");
+  assert.equal(summarizePremiumSource(stale), "no_data");
 
   const wild = buildProducts([], quotes(200, 100), NOW);
-  assert.equal(wild[0].premium_source, "hardcoded_fallback");
+  assert.equal(wild[0].premium_source, "no_data");
+  assert.equal(wild[0].premium_pct, null);
   assert.equal(wild[0].mark_price_usd, null);
 });
 
 test("applyJupPremiums overwrites premium only when the jupiter premium is usable", () => {
   const base = buildProducts([], quotes(80, 100, NOW - 73 * 60 * 60 * 1000), NOW);
   const kept = applyJupPremiums(base, quotes(80, 100, NOW - 73 * 60 * 60 * 1000), NOW);
-  assert.equal(kept[0].premium_source, "hardcoded_fallback");
+  assert.equal(kept[0].premium_source, "no_data");
+  assert.equal(kept[0].premium_pct, null);
 
   const next = applyJupPremiums(base, quotes(90, 100), NOW);
   const row = next.find((p) => p.name === "Anthropic");
@@ -92,9 +94,9 @@ test("fresh SpaceX stockData without a reference token is not a live premium", (
   const products = buildProducts([], quotes(122.05, 167.16), NOW);
   const sx = products.find((p) => p.name === "SpaceX");
   assert.ok(sx);
-  assert.equal(sx.premium_source, "hardcoded_fallback");
+  assert.equal(sx.premium_source, "no_data");
   assert.equal(sx.mark_price_usd, null);
-  assert.equal(sx.premium_pct, HARDCODED_PREMIUMS_PCT.SpaceX);
+  assert.equal(sx.premium_pct, null);
   const anth = products.find((p) => p.name === "Anthropic");
   assert.equal(anth?.premium_source, "jupiter_stockdata");
   assert.equal(anth?.mark_price_usd, 167.16);

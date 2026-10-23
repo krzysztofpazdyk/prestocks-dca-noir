@@ -51,7 +51,6 @@ function sample(): RankResult {
     scores: [],
     products: [],
     fetchedAt: "2026-10-10T12:00:00Z",
-    premiumBasis: "live",
   };
 }
 

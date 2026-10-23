@@ -1,7 +1,7 @@
 /**
  * Live PreStocks public APIs (no keys) — the ranking input when Grok is absent.
  * Prefer same-origin /api/prestocks/live (next dev) so CORS cannot block
- * prestocks.com. Then direct → DCA API → session → static snapshot.
+ * prestocks.com. Then direct → DCA API → session → Jupiter only, else no data.
  */
 
 import {
@@ -22,16 +22,12 @@ import {
 import { canUseSameOriginJevProxy, dcaApiBase, SS_PRODUCTS } from "@/lib/keys";
 import { ensureRuntimeConfig } from "@/lib/runtime-config";
 import {
-  HARDCODED_PREMIUMS_PCT,
   MINTS,
   NEAR_IPO_NAMES,
   SYMBOL_BY_NAME,
   XAI_MINT,
   type PrestocksProduct,
 } from "@/lib/universe";
-
-/** Static snapshot file date (`public/data/prestocks-snapshot.json`). */
-export const PRESTOCKS_SNAPSHOT_DATE = "19.09.2026";
 
 const ORIGIN = "https://prestocks.com";
 
@@ -45,7 +41,7 @@ export type ProductsFetchResult = {
   products: PrestocksProduct[];
   totals: unknown;
   premiumsSource: string;
-  dataSource: "live" | "live_proxy" | "api_proxy" | "session" | "snapshot";
+  dataSource: "live" | "live_proxy" | "api_proxy" | "session" | "jupiter_only" | "none";
   corsError: boolean;
   /** Older callers and a saved Polish sentence. New notes use errorKey. */
   errorPl: string | null;
@@ -65,15 +61,6 @@ export function fillNoticeVars(
   if (vars.date != null) out.date = vars.date;
   return out;
 }
-
-function assetUrl(path: string): string {
-  const base = (
-    process.env.NEXT_PUBLIC_BASE_PATH || "/prestocks-dca-noir"
-  ).replace(/\/$/, "");
-  const p = path.startsWith("/") ? path : `/${path}`;
-  return `${base}${p}`;
-}
-
 
 /** Map optional metrics expiry/deadline signals → deadline_invalid (do not invent). */
 export function deadlineInvalidFromMetrics(
@@ -139,12 +126,12 @@ function positivePrice(v: unknown): number | null {
   return n;
 }
 
-/** Ranking still stores a number. The UI does not display `hardcoded_fallback`. */
+/** Live Jupiter when any name has it. Otherwise there is no premium figure. */
 export function summarizePremiumSource(products: PrestocksProduct[]): string {
   if (products.some((p) => p.premium_source === "jupiter_stockdata")) {
     return "jupiter_stockdata";
   }
-  return "hardcoded_fallback (no live jupiter premium)";
+  return "no_data";
 }
 
 export function buildProducts(
@@ -167,16 +154,16 @@ export function buildProducts(
     const tokenPrice = positivePrice(m.tokenPrice) ?? quote?.usdPrice ?? null;
     const premium = quote ? ipoPremiumPct(quote, now) : null;
     const basis = quote ? premiumBasisUsd(quote, now) : null;
-    let premium_pct: number;
+    let premium_pct: number | null;
     let premium_source: string;
     let markOut: number | null = null;
     if (premium != null && basis != null) {
-      premium_pct = premium;
+      premium_pct = round3(premium);
       premium_source = "jupiter_stockdata";
       markOut = basis;
     } else {
-      premium_pct = HARDCODED_PREMIUMS_PCT[name] ?? 0;
-      premium_source = "hardcoded_fallback";
+      premium_pct = null;
+      premium_source = "no_data";
     }
     out.push({
       name,
@@ -184,7 +171,7 @@ export function buildProducts(
       mint,
       token_price_usd: tokenPrice != null ? round6(tokenPrice) : null,
       mark_price_usd: markOut != null ? round6(markOut) : null,
-      premium_pct: round3(premium_pct),
+      premium_pct,
       premium_source,
       market_cap_usd: (m.marketCapUSD as number) ?? null,
       holders: (m.holderCount as number) ?? null,
@@ -202,11 +189,11 @@ export function buildProducts(
 }
 
 /**
- * Overlay a Jupiter quote onto products that already exist (API proxy or snapshot).
+ * Overlay a Jupiter quote onto products that already exist (API proxy or an earlier list).
  * Premium and mark move only when `ipoPremiumPct` is a number.
  * SpaceX mark is the post-IPO reference (SPCXx, else SPCX), not the frozen stock quote.
- * `replaceTokenPrice` writes `usdPrice` even when the product already has one
- * (snapshot cache restore). Otherwise token price is filled only when missing.
+ * `replaceTokenPrice` writes `usdPrice` even when the product already has one.
+ * Otherwise token price is filled only when missing.
  */
 export function applyJupPremiums(
   products: PrestocksProduct[],
@@ -326,16 +313,6 @@ function writeSession(products: PrestocksProduct[]) {
   }
 }
 
-async function fetchSnapshot(): Promise<{
-  products: PrestocksProduct[];
-  totals: unknown;
-}> {
-  const data = (await fetchJson(
-    assetUrl("/data/prestocks-snapshot.json"),
-  )) as { products: PrestocksProduct[]; totals?: unknown };
-  return { products: data.products ?? [], totals: data.totals };
-}
-
 function localLiveProxyUrl(): string | null {
   if (typeof window === "undefined") return null;
   const base = (
@@ -351,7 +328,7 @@ function listedNearIpo(name: string): boolean {
 
 function finishProducts(products: PrestocksProduct[]): PrestocksProduct[] {
   const now = Date.now();
-  // Server and snapshot flags are not a source. Only the client list, then fresh company data.
+  // Server flags are not a source. Only the client list, then fresh company data.
   const grounded = products.map((product) => ({
     ...product,
     near_ipo: listedNearIpo(product.name),
@@ -464,41 +441,67 @@ export async function fetchPrestocksProducts(
     };
   }
 
-  try {
-    const snap = await fetchSnapshot();
-    let products = (snap.products ?? []).filter((p) => p.mint !== XAI_MINT);
-    let premiumsSource = "static_snapshot";
-    const cached = readJupPriceCache();
-    if (cached) {
-      products = applyJupPremiums(products, cached.quotes, cached.fetchedAt, {
-        replaceTokenPrice: true,
-      });
-      if (products.some((p) => p.premium_source === "jupiter_stockdata")) {
-        premiumsSource = "jupiter_stockdata";
-      }
-    }
+  const fromJupiter = await jupiterOnlyQuotes(pricesOnce);
+  if (fromJupiter) {
+    const products = finishProducts(
+      buildProducts([], fromJupiter.quotes, fromJupiter.fetchedAt),
+    );
     return {
-      products: finishProducts(products),
-      totals: snap.totals,
-      premiumsSource,
-      dataSource: "snapshot",
-      corsError: looksCors,
-      errorPl: null,
-      errorKey: "prestocks.snapshotDated",
-      errorVars: { date: PRESTOCKS_SNAPSHOT_DATE },
-    };
-  } catch {
-    return {
-      products: finishProducts([]),
+      products,
       totals: null,
-      premiumsSource: "none",
-      dataSource: "snapshot",
+      premiumsSource: summarizePremiumSource(products),
+      dataSource: "jupiter_only",
       corsError: looksCors,
       errorPl: null,
-      errorKey: "prestocks.snapshotError",
-      errorVars: directDetailKey
-        ? { detailKey: directDetailKey }
-        : { detail: directDetail },
     };
   }
+
+  return {
+    products: finishProducts([]),
+    totals: null,
+    premiumsSource: "none",
+    dataSource: "none",
+    corsError: looksCors,
+    errorPl: null,
+    errorKey: "prestocks.snapshotError",
+    errorVars: directDetailKey
+      ? { detailKey: directDetailKey }
+      : { detail: directDetail },
+  };
+}
+
+/** A quote set we can turn into the 8 names. Blank shells are not a read. */
+function quotesWithMarket(
+  quotes: Record<string, JupQuote> | null | undefined,
+): Record<string, JupQuote> | null {
+  if (!quotes) return null;
+  const any = Object.values(quotes).some(
+    (q) =>
+      q != null &&
+      (q.usdPrice != null ||
+        q.stockPrice != null ||
+        q.refUsdPrice != null ||
+        q.refBackupUsdPrice != null),
+  );
+  return any ? quotes : null;
+}
+
+/**
+ * Eight names from the Jupiter read already in flight.
+ * A failed read uses the price cache. Neither → null (caller returns no products).
+ */
+async function jupiterOnlyQuotes(
+  pricesOnce: () => Promise<JupPrices>,
+): Promise<{ quotes: Record<string, JupQuote>; fetchedAt: number } | null> {
+  try {
+    const jup = await pricesOnce();
+    const quotes = quotesWithMarket(jup.quotes);
+    if (quotes) return { quotes, fetchedAt: jup.fetchedAt };
+  } catch {
+    /* try the cache */
+  }
+  const cached = readJupPriceCache();
+  const quotes = quotesWithMarket(cached?.quotes);
+  if (!cached || !quotes) return null;
+  return { quotes, fetchedAt: cached.fetchedAt };
 }

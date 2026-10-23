@@ -70,7 +70,6 @@ import {
 import {
   fetchPrestocksProducts,
   fillNoticeVars,
-  PRESTOCKS_SNAPSHOT_DATE,
 } from "@/lib/prestocks";
 import {
   isFlatFallback,
@@ -128,7 +127,6 @@ type RankView = {
   top3: TopPick[];
   title: string | null;
   subtitle: string | null;
-  premiumBasis: RankResult["premiumBasis"];
   rankFlat: boolean;
 };
 
@@ -143,7 +141,6 @@ function rankView(result: RankResult, locale: string): RankView {
     })),
     title: top3TitleFromRank(result, locale),
     subtitle: result.sourceLabel || null,
-    premiumBasis: result.premiumBasis,
     rankFlat: isFlatFallback(result),
   };
 }
@@ -349,11 +346,7 @@ export function OverviewView() {
       }
       setGenerated(rankView(result, locale));
       const notes: string[] = [];
-      if (productsResult.dataSource === "snapshot") {
-        notes.push(
-          t("prestocks.snapshotDated", { date: PRESTOCKS_SNAPSHOT_DATE }),
-        );
-      } else if (productsResult.errorKey) {
+      if (productsResult.errorKey) {
         notes.push(
           t(
             productsResult.errorKey,
@@ -714,7 +707,6 @@ export function OverviewView() {
   }, [connected, onChainReady, top3Names, previewBuy, locale, t]);
   const top3Title = active?.title ?? null;
   const top3Subtitle = active?.subtitle ?? null;
-  const premiumBasis = active?.premiumBasis ?? null;
   const rankFlat = active?.rankFlat ?? false;
   const restoredClock = restored
     ? fmtPriceClock(restored.savedAt, priceNow, locale)
@@ -1356,11 +1348,6 @@ export function OverviewView() {
                 );
               })}
             </ol>
-            {premiumBasis ? (
-              <p className="mt-3 text-[10px] normal-case leading-relaxed tracking-normal text-[#8b95a8]">
-                {t(`rank.premiumBasis.${premiumBasis}`)}
-              </p>
-            ) : null}
             {rankError && (
               <p className="mt-3 text-xs text-[#f87171]">{rankError}</p>
             )}

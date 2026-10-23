@@ -770,13 +770,12 @@ async function rankTop3(owner) {
       products = rows;
     }
   } catch {
-    /* snapshot */
+    /* live metrics unavailable */
   }
   if (products.length < 3) {
-    const snap = JSON.parse(
-      readFileSync(join(ROOT, "public/data/prestocks-snapshot.json"), "utf8"),
+    throw new Error(
+      "Za mało produktów PreStocks do rankingu (<3). Zakup nie został wysłany.",
     );
-    products = snap.products || [];
   }
 
   const prefs = readKeeperRankPrefs(owner);
