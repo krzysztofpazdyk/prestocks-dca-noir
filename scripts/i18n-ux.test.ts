@@ -49,7 +49,6 @@ test("jupiter price and position keys exist in Polish and English", () => {
     "positions.atCost",
     "positions.legacyHint",
     "positions.mismatch",
-    "prices.source",
     "prices.stale",
     "prices.unavailable",
     "prices.suspect",

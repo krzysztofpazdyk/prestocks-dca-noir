@@ -69,7 +69,6 @@ const pl: Dict = {
     "Portfel odłączony — podłącz wallet, by zobaczyć salda on-chain.",
   "overview.noMintHint":
     "Ustaw NEXT_PUBLIC_USDC_MINT na lokalny mock mint.",
-  "overview.onChainHint": "On-chain · wartości z RPC",
   "overview.rpcStale": "ostatni odczyt",
   "overview.clusterMainnet":
     "Uwaga: RPC wygląda na Mainnet — ta aplikacja nie działa na tej sieci. Sprawdź NEXT_PUBLIC_RPC_URL.",
@@ -87,7 +86,6 @@ const pl: Dict = {
   "faucet.needWallet": "Podłącz portfel, by wziąć demo USDC + SOL.",
 
   "predca.title": "Predca on-chain",
-  "predca.rpc": "RPC:",
   "predca.refresh": "Odśwież",
   "predca.loading": "Ładowanie…",
   "predca.budget": "Budżet tygodniowy",
@@ -120,8 +118,6 @@ const pl: Dict = {
   "tile.sol": "SOL",
   "tile.usdcWallet": "USDC (portfel)",
   "tile.portfolioPreStock": "Wartość portfela PreStock",
-  "tile.portfolioHint":
-    "Wartość portfela PreStock: vault USDC + wartość tokenów (zakupy v2 po cenie rynkowej; starsze 1:1 po koszcie). USDC w portfelu osobno.",
 
   "holdings.titleOnChain": "Alokacja",
   "holdings.titleOffline": "Alokacja holdings (offline)",
@@ -394,7 +390,6 @@ const pl: Dict = {
   "rpc.timeoutWarning":
     "RPC odpowiada zbyt wolno — pokazuję poprzednie dane. Spróbuję ponownie automatycznie.",
 
-  "prices.source": "Ceny: Jupiter (mainnet PreStocks)",
   "prices.stale": "ceny: ostatni odczyt · {time}",
   "prices.unavailable": "Ceny chwilowo niedostępne — wartości po koszcie.",
   "prices.suspect": "niepewna cena",
@@ -536,7 +531,6 @@ const en: Dict = {
     "Wallet disconnected — connect to see on-chain balances.",
   "overview.noMintHint":
     "Set NEXT_PUBLIC_USDC_MINT to a local mock mint.",
-  "overview.onChainHint": "On-chain · values from RPC",
   "overview.rpcStale": "last read",
   "overview.clusterMainnet":
     "Warning: RPC looks like Mainnet — this app does not run on that network. Check NEXT_PUBLIC_RPC_URL.",
@@ -554,7 +548,6 @@ const en: Dict = {
   "faucet.needWallet": "Connect a wallet to claim demo USDC + SOL.",
 
   "predca.title": "Predca on-chain",
-  "predca.rpc": "RPC:",
   "predca.refresh": "Refresh",
   "predca.loading": "Loading…",
   "predca.budget": "Weekly budget",
@@ -587,8 +580,6 @@ const en: Dict = {
   "tile.sol": "SOL",
   "tile.usdcWallet": "USDC (wallet)",
   "tile.portfolioPreStock": "PreStock portfolio value",
-  "tile.portfolioHint":
-    "PreStock portfolio value: vault USDC + token value (v2 buys at the market price; older 1:1 buys at cost). Wallet USDC is separate.",
 
   "holdings.titleOnChain": "Allocation",
   "holdings.titleOffline": "Holdings allocation (offline)",
@@ -861,7 +852,6 @@ const en: Dict = {
   "rpc.timeoutWarning":
     "RPC is responding slowly — showing the previous data. Retrying automatically.",
 
-  "prices.source": "Prices: Jupiter (mainnet PreStocks)",
   "prices.stale": "prices: last read · {time}",
   "prices.unavailable": "Prices unavailable — values at cost.",
   "prices.suspect": "uncertain price",

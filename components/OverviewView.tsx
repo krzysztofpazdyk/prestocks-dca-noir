@@ -57,7 +57,6 @@ import { TxNotice, txMessageWithLink } from "@/components/TxNotice";
 import {
   explorerTxUrl,
   formatUsd,
-  rpcHost,
 } from "@/lib/predca";
 import {
   formatPremiumPct,
@@ -804,6 +803,19 @@ export function OverviewView() {
     predca.positions.every(
       (row) => row.basis === "cost" && row.valueKnown !== false,
     );
+  const showPortfolioNotes = Boolean(
+    (pricesReady && predca.jupPrices.source === "cache") ||
+      (pricesReady && !predca.pricesLoading && !anyTokenPrice) ||
+      portfolioPriceUnknown ||
+      (portfolioBalanceStale && predca.balanceWarning) ||
+      (connected && predca.rpcWarning) ||
+      (allAtCost &&
+        !(
+          connected &&
+          predca.positions.length > 0 &&
+          !pnlSummary(predca.positions).hasPriced
+        )),
+  );
   const showPnl = connected && predca.positions.length > 0;
 
   const vaultStat =
@@ -854,25 +866,14 @@ export function OverviewView() {
             {t("overview.noMintHint")}
           </p>
         )}
-        {connected && onChainReady && (
-          <p className="text-xs text-[#2dd4bf]">
-            {t("overview.onChainHint")}
-          </p>
-        )}
       </div>
 
       {/* On-chain Predca strip */}
       <section className="rounded-lg border border-[#2dd4bf33] bg-[#141820] p-5">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h2 className="text-[11px] uppercase tracking-[0.15em] text-[#2dd4bf]">
-              {t("predca.title")}
-            </h2>
-            <p className="mt-0.5 text-[10px] text-[#8b95a8]">
-              {t("predca.rpc")}{" "}
-              <span className="mono-num text-[#c5cedb]">{rpcHost()}</span>
-            </p>
-          </div>
+          <h2 className="text-[11px] uppercase tracking-[0.15em] text-[#2dd4bf]">
+            {t("predca.title")}
+          </h2>
           <div className="flex flex-wrap items-center gap-2">
             {connected && publicKey && (
               <button
@@ -1196,10 +1197,8 @@ export function OverviewView() {
           </div>
         ))}
       </div>
-      {connected && (
+      {connected && showPortfolioNotes && (
         <div className="space-y-1 text-[10px] text-[#8b95a8]">
-          <p>{t("tile.portfolioHint")}</p>
-          {pricesReady && <p>{t("prices.source")}</p>}
           {pricesReady && predca.jupPrices.source === "cache" && (
             <p>{t("prices.stale", { time: priceClock })}</p>
           )}
@@ -1389,9 +1388,6 @@ export function OverviewView() {
             ) : null}
             {dupNotice("buy", resolvePurchaseAmount(predca.weeklyBudgetUsd, ownerBase58))}
             {dupInfoNotice("buy", resolvePurchaseAmount(predca.weeklyBudgetUsd, ownerBase58))}
-            {shownBuyPreview && (
-              <p className="mt-3 text-[10px] text-[#8b95a8]">{shownBuyPreview}</p>
-            )}
             <PrivySignWaitNotice className="mt-3" />
             {purchaseText && (
               <p
@@ -1585,7 +1581,6 @@ function PricesPanel({
               </tbody>
             </table>
           </div>
-          <p className="mt-3 text-[10px] text-[#8b95a8]">{t("prices.source")}</p>
         </>
       )}
     </section>
