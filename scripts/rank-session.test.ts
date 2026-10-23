@@ -22,7 +22,7 @@ function memory() {
 function sample(): RankResult {
   return {
     mode: "byok_ai",
-    sourceLabel: "Źródło: PreStocks + AI (BYOK · Jev)",
+    sourceLabel: "Źródło: PreStocks + AI (Jev)",
     pipeline: ["prestocks", "jev"],
     top3: [
       {
