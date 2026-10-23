@@ -21,9 +21,9 @@ function memory() {
 
 function sample(): RankResult {
   return {
-    mode: "metrics_fallback",
-    sourceLabel: "Źródło: metryki",
-    pipeline: ["prestocks", "metrics_rank"],
+    mode: "byok_ai",
+    sourceLabel: "Źródło: PreStocks + AI (BYOK · Jev)",
+    pipeline: ["prestocks", "jev"],
     top3: [
       {
         name: "OpenAI",
@@ -101,4 +101,33 @@ test("prefs key sorts exclusions and Overview restores on mount without a networ
   const i18n = readFileSync(new URL("../lib/i18n.tsx", import.meta.url), "utf8");
   const values = [...i18n.matchAll(/"top3\.restored":\s*"([^"]*)"/g)].map((match) => match[1]);
   assert.deepEqual(values, ["z {time}", "from {time}"]);
+});
+
+test("a metrics ranking is not restored and is not written back", () => {
+  const store = memory();
+  const key = rankPrefsKey();
+  store.setItem(
+    SS_RANK,
+    JSON.stringify({
+      v: 2,
+      rank: {
+        mode: "metrics_fallback",
+        sourceLabel: "metrics",
+        pipeline: ["prestocks", "metrics_rank"],
+        top3: sample().top3,
+        scores: [],
+        products: [],
+        fetchedAt: "2026-10-10T12:00:00Z",
+      },
+      prefsKey: key,
+      savedAt: 1,
+    }),
+  );
+  assert.equal(restoreRankSession(key, store), null);
+
+  const withoutJev = sample();
+  withoutJev.pipeline = ["prestocks"];
+  saveRankSession(withoutJev, store);
+  assert.equal(store.getItem(SS_RANK)?.includes("metrics_rank"), true);
+  assert.equal(restoreRankSession(key, store), null);
 });

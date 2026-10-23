@@ -1,8 +1,8 @@
 /**
- * Weekly DCA ranking:
+ * Weekly DCA ranking exists only from Jev:
  * 1. Grok analysis (if XAI_API_KEY) → Jev top-3 (client TYPESAFE BYOK, via /api/jev)
- * 2. Else hosted API /rank or /run/dry — only when client TypeSafe BYOK is set
- * 3. metrics_rank when no BYOK or Jev is down — clearly labeled (no free hosted Jev)
+ * 2. Hosted API /rank or /run/dry — only when client TypeSafe BYOK is set
+ * If none of those return a Jev ranking, ranking is unavailable.
  * Equal ⅓ buy of the 3 names is a separate Predca step.
  */
 
@@ -17,9 +17,6 @@ import {
   type RankPrefs,
 } from "@/lib/rank-prefs";
 import {
-  emergencyFromProducts,
-  fetchLatestRun,
-  fetchSampleRun,
   postRank,
   rankResultFromProxy,
   triggerDryRun,
@@ -63,6 +60,14 @@ export function rankPrefsKey(prefs: RankPrefs = readRankPrefs()): string {
   ]);
 }
 
+/** A saved or live result counts only when Jev produced it. */
+export function isJevRanking(rank: RankResult | null | undefined): boolean {
+  if (!rank) return false;
+  const pipeline = Array.isArray(rank.pipeline) ? rank.pipeline : [];
+  if (!pipeline.includes("jev") || pipeline.includes("metrics_rank")) return false;
+  return rank.mode === "hosted_jev" || rank.mode === "byok_ai";
+}
+
 export function parseRankSession(
   raw: string | null,
   prefsKeyNow: string,
@@ -78,6 +83,7 @@ export function parseRankSession(
     if (!parsed || parsed.v !== 2 || !parsed.rank || typeof parsed.rank !== "object") {
       return null;
     }
+    if (!isJevRanking(parsed.rank)) return null;
     if (parsed.prefsKey !== prefsKeyNow) return null;
     if (typeof parsed.savedAt !== "number" || !Number.isFinite(parsed.savedAt)) return null;
     return { rank: parsed.rank, savedAt: parsed.savedAt };
@@ -87,6 +93,7 @@ export function parseRankSession(
 }
 
 export function saveRankSession(rank: RankResult, storage?: RankStore) {
+  if (!isJevRanking(rank)) return;
   const envelope = {
     v: 2 as const,
     rank,
@@ -175,29 +182,29 @@ export async function loadInitialRanking(): Promise<{
   error: string | null;
 }> {
   const productsResult = await fetchPrestocksProducts();
-  let rank: RankResult | null = null;
-  let error: string | null = productsNotice(productsResult);
+  return {
+    productsResult,
+    rank: loadRankSession(),
+    error: productsNotice(productsResult),
+  };
+}
 
-  if (dcaApiBase()) {
-    try {
-      rank = await fetchLatestRun();
-    } catch (e) {
-      error = `API /run/latest: ${e instanceof Error ? e.message : e}`;
-    }
+function acceptJevRank(result: RankResult): RankResult | null {
+  if (!isJevRanking(result) || result.top3.length < 3) return null;
+  if (
+    result.top3.some(
+      (row) => typeof row.score !== "number" || !Number.isFinite(row.score),
+    )
+  ) {
+    return null;
   }
-
-  if (!rank) rank = loadRankSession();
-  if (!rank) rank = await fetchSampleRun();
-
-  // Do NOT metrics-rank as default — only surface products / last Jev result.
-  if (rank) saveRankSession(rank);
-
-  return { productsResult, rank, error };
+  saveRankSession(result);
+  return result;
 }
 
 /**
- * Run ranking now: Grok→Jev / hosted /rank only when client TypeSafe BYOK
- * is set (hasByokTypesafe). Without BYOK: emergency metrics — no hosted free Jev.
+ * Run ranking now. Every path is Jev (BYOK /api/jev, then /rank, then /run/dry).
+ * Without a TypeSafe key, or when every path fails, ranking is unavailable.
  */
 export async function runRankingNow(
   productsResult: ProductsFetchResult,
@@ -215,94 +222,54 @@ export async function runRankingNow(
   }
 
   const byok = hasByokTypesafe();
-  let byokFallback: RankResult | null = null;
 
   // GitHub Pages has no Route Handler — skip same-origin /api/jev (POST → 405).
   if (byok && canUseSameOriginJevProxy()) {
-    const result = await runByokAiRank({
-      products,
-      premiumsSource: productsResult.premiumsSource,
-      totals: productsResult.totals,
-      typesafeKey: readTypesafeKey(),
-      xaiKey: readXaiKey(),
-      exclusions: prefs.exclusions,
-      prefs,
-    });
-    if (result.mode !== "metrics_fallback") {
-      saveRankSession(result);
-      return result;
-    }
-    byokFallback = result;
-    if (!dcaApiBase()) {
-      saveRankSession(result);
-      return result;
+    try {
+      const result = await runByokAiRank({
+        products,
+        premiumsSource: productsResult.premiumsSource,
+        totals: productsResult.totals,
+        typesafeKey: readTypesafeKey(),
+        xaiKey: readXaiKey(),
+        exclusions: prefs.exclusions,
+        prefs,
+      });
+      const accepted = acceptJevRank(result);
+      if (accepted) return accepted;
+    } catch {
+      /* try hosted Jev next */
     }
   }
 
-  // Hosted /rank and /run/dry need client TypeSafe — never call without BYOK
-  // (API also rejects public requests without a client key; no free hosted Jev).
+  // Hosted /rank and /run/dry need client TypeSafe — never call without BYOK.
   if (byok && dcaApiBase()) {
     try {
       const proxy = await postRank(prefs);
-      if (proxy.top3.length >= 3) {
-        const result = rankResultFromProxy(proxy, products);
-        saveRankSession(result);
-        return result;
+      const pipeline = proxy.pipeline ?? ["prestocks", "jev"];
+      if (
+        proxy.ok !== false &&
+        pipeline.includes("jev") &&
+        !pipeline.includes("metrics_rank") &&
+        proxy.top3.length >= 3
+      ) {
+        const accepted = acceptJevRank(rankResultFromProxy(proxy, products));
+        if (accepted) return accepted;
       }
     } catch {
       /* try /run/dry next */
     }
     try {
-      const result = await triggerDryRun(prefs.exclusions, prefs);
-      saveRankSession(result);
-      return result;
-    } catch (e) {
-      if (byokFallback) {
-        saveRankSession(byokFallback);
-        return byokFallback;
-      }
-      const reason = shown("rank.err.hostedDown", {
-        error: e instanceof Error ? e.message : String(e),
-      });
-      const fallback = emergencyFromProducts(
-        products,
-        reason,
-        prefs.exclusions,
-        prefs,
+      const accepted = acceptJevRank(
+        await triggerDryRun(prefs.exclusions, prefs),
       );
-      saveRankSession(fallback);
-      return fallback;
+      if (accepted) return accepted;
+    } catch {
+      /* no Jev ranking */
     }
   }
 
-  if (byokFallback) {
-    saveRankSession(byokFallback);
-    return byokFallback;
-  }
-
-  const reason = byok
-    ? shown("rank.err.noApiNoProxy")
-    : shown("rank.err.byokRequired");
-  const fallback = emergencyFromProducts(
-    products,
-    reason,
-    prefs.exclusions,
-    prefs,
-  );
-  saveRankSession(fallback);
-  return fallback;
-}
-
-/** Backup ranking that scored every name the same. Hosted AI is never flat. */
-export function isFlatFallback(rank: RankResult | null | undefined): boolean {
-  if (!rank || rank.mode !== "metrics_fallback") return false;
-  const top = rank.top3 ?? [];
-  if (top.length < 2) return false;
-  const first = top[0]?.score;
-  if (typeof first !== "number" || !Number.isFinite(first)) return false;
-  return top.every(
-    (row) => typeof row.score === "number" && Math.abs(row.score - first) < 1e-9,
-  );
+  throw new Error(shown("rank.err.jevUnavailable"));
 }
 
 export function activeModeLabel(

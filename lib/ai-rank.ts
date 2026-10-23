@@ -5,7 +5,6 @@
  */
 
 import { shown } from "@/lib/i18n";
-import { metricsRank } from "@/lib/metrics-rank";
 import type { RankPrefs } from "@/lib/rank-prefs";
 import { readRankPrefs } from "@/lib/rank-prefs";
 import type { PrestocksProduct, RankResult, RankRow } from "@/lib/universe";
@@ -251,14 +250,23 @@ function stripJsonFences(text: string): string {
   return m ? m[1].trim() : text.trim();
 }
 
-function normalizeScore(answer: Record<string, unknown>): number {
-  const raw = answer.score;
-  if (raw == null) return 0;
-  const legend = (answer.legend as Record<string, unknown>) || {};
-  const keys = Object.keys(legend).map((k) => Number(k));
+/** A missing or non-numeric Jev score is not a ranking. Zero is a real score. */
+function numericScore(answer: Record<string, unknown> | undefined): number {
+  const raw = answer?.score;
+  if (typeof raw !== "number" || !Number.isFinite(raw)) {
+    throw new Error(shown("rank.err.jevUnavailable"));
+  }
+  const legend = (answer?.legend as Record<string, unknown>) || {};
+  const keys = Object.keys(legend)
+    .map((k) => Number(k))
+    .filter((n) => Number.isFinite(n));
   const maxIdx = keys.length ? Math.max(...keys) : 4;
-  if (maxIdx <= 0) return Number(raw) * 100;
-  return Math.round(((100 * Number(raw)) / maxIdx) * 1000) / 1000;
+  const score =
+    maxIdx <= 0 ? raw * 100 : Math.round(((100 * raw) / maxIdx) * 1000) / 1000;
+  if (!Number.isFinite(score)) {
+    throw new Error(shown("rank.err.jevUnavailable"));
+  }
+  return score;
 }
 
 async function callGrok(
@@ -442,12 +450,13 @@ function jevResultFromAnswers(
 ): RankResult {
   const scores: RankRow[] = products.map((p) => {
     const qid = `score_${p.symbol.toLowerCase()}`;
-    const ans = answers[qid] ?? {};
+    const ans = answers[qid];
+    const score = numericScore(ans);
     return {
       ...p,
-      score: normalizeScore(ans),
-      score_raw: (ans.score as number) ?? null,
-      confidence: (ans.confidence as number) ?? null,
+      score,
+      score_raw: score,
+      confidence: (ans?.confidence as number) ?? null,
     };
   });
   scores.sort((a, b) => b.score - a.score);
@@ -479,7 +488,7 @@ function jevResultFromAnswers(
 
 /**
  * Weekly path: Grok analysis (skipped without XAI_API_KEY) → Jev top-3.
- * Grok never replaces Jev. Metrics only if Jev fails.
+ * Grok never replaces Jev. A missing key or a Jev failure is an error.
  */
 export async function runByokAiRank(opts: {
   products: PrestocksProduct[];
@@ -498,11 +507,7 @@ export async function runByokAiRank(opts: {
   };
 
   if (!typesafeKey) {
-    const fallback = metricsRank(products, prefs.exclusions, prefs);
-    return {
-      ...fallback,
-      error: shown("jev.noTypesafeKey"),
-    };
+    throw new Error(shown("jev.noTypesafeKey"));
   }
 
   const grok = await callGrok(products, xaiKey, prefs);
@@ -517,18 +522,17 @@ export async function runByokAiRank(opts: {
         {});
     return jevResultFromAnswers(products, answers, grok);
   } catch (e) {
+    if (
+      e instanceof Error &&
+      e.message === shown("rank.err.jevUnavailable")
+    ) {
+      throw e;
+    }
     const jevErr = e instanceof Error ? e.message : String(e);
-    const fallback = metricsRank(products, prefs.exclusions, prefs);
-    return {
-      ...fallback,
-      error: isBrowserNetworkError(jevErr)
+    throw new Error(
+      isBrowserNetworkError(jevErr)
         ? shown("jev.proxyHint")
         : shown("jev.unavailable", { error: jevErr }),
-      grok: {
-        skipped: !!grok.skipped,
-        reason: grok.reason,
-        summary: grok.summary,
-      },
-    };
+    );
   }
 }

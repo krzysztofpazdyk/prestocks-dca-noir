@@ -72,7 +72,6 @@ import {
   fillNoticeVars,
 } from "@/lib/prestocks";
 import {
-  isFlatFallback,
   parseRankSession,
   rankPrefsKey,
   rankSessionClientSnapshot,
@@ -88,18 +87,14 @@ import type { RankResult } from "@/lib/universe";
 /** Page-load clock. Avoids Date.now() during render (react-hooks/purity). */
 const UI_CLOCK_AT = Date.now();
 
-/** Short Top-3 h2 from RankResult.mode — never claim live Jev for metrics. */
-function top3TitleFromRank(result: RankResult, locale: string): string {
+/** Short Top-3 h2. Grok is named only when that step is in the pipeline. */
+function top3TitleFromRank(result: RankResult): string {
   const grok = (result.pipeline || []).includes("grok");
-  if (result.mode === "metrics_fallback") {
-    return locale === "en" ? "Top-3 · metrics" : "Top-3 · metryki";
-  }
   if (result.mode === "byok_ai") {
     if (grok) return "Top-3 · Grok+Jev";
-    return "Top-3 · AI (BYOK)";
+    return "Top-3 · AI";
   }
-  // hosted_jev / cache / other
-  return locale === "en" ? "Top-3 · ranking" : "Top-3 · ranking";
+  return "Top-3 · ranking";
 }
 
 const BUDGET_EPS = WEEKLY_BUDGET_EPS;
@@ -127,10 +122,9 @@ type RankView = {
   top3: TopPick[];
   title: string | null;
   subtitle: string | null;
-  rankFlat: boolean;
 };
 
-function rankView(result: RankResult, locale: string): RankView {
+function rankView(result: RankResult): RankView {
   return {
     top3: result.top3.slice(0, 3).map((row) => ({
       name: row.name,
@@ -139,9 +133,8 @@ function rankView(result: RankResult, locale: string): RankView {
       premiumPct: Number.isFinite(row.premium_pct) ? row.premium_pct : null,
       premiumSource: row.premium_source,
     })),
-    title: top3TitleFromRank(result, locale),
+    title: top3TitleFromRank(result),
     subtitle: result.sourceLabel || null,
-    rankFlat: isFlatFallback(result),
   };
 }
 
@@ -166,6 +159,7 @@ export function OverviewView() {
   }, [ownerBase58]);
   const [rankBusy, setRankBusy] = useState(false);
   const [rankError, setRankError] = useState<string | null>(null);
+  const [rankBlocked, setRankBlocked] = useState(false);
   const [purchaseMsg, setPurchaseMsg] = useState<string | null>(null);
   const [purchaseTone, setPurchaseTone] = useState<"ok" | "fail" | "pending">("ok");
   const [purchaseNotice, setPurchaseNotice] = useState<
@@ -344,7 +338,8 @@ export function OverviewView() {
       if (result.error && (!result.top3 || result.top3.length === 0)) {
         throw new Error(result.error);
       }
-      setGenerated(rankView(result, locale));
+      setRankBlocked(false);
+      setGenerated(rankView(result));
       const notes: string[] = [];
       if (productsResult.errorKey) {
         notes.push(
@@ -359,7 +354,12 @@ export function OverviewView() {
       if (result.error) notes.push(result.error);
       if (notes.length) setRankError(notes.join(" "));
     } catch (e) {
-      setRankError(e instanceof Error ? e.message : String(e));
+      const message = e instanceof Error ? e.message : String(e);
+      setRankError(message);
+      if (message === t("rank.err.jevUnavailable")) {
+        setGenerated(null);
+        setRankBlocked(true);
+      }
     } finally {
       setRankBusy(false);
     }
@@ -660,8 +660,13 @@ export function OverviewView() {
     withdrawOverCap ||
     withdrawPresentation === "disabled";
   const showWithdraw = withdrawPresentation !== "hidden";
-  const restored = generated ? null : parseRankSession(sessionSnap.raw, rankPrefsKey());
-  const active = generated ?? (restored ? rankView(restored.rank, locale) : null);
+  const restored =
+    generated || rankBlocked
+      ? null
+      : parseRankSession(sessionSnap.raw, rankPrefsKey());
+  const active = rankBlocked
+    ? null
+    : (generated ?? (restored ? rankView(restored.rank) : null));
   const top3 = active?.top3 ?? [];
   const top3Names = top3.map((row) => row.name).join("\u0001");
   // previewBuy is a useCallback (no `this`). Depend on it, not the whole predca object.
@@ -707,7 +712,6 @@ export function OverviewView() {
   }, [connected, onChainReady, top3Names, previewBuy, locale, t]);
   const top3Title = active?.title ?? null;
   const top3Subtitle = active?.subtitle ?? null;
-  const rankFlat = active?.rankFlat ?? false;
   const restoredClock = restored
     ? fmtPriceClock(restored.savedAt, priceNow, locale)
     : "";
@@ -721,7 +725,6 @@ export function OverviewView() {
     sigUnresolved ||
     buyInFlight ||
     top3.length === 0 ||
-    rankFlat ||
     predca.txPending ||
     (onChainReady
       ? vaultTooLow
@@ -737,7 +740,6 @@ export function OverviewView() {
       buyInFlight,
       txPending: predca.txPending,
       statusError: predca.status === "error",
-      rankFlat,
       top3Empty: top3.length === 0,
       connected,
       onChainReady,
@@ -745,7 +747,6 @@ export function OverviewView() {
     });
     if (key == null) return null;
     if (key === "purchase.disabled.rpcError") return t("purchase.disabled.rpcError");
-    if (key === "purchase.disabled.flatRanking") return t("purchase.disabled.flatRanking");
     if (key === "purchase.disabled.noRecs") return t("purchase.disabled.noRecs");
     if (key === "purchase.disabled.vaultLow") {
       return t("purchase.disabled.vaultLow", {
@@ -1302,6 +1303,9 @@ export function OverviewView() {
                 </button>
               </div>
             </div>
+            {rankBlocked && rankError ? (
+              <p className="mt-3 text-xs text-[#f87171]">{rankError}</p>
+            ) : (
             <ol className="space-y-2">
               {top3.length === 0 && (
                 <li className="rounded border border-[#1e2633] bg-[#0c0e12] px-3 py-2 text-sm text-[#8b95a8]">
@@ -1348,7 +1352,8 @@ export function OverviewView() {
                 );
               })}
             </ol>
-            {rankError && (
+            )}
+            {!rankBlocked && rankError && (
               <p className="mt-3 text-xs text-[#f87171]">{rankError}</p>
             )}
             {purchaseDisabledReason && !purchaseText && (

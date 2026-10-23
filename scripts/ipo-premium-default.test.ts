@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { APP_VERSION } from "../lib/app-version";
-import { metricsRank } from "../lib/metrics-rank";
 import { DEFAULT_SETTINGS } from "../lib/mock-data";
 import {
   LS_IPO_PREMIUM,
@@ -9,7 +8,6 @@ import {
   readIpoPremiumMatters,
   readRankPrefs,
 } from "../lib/rank-prefs";
-import type { PrestocksProduct } from "../lib/universe";
 
 type MemStorage = {
   getItem: (key: string) => string | null;
@@ -55,23 +53,10 @@ function installStorage(): { data: Map<string, string>; restore: () => void } {
   };
 }
 
-function discounted(): PrestocksProduct {
-  return {
-    name: "OpenAI",
-    symbol: "OPENAI",
-    mint: "mint-openai",
-    token_price_usd: 1,
-    mark_price_usd: 1,
-    premium_pct: -20,
-    premium_source: "jupiter_stockdata",
-    near_ipo: false,
-  };
-}
-
 describe("IPO premium default", { concurrency: false }, () => {
   test("defaults on, and a saved choice still wins", () => {
     assert.equal(DEFAULT_SETTINGS.ipoPremiumMatters, true);
-    assert.equal(APP_VERSION, "5.0.6");
+    assert.equal(APP_VERSION, "5.0.7");
 
     const mem = installStorage();
     try {
@@ -83,13 +68,11 @@ describe("IPO premium default", { concurrency: false }, () => {
       const body = rankPrefsForApi();
       assert.equal(body.premiums_matter, true);
       assert.equal(body.premiums_especially_near_ipo, true);
-      assert.equal(metricsRank([discounted()], []).scores[0].score, 70);
 
       mem.data.set(LS_IPO_PREMIUM, "false");
       assert.equal(readIpoPremiumMatters(), false);
       assert.equal(rankPrefsForApi().premiums_matter, false);
       assert.equal(rankPrefsForApi().premiums_especially_near_ipo, false);
-      assert.equal(metricsRank([discounted()], []).scores[0].score, 50);
 
       mem.data.set(LS_IPO_PREMIUM, "0");
       assert.equal(readIpoPremiumMatters(), false);
@@ -130,7 +113,6 @@ describe("IPO premium default", { concurrency: false }, () => {
     try {
       assert.equal(readIpoPremiumMatters(), true);
       assert.equal(rankPrefsForApi().premiums_matter, true);
-      assert.equal(metricsRank([discounted()], []).scores[0].score, 70);
     } finally {
       if (previousStorage === undefined) {
         delete (globalThis as { localStorage?: Storage }).localStorage;

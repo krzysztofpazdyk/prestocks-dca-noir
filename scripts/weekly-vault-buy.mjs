@@ -14,7 +14,7 @@
  *      PREDCA_OWNER    vault owner pubkey (the user's wallet, NOT a secret)
  *      NEXT_PUBLIC_RPC_URL / NEXT_PUBLIC_SOLANA_RPC, NEXT_PUBLIC_PREDCA_PROGRAM_ID, NEXT_PUBLIC_USDC_MINT
  *      KEEPER_TOKEN (required for POST mutations; also ~/.config/predca/keeper.token)
- *      NEXT_PUBLIC_DCA_API_URL (optional ranking)
+ *      NEXT_PUBLIC_DCA_API_URL (Jev /rank only — no metric fallback)
  */
 
 import {
@@ -737,110 +737,41 @@ function ensurePrefsDefaults() {
 }
 
 async function rankTop3(owner) {
+  const unavailable = "Jev niedostępny, zakup nie wysłany";
   const base = (process.env.NEXT_PUBLIC_DCA_API_URL || "").replace(/\/$/, "");
-  if (base) {
-    try {
-      const r = await fetchJson(
-        `${base}/rank`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "application/json" },
-          body: JSON.stringify(readKeeperRankPrefs(owner)),
-        },
-        60000,
-      );
-      const top3 = r.data?.top3;
-      if (r.ok && Array.isArray(top3) && top3.length >= 3) {
-        return {
-          names: top3.slice(0, 3).map((x) => x.name),
-          source: "hosted_rank",
-        };
-      }
-      log("hosted /rank skipped", r.status, r.data?.error || "");
-    } catch (e) {
-      log("hosted /rank failed", e instanceof Error ? e.message : e);
-    }
-  }
-
-  let products = [];
+  if (!base) throw new Error(unavailable);
+  let r;
   try {
-    const live = await fetchJson("https://prestocks.com/api/metrics", {}, 15000);
-    const rows = live.data?.tokens || live.data?.products || live.data;
-    if (live.ok && Array.isArray(rows)) {
-      products = rows;
-    }
-  } catch {
-    /* live metrics unavailable */
-  }
-  if (products.length < 3) {
-    throw new Error(
-      "Za mało produktów PreStocks do rankingu (<3). Zakup nie został wysłany.",
+    r = await fetchJson(
+      `${base}/rank`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(readKeeperRankPrefs(owner)),
+      },
+      60000,
     );
+  } catch (e) {
+    log("hosted /rank failed", e instanceof Error ? e.message : e);
+    throw new Error(unavailable);
   }
-
-  const prefs = readKeeperRankPrefs(owner);
-  const productDeadlineInvalid = (p) => {
-    const boolKeys = [
-      "deadline_invalid",
-      "deadlineInvalid",
-      "expired",
-      "is_expired",
-      "isExpired",
-    ];
-    for (const key of boolKeys) {
-      if (p[key] == null) continue;
-      const v = p[key];
-      if (typeof v === "boolean") return v;
-      if (typeof v === "number") return v !== 0;
-      if (typeof v === "string") {
-        const s = v.trim().toLowerCase();
-        if (["1", "true", "yes", "on", "expired", "invalid"].includes(s)) return true;
-        if (["0", "false", "no", "off", "valid", "ok"].includes(s)) return false;
-      }
-    }
-    const dateKeys = ["expires_at", "expiry", "expiry_date", "deadline", "deadline_at"];
-    const now = Date.now();
-    for (const key of dateKeys) {
-      if (p[key] == null || p[key] === "") continue;
-      const raw = p[key];
-      let ms = null;
-      if (typeof raw === "number" && Number.isFinite(raw)) {
-        ms = raw < 1e12 ? raw * 1000 : raw;
-      } else if (typeof raw === "string") {
-        const t = Date.parse(raw);
-        if (Number.isFinite(t)) ms = t;
-      }
-      if (ms != null && ms < now) return true;
-    }
-    return false;
-  };
-  const scored = products
-    .map((p) => {
-      const name = String(p.name || p.symbol || "");
-      const premium = Number(p.premium_pct ?? p.premiumPct ?? 0);
-      const near = Boolean(p.near_ipo) || normKey(name) === "spacex";
-      const ipoDone = Boolean(p.ipo_completed ?? p.ipoCompleted);
-      const deadlineBad = Boolean(p.deadline_invalid ?? productDeadlineInvalid(p));
-      // premiums_matter OFF: neutralize premium_pct; near-IPO premium bonus OFF
-      let score = 50;
-      if (prefs.premiums_matter) {
-        score -= premium;
-        if (near && prefs.premiums_especially_near_ipo) score += 8;
-      }
-      return { name, score, ipoDone, deadlineBad };
-    })
-    .filter((p) => p.name && normKey(p.name) !== "xai")
-    .filter((p) => prefs.buy_despite_ipo || !p.ipoDone)
-    .filter((p) => prefs.deadlines_unimportant || !p.deadlineBad)
-    .sort((a, b) => b.score - a.score);
-
-  if (scored.length < 3) {
-    throw new Error("Za mało produktów do rankingu (<3).");
+  const pipeline = Array.isArray(r.data?.pipeline) ? r.data.pipeline : [];
+  const top3 = r.data?.top3;
+  if (
+    r.ok &&
+    r.data?.ok === true &&
+    pipeline.includes("jev") &&
+    !pipeline.includes("metrics_rank") &&
+    Array.isArray(top3) &&
+    top3.length >= 3
+  ) {
+    return {
+      names: top3.slice(0, 3).map((x) => x.name),
+      source: "hosted_rank",
+    };
   }
-  return {
-    names: scored.slice(0, 3).map((p) => p.name),
-    source: "metrics_fallback",
-  };
+  log("hosted /rank skipped", r.status, r.data?.error || "");
+  throw new Error(unavailable);
 }
 
 const RUN_RECORD_SCAN_CAP = 1024;
