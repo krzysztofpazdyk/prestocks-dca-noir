@@ -85,7 +85,7 @@ export type RankRow = PrestocksProduct & {
 };
 
 export type RankResult = {
-  mode: "hosted_jev" | "byok_ai" | "metrics_fallback";
+  mode: "hosted_jev" | "byok_ai";
   sourceLabel: string;
   pipeline: string[];
   top3: RankRow[];

@@ -4,38 +4,8 @@ import test from "node:test";
 import { rankResultFromProxy } from "../lib/dca-api";
 import { emptyJupPrices, JUP_CACHE_KEY, parseJupResponse } from "../lib/jup-prices";
 import { dcaApiBase, LS_XAI } from "../lib/keys";
-import { metricsRank } from "../lib/metrics-rank";
 import { fetchPrestocksProducts } from "../lib/prestocks";
-import { isFlatFallback } from "../lib/ranking";
-import { MINTS, REFERENCE_MINTS, type PrestocksProduct, type RankResult, type RankRow } from "../lib/universe";
-
-function rank(partial: Partial<RankResult>): RankResult {
-  return {
-    mode: "metrics_fallback",
-    sourceLabel: "",
-    pipeline: ["prestocks", "metrics_rank"],
-    top3: [],
-    scores: [],
-    products: [],
-    fetchedAt: "2026-10-10T12:00:00Z",
-    ...partial,
-  };
-}
-
-function rows(scores: number[]): RankRow[] {
-  return scores.map((score, index) => ({ score, name: `N${index}` }) as RankRow);
-}
-
-test("isFlatFallback is only an all-equal metrics backup", () => {
-  assert.equal(isFlatFallback(rank({ top3: rows([50, 50, 50]) })), true);
-  assert.equal(isFlatFallback(rank({ top3: rows([50, 50, 51]) })), false);
-  assert.equal(
-    isFlatFallback(rank({ mode: "hosted_jev", top3: rows([50, 50, 50]) })),
-    false,
-  );
-  assert.equal(isFlatFallback(rank({ top3: rows([50]) })), false);
-  assert.equal(isFlatFallback(null), false);
-});
+import { MINTS, REFERENCE_MINTS, type PrestocksProduct } from "../lib/universe";
 
 test("Grok in the label follows the pipeline, not a stored xAI key", () => {
   const previous = globalThis.localStorage;
@@ -79,24 +49,33 @@ test("Grok in the label follows the pipeline, not a stored xAI key", () => {
   }
 
   const api = readFileSync(new URL("../lib/dca-api.ts", import.meta.url), "utf8");
-  const dry = api.slice(api.indexOf("export async function triggerDryRun"), api.indexOf("export async function fetchSampleRun"));
-  assert.match(dry, /pipeline[\s\S]{0,120}includes\("grok"\)/);
+  const dry = api.slice(
+    api.indexOf("export async function triggerDryRun"),
+    api.indexOf("export type RankProxyResponse"),
+  );
+  assert.match(dry, /pipeline[\s\S]{0,160}includes\("grok"\)/);
+  assert.doesNotMatch(dry, /metrics_fallback/);
+  assert.doesNotMatch(dry, /dryNoByok/);
   const overview = readFileSync(new URL("../components/OverviewView.tsx", import.meta.url), "utf8");
   const title = overview.slice(
     overview.indexOf("function top3TitleFromRank"),
     overview.indexOf("const BUDGET_EPS"),
   );
   assert.match(title, /includes\("grok"\)/);
+  assert.match(title, /Top-3 · AI/);
+  assert.doesNotMatch(title, /BYOK/);
+  assert.doesNotMatch(title, /metryki/);
   assert.doesNotMatch(title, /sourceLabel/);
   const disabled = overview.slice(
     overview.indexOf("const purchaseDisabled"),
     overview.indexOf("function fmtTile"),
   );
-  assert.match(disabled, /rankFlat/);
+  assert.doesNotMatch(disabled, /rankFlat/);
+  assert.doesNotMatch(disabled, /flatRanking/);
+  assert.match(disabled, /top3\.length === 0/);
   const rpc = disabled.indexOf("purchase.disabled.rpcError");
-  const flat = disabled.indexOf("purchase.disabled.flatRanking");
   const none = disabled.indexOf("purchase.disabled.noRecs");
-  assert.ok(rpc >= 0 && rpc < flat && flat < none);
+  assert.ok(rpc >= 0 && rpc < none);
   assert.match(overview, /productsResult\.errorPl/);
 });
 
@@ -178,17 +157,6 @@ test("product fetch skips dead hosts off localhost and calls Jupiter once", asyn
   }
 });
 
-test("flat-ranking copy exists in Polish and English", () => {
-  const src = readFileSync(new URL("../lib/i18n.tsx", import.meta.url), "utf8");
-  const values = [...src.matchAll(/"purchase\.disabled\.flatRanking":\s*"([^"]*)"/g)].map(
-    (match) => match[1],
-  );
-  assert.deepEqual(values, [
-    "Zakup nieaktywny — ranking awaryjny nie rozróżnia spółek (wszystkie 50,0). Spróbuj ponownie później albo włącz „Premia IPO ma znaczenie”.",
-    "Purchase disabled — the backup ranking can't tell names apart (all 50.0). Try again later or turn on “IPO premium matters”.",
-  ]);
-});
-
 function hostedProduct(name: string, nearIpo: boolean): PrestocksProduct {
   return {
     name,
@@ -237,14 +205,6 @@ test("hosted products do not keep a server near-IPO flag", async () => {
 
     const got = await fetchPrestocksProducts(emptyJupPrices(1_700_000_000_000));
     assert.equal(got.products.find((row) => row.name === "SpaceX")?.near_ipo, false);
-    const ranked = metricsRank(got.products, [], {
-      premiumsMatter: true,
-      premiumsEspeciallyNearIpo: true,
-      buyDespiteIpo: false,
-      deadlinesUnimportant: false,
-    });
-    assert.equal(ranked.scores.every((row) => row.score === 50), true);
-    assert.equal(isFlatFallback(ranked), true);
   });
 });
 

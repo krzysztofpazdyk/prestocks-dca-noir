@@ -4,7 +4,6 @@ export type PurchaseBlockInput = {
   buyInFlight: boolean;
   txPending: boolean;
   statusError: boolean;
-  rankFlat: boolean;
   top3Empty: boolean;
   connected: boolean;
   onChainReady: boolean;
@@ -18,7 +17,6 @@ export function purchaseDisabledReasonKey(i: PurchaseBlockInput): string | null 
   if (!i.connected) return "msg.connectForPurchase";
   if (i.txPending) return "purchase.disabled.tx";
   if (i.statusError) return "purchase.disabled.rpcError";
-  if (i.rankFlat) return "purchase.disabled.flatRanking";
   if (i.top3Empty) return "purchase.disabled.noRecs";
   if (!i.onChainReady) return "purchase.disabled.notReady";
   if (i.vaultTooLow) return "purchase.disabled.vaultLow";

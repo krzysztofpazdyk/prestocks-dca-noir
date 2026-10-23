@@ -12,7 +12,6 @@ import {
 import { shown, translate } from "@/lib/i18n";
 import { dcaApiBase, readTypesafeKey, readXaiKey } from "@/lib/keys";
 import { ensureRuntimeConfig } from "@/lib/runtime-config";
-import { metricsRank } from "@/lib/metrics-rank";
 import {
   fetchOwnerUsdcBalance,
   fetchSolBalance,
@@ -86,28 +85,48 @@ async function fetchWithTimeout(
   }
 }
 
+function jevUnavailable(): Error {
+  return new Error(shown("rank.err.jevUnavailable"));
+}
+
+/** A ranking exists only when the pipeline is Jev and the response is ok. */
+function jevPipeline(pipeline: string[] | undefined, ok?: boolean): string[] {
+  const resolved = Array.isArray(pipeline) ? pipeline : ["prestocks", "jev"];
+  if (
+    ok === false ||
+    !resolved.includes("jev") ||
+    resolved.includes("metrics_rank")
+  ) {
+    throw jevUnavailable();
+  }
+  return resolved;
+}
+
 function mapRunToRank(
   run: LatestRunJson,
   mode: RankResult["mode"],
   sourceLabel: string,
   exclusions?: string[],
 ): RankResult {
+  const pipeline = jevPipeline(run.pipeline, (run as { ok?: boolean }).ok);
   const excl = exclusions ?? readExclusions();
   const products = filterProducts(run.products ?? [], excl);
   const scores = filterProducts((run.scores ?? []) as RankRow[], excl);
   const top3Raw = (run.top3 ?? scores.slice(0, 3)) as RankRow[];
   const top3 = filterTop3(top3Raw, excl);
-  // If top3 short after filter, refill from scores
   const filled =
     top3.length >= 3
       ? top3
       : filterTop3([...(top3 as RankRow[]), ...scores], excl);
-  const pipeline = run.pipeline ?? ["prestocks", "jev"];
-  const isMetrics =
-    pipeline.includes("metrics_rank") && !pipeline.includes("jev");
+  if (
+    filled.length < 3 ||
+    filled.some((row) => typeof row.score !== "number" || !Number.isFinite(row.score))
+  ) {
+    throw jevUnavailable();
+  }
   return {
-    mode: isMetrics ? "metrics_fallback" : mode,
-    sourceLabel: isMetrics ? shown("rank.source.metricsNoJev") : sourceLabel,
+    mode,
+    sourceLabel,
     pipeline,
     top3: filled,
     scores: scores.length ? scores : filled,
@@ -122,27 +141,6 @@ function mapRunToRank(
       : undefined,
     fetchedAt: run.finished_at_utc ?? new Date().toISOString(),
   };
-}
-
-export async function fetchLatestRun(): Promise<RankResult | null> {
-  await ensureRuntimeConfig();
-  const base = dcaApiBase();
-  if (!base) return null;
-  const resp = await fetchWithTimeout(`${base}/run/latest`, {
-    headers: { Accept: "application/json" },
-  });
-  if (!resp.ok) return null;
-  const run = (await resp.json()) as LatestRunJson;
-  const byok = readTypesafeKey().length > 0;
-  // /run/latest is a server cache (often keeper) — never claim "hosted Jev" without BYOK.
-  return mapRunToRank(
-    run,
-    byok ? "byok_ai" : "metrics_fallback",
-    byok
-      ? shown("rank.source.cacheByok")
-      : shown("rank.source.cacheNoByok"),
-    readExclusions(),
-  );
 }
 
 /** Trigger dry-run on backend. Passes BYOK headers when present. */
@@ -191,11 +189,11 @@ export async function triggerDryRun(
     run?: LatestRunJson;
     detail?: unknown;
   };
-  if (!resp.ok) {
+  if (!resp.ok || data.ok === false) {
     const errMsg =
       (data as { error?: string }).error ||
       (typeof data.detail === "string" ? data.detail : null);
-    throw new Error(errMsg || `API /run/dry HTTP ${resp.status}`);
+    throw new Error(errMsg || shown("rank.err.jevUnavailable"));
   }
   const run = data.run ?? (data as LatestRunJson);
   const companyRaw =
@@ -204,38 +202,14 @@ export async function triggerDryRun(
   if (companyRaw) {
     rememberCompanyRecords(companyDataFromRankMap(companyRaw, Date.now()));
   }
-  const byok = !!ts;
+  if (!ts) throw jevUnavailable();
   const grok = (run.pipeline ?? []).includes("grok");
   return mapRunToRank(
     run,
-    byok ? "byok_ai" : "metrics_fallback",
-    byok
-      ? grok
-        ? shown("rank.source.grokJev")
-        : shown("rank.source.jev")
-      : shown("rank.source.dryNoByok"),
+    "byok_ai",
+    grok ? shown("rank.source.grokJev") : shown("rank.source.jev"),
     apiPrefs.exclusions,
   );
-}
-
-/** Load sample latest-run from static Pages asset. */
-export async function fetchSampleRun(): Promise<RankResult | null> {
-  const base = (
-    process.env.NEXT_PUBLIC_BASE_PATH || "/prestocks-dca-noir"
-  ).replace(/\/$/, "");
-  try {
-    const resp = await fetch(`${base}/data/latest-run-sample.json`);
-    if (!resp.ok) return null;
-    const run = (await resp.json()) as LatestRunJson;
-    return mapRunToRank(
-      run,
-      "metrics_fallback",
-      shown("rank.source.sample"),
-      readExclusions(),
-    );
-  } catch {
-    return null;
-  }
 }
 
 
@@ -311,6 +285,7 @@ export function rankResultFromProxy(
   prefs?: Pick<RankPrefs, "premiumsMatter">,
 ): RankResult {
   const byName = new Map(products.map((p) => [p.name.toLowerCase(), p]));
+  const pipeline = jevPipeline(data.pipeline, data.ok);
   const rows: RankRow[] = (data.top3 ?? []).map((r) => {
     const p = byName.get(r.name.toLowerCase());
     const folded = r.name.replace(/\s+/g, "").toLowerCase();
@@ -326,26 +301,23 @@ export function rankResultFromProxy(
         (entry) => entry.replace(/\s+/g, "").toLowerCase() === folded,
       ),
     };
+    const score = typeof r.score === "number" ? r.score : Number(r.score);
+    if (!Number.isFinite(score)) throw jevUnavailable();
     return {
       ...base,
-      score: Number(r.score) || 0,
+      score,
       score_raw: null,
       confidence: null,
     };
   });
-  const pipeline = data.pipeline ?? ["prestocks", "jev"];
-  const isMetrics =
-    pipeline.includes("metrics_rank") && !pipeline.includes("jev");
   // Callers still pass premiumsMatter. The ranking note that used it is gone.
   void prefs;
   const grok = pipeline.includes("grok");
   return {
-    mode: isMetrics ? "metrics_fallback" : "byok_ai",
-    sourceLabel: isMetrics
-      ? shown("rank.source.metricsNoJev")
-      : grok
-        ? shown("rank.source.grokJev")
-        : shown("rank.source.jev"),
+    mode: "byok_ai",
+    sourceLabel: grok
+      ? shown("rank.source.grokJev")
+      : shown("rank.source.jev"),
     pipeline,
     top3: rows.slice(0, 3),
     scores: rows,
@@ -353,16 +325,6 @@ export function rankResultFromProxy(
     error: data.error,
     fetchedAt: new Date().toISOString(),
   };
-}
-
-export function emergencyFromProducts(
-  products: PrestocksProduct[],
-  reason: string,
-  exclusions?: string[],
-  prefs?: RankPrefs,
-): RankResult {
-  const r = metricsRank(products, exclusions, prefs);
-  return { ...r, error: reason };
 }
 
 export type FaucetUsdcResponse = {

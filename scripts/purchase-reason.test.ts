@@ -9,7 +9,6 @@ const base = {
   buyInFlight: false,
   txPending: false,
   statusError: false,
-  rankFlat: false,
   top3Empty: false,
   connected: true,
   onChainReady: true,
