@@ -74,12 +74,12 @@ export function HistoryRunEntry({
 
   return (
     <div>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <p className="mono-num text-sm text-[#2dd4bf]">
+      <div className="min-w-0 max-w-full">
+        <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-3 gap-y-1 md:grid md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)] md:items-baseline">
+          <p className="mono-num min-w-0 max-w-full break-words text-sm text-[#2dd4bf] md:col-start-1">
             {formatTs(run.ts)}
           </p>
-          <p className="text-xs text-[#8b95a8]">
+          <p className="order-last min-w-0 max-w-full basis-full break-words text-center text-xs text-[#8b95a8] md:order-none md:col-start-2 md:basis-auto">
             {priceState === "unknown"
               ? t("history.runMetaUnknown", {
                   index: run.runIndex.toString(),
@@ -92,18 +92,19 @@ export function HistoryRunEntry({
                   slot: run.slot.toString(),
                 })}
           </p>
-          {priceState === "unknown" ? (
-            <p className="text-[10px] text-[#8b95a8]">{t("runPrice.loading")}</p>
-          ) : null}
-          {runPnlText && (
-            <p className={`mono-num text-xs ${runClass}`}>
+          {runPnlText ? (
+            <p
+              className={`mono-num min-w-0 max-w-full break-words text-right text-xs md:col-start-3 ${runClass}`}
+            >
               {t("history.runPnl", { pnl: runPnlText })}
             </p>
+          ) : (
+            <span className="hidden md:col-start-3 md:block" aria-hidden="true" />
           )}
         </div>
-        <span className="mono-num rounded border border-[#2dd4bf44] px-2 py-1 text-[11px] text-[#2dd4bf]">
-          on-chain
-        </span>
+        {priceState === "unknown" ? (
+          <p className="mt-1 text-[10px] text-[#8b95a8]">{t("runPrice.loading")}</p>
+        ) : null}
       </div>
       <ul className="mt-3 grid gap-1 sm:grid-cols-3">
         {run.mints.map((m, i) => {
