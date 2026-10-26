@@ -442,6 +442,17 @@ export function SettingsView() {
       writeDeadlineInvalid(deadlineInvalid);
       writeIpoPremiumMatters(ipoPremium);
       writeBuyDespiteIpo(buyDespiteIpo);
+      // Current Jev field rides along on the signed prefs push, so a new key
+      // replaces the keeper copy without turning auto-buy off.
+      const nextTypesafe = typesafeKey.trim();
+      if (nextTypesafe) {
+        try {
+          localStorage.setItem(LS_TYPESAFE, nextTypesafe);
+          setTypesafeFilled(true);
+        } catch {
+          /* private mode — the push still reads whatever is already stored */
+        }
+      }
       const res = await keeperPushPrefs(
         rankPrefsForApi(readRankPrefs()),
         owner,

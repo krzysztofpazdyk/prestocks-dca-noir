@@ -31,7 +31,7 @@ const PREDCA_NAME_TO_CODE: Record<string, number> = {
 const STATUS_ERROR_PREFIXES = ["Auto-zakup nieudany:", "Auto-buy failed:"];
 
 const TECHNICAL_RE =
-  /custom program error|simulation failed|error number:|error code:|anchorerror|program log|0x[0-9a-f]+|blockhash|insufficient|slippage|timed?\s*out|timeout|econn|enotfound|failed to fetch|fetch failed|network request failed|sign_rejected|signature_rejected|signature rejected|user rejected|podpis odrzucony|http_\d+|enable_failed|enable_timeout|keeper_unreachable|\{\s*"|\blog:|instruction \d|json-rpc|transaction expired|block height exceeded|disable failed|purchase skipped|without a completed purchase/i;
+  /custom program error|simulation failed|error number:|error code:|anchorerror|program log|0x[0-9a-f]+|blockhash|insufficient|slippage|timed?\s*out|timeout|econn|enotfound|failed to fetch|fetch failed|network request failed|sign_rejected|signature_rejected|signature rejected|user rejected|podpis odrzucony|http_\d+|enable_failed|enable_timeout|keeper_unreachable|\{\s*"|\blog:|instruction \d|json-rpc|transaction expired|block height exceeded|disable failed|purchase skipped|without a completed purchase|jev niedostępny\s*:|typesafe_key_required|klucz odrzucony|spending limit exceeded|max_usd/i;
 
 function translator(langOrT: Locale | AutoBuyErrorT): AutoBuyErrorT {
   if (typeof langOrT === "function") return langOrT;
@@ -68,6 +68,14 @@ function predcaCode(raw: string): number | null {
   return null;
 }
 
+function keeperReasonKey(raw: string): string | null {
+  if (/brak klucza|typesafe_key_required/i.test(raw)) return "auto.error.jevNoKey";
+  if (/klucz odrzucony/i.test(raw)) return "auto.error.jevKeyRejected";
+  if (/spending limit exceeded|\bmax_usd\b/i.test(raw)) return "auto.error.spendLimit";
+  if (/jev niedostępny/i.test(raw)) return "auto.error.jevUnavailable";
+  return null;
+}
+
 function isUserRejected(raw: string): boolean {
   return /user rejected|rejected the request|user denied|user cancel(?:ed|led)|sign_rejected|signature_rejected|signature rejected|podpis odrzucony/i.test(
     raw,
@@ -79,6 +87,9 @@ function categoryKey(raw: string): string | null {
   // Program code wins over a "signature rejected" wrapper that quotes the logs.
   if (code != null) return `auto.error.predca.${code}`;
   if (isUserRejected(raw)) return "auto.error.rejected";
+  // Keeper reasons before generic timeout / http_5xx → network.
+  const keeper = keeperReasonKey(raw);
+  if (keeper) return keeper;
   if (
     /slippage|price impact too high|price moved|exceeds desired price|priceslippage/i.test(
       raw,

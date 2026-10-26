@@ -35,6 +35,7 @@ import {
   isBannerHoldActive,
   resolvePendingEnable,
   pendingEnableStillFor,
+  canPostAutoEnable,
   shouldCommitAutoBuyEnabled,
   shouldPollInProgressEnable,
   shouldSendEnable,
@@ -55,6 +56,7 @@ import {
 } from "@/lib/hooks/useLatestRef";
 import { usePredca } from "@/lib/hooks/usePredca";
 import { keeperEnabledForConnectedOwner } from "@/lib/keeper-enabled";
+import { readTypesafeKey } from "@/lib/keys";
 import { unresolvedSignatureBlocksTx } from "@/lib/vault-follow-up";
 
 export type AutoBuyPhase =
@@ -287,6 +289,15 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
       setPhase("blocked");
       setBlockReason("need_wallet");
       setMessage(tRef.current("auto.status.needWallet"));
+      return;
+    }
+    if (!canPostAutoEnable(readTypesafeKey())) {
+      bannerHoldUntilRef.current = Date.now() + BANNER_HOLD_MS;
+      setEnabledState(false);
+      writeAutoWeeklyBuy(false, cycleOwner);
+      setPhase("error");
+      setBlockReason(null);
+      setMessage(tRef.current("auto.error.jevNoKey"));
       return;
     }
     if (!shouldSendEnable(cycleInFlight)) return;

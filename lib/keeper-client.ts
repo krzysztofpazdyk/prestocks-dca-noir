@@ -1,5 +1,6 @@
 /** Predca keeper client — public HTTPS (rank API /keeper proxy) + wallet sig auth. */
 
+import { readTypesafeKey } from "@/lib/keys";
 import {
   ensureRuntimeConfig,
   runtimeDcaApiUrl,
@@ -485,6 +486,13 @@ export async function keeperRun(
   return r.data;
 }
 
+/** Top-level POST field. Omitted when the settings field is empty. Never a URL. */
+function typesafeKeyJson(): { typesafe_key: string } | Record<string, never> {
+  const key = readTypesafeKey();
+  if (!key) return {};
+  return { typesafe_key: key };
+}
+
 export async function keeperEnable(
   owner: string,
   force = true,
@@ -501,17 +509,22 @@ export async function keeperEnable(
     const msg = e instanceof Error ? e.message : String(e);
     return { ok: false, error: `sign_rejected: ${msg}` };
   }
-  // Client timeout stays 120s. The keeper proxy upstream timeout is also 120s
-  // today, so they race: a 408/502/504/524 or "timeout|unreachable" body is
-  // pending and the UI polls status instead of treating it as Off.
-  // predca-api-render needs a twin PR to raise _mutating("enable") above
-  // rank + buy + the 90s confirm poll (for example _upstream(..., timeout=240)).
+  // Client timeout stays 120s. Proxy /enable is longer: 5s rank, then the
+  // buy, then about 90s waiting for confirmation. When this call ends first,
+  // a 408/502/504/524, a client timeout, or a "timeout|unreachable" body is
+  // pending (enableResultFromTransport) and the UI polls status instead of
+  // turning the switch off.
   const r = await keeperFetch(
     "/enable",
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...auth, force, ...(prefs ? { prefs } : {}) }),
+      body: JSON.stringify({
+        ...auth,
+        force,
+        ...(prefs ? { prefs } : {}),
+        ...typesafeKeyJson(),
+      }),
     },
     120000,
   );
@@ -834,7 +847,7 @@ export async function keeperPushPrefs(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...auth, prefs }),
+      body: JSON.stringify({ ...auth, prefs, ...typesafeKeyJson() }),
     },
     15000,
   );
