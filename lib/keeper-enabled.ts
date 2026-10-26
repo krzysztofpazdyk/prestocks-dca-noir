@@ -46,6 +46,63 @@ export function keeperStatusNeedsSignature(st: { error?: string }): boolean {
   );
 }
 
+/**
+ * Phases where /enable has not settled the on/off bit. The daemon writes
+ * `enabled: false` for the whole purchase (`enabling`, then `buying`).
+ */
+const TRANSITIONAL_AUTO_BUY_PHASES = new Set([
+  "enabling",
+  "buying",
+  "checking",
+  "ranking",
+  "confirming",
+  "pending",
+]);
+
+export type AutoBuyStatusSnapshot = {
+  ok?: boolean;
+  enabled?: boolean;
+  owner?: string;
+  error?: string;
+  phase?: string | null;
+};
+
+/**
+ * A silent read that must not replace the enable/disable bit.
+ * No `enabled` field is unknown. `enabled: false` with no phase, or with a
+ * phase still inside enable, is the temporary off written while the purchase
+ * runs. A settled phase (`off`, `error`, …) with `enabled: false` is real.
+ */
+export function autoBuyStatusIsTransitional(st: {
+  enabled?: boolean;
+  phase?: string | null;
+}): boolean {
+  if (typeof st.enabled !== "boolean") return true;
+  if (st.enabled === true) return false;
+  const phase = typeof st.phase === "string" ? st.phase.trim() : "";
+  if (!phase) return true;
+  return TRANSITIONAL_AUTO_BUY_PHASES.has(phase);
+}
+
+/**
+ * Next toggle value. `actionEnabled` is the enable/disable response
+ * (`null` before this wallet has acted). A later silent status replaces it
+ * only when that payload authoritatively names this wallet and is not
+ * transitional. `null` means "do not touch the toggle".
+ */
+export function nextAutoBuyEnabled(
+  actionEnabled: boolean | null,
+  st: AutoBuyStatusSnapshot,
+  wallet: string | null,
+): boolean | null {
+  if (actionEnabled !== null && autoBuyStatusIsTransitional(st)) {
+    return actionEnabled;
+  }
+  const verdict = keeperEnabledForConnectedOwner(st, wallet);
+  if (verdict === null) return actionEnabled;
+  return verdict;
+}
+
 export type AutoBuyActionStatusPatch = {
   /** On/off from the enable or disable response. A silent read must not replace it. */
   enabled: boolean;
