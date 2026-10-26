@@ -63,10 +63,7 @@ import {
   weeklyBudgetServerRevision,
   writeWeeklyDraft,
 } from "@/lib/weekly-budget";
-import {
-  KeeperSessionSignPrompt,
-  useAutoWeeklyBuy,
-} from "@/lib/hooks/useAutoWeeklyBuy";
+import { useAutoWeeklyBuy } from "@/lib/hooks/useAutoWeeklyBuy";
 import { useIsClient } from "@/lib/hooks/useIsClient";
 import {
   commitLatestRef,
@@ -550,7 +547,6 @@ export function SettingsView() {
         <span className="text-[11px] uppercase tracking-[0.15em] text-[#8b95a8]">
           {t("settings.exclusions")}
         </span>
-        {connected && autoBuy.needsSignature ? <KeeperSessionSignPrompt /> : null}
         <p className="text-xs text-[#8b95a8]">{t("settings.fixedExclusion")}</p>
         <input
           type="text"
@@ -569,7 +565,6 @@ export function SettingsView() {
       </label>
 
       <div className="space-y-3 rounded-lg border border-[#1e2633] bg-[#141820] p-5">
-        {connected && autoBuy.needsSignature ? <KeeperSessionSignPrompt /> : null}
         <CompanyToggle
           label={t("settings.buyDespiteIpo")}
           checked={buyDespiteIpo}
@@ -701,15 +696,12 @@ export function SettingsView() {
         {budgetTxNotice(predca.error, "error")}
         {budgetTxNotice(predca.okMsg, "ok")}
         <div className="border-t border-[#1e2633] pt-4">
-          {connected && autoBuy.needsSignature ? (
-            <div className="space-y-2">
-              <p className="text-sm text-[#e8eef5]">{t("settings.autoWeekly")}</p>
-              <KeeperSessionSignPrompt />
-            </div>
+          {connected && autoBuy.needsSignature && !autoBuy.statusResolved ? (
+            <p className="text-sm text-[#e8eef5]">{t("settings.autoBuySignInBar")}</p>
           ) : connected && !autoBuy.statusChecked ? (
             <p className="text-xs text-[#8b95a8]">{t("settings.prefsLoading")}</p>
           ) : connected && !autoBuy.statusResolved ? (
-            <p className="text-sm text-[#e8eef5]">{t("settings.autoWeekly")}</p>
+            <p className="text-sm text-[#e8eef5]">{t("settings.autoBuyKeeperUnreachable")}</p>
           ) : (
           <Toggle
             label={t("settings.autoWeekly")}

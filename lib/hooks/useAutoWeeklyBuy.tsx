@@ -56,6 +56,7 @@ import {
 } from "@/lib/hooks/useLatestRef";
 import { usePredca } from "@/lib/hooks/usePredca";
 import {
+  applyAutoBuyActionStatus,
   keeperEnabledForConnectedOwner,
   keeperStatusNeedsSignature,
 } from "@/lib/keeper-enabled";
@@ -129,7 +130,12 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
   const [due, setDue] = useState(false);
   const [keeperMode, setKeeperMode] = useState<KeeperMode | null>(null);
   const [needsSignature, setNeedsSignature] = useState(false);
-  const [statusResolved, setStatusResolved] = useState(false);
+  const [statusResolved, setStatusResolvedState] = useState(false);
+  const statusResolvedRef = useRef(false);
+  const markStatusResolved = useCallback((value: boolean) => {
+    statusResolvedRef.current = value;
+    setStatusResolvedState(value);
+  }, []);
   const [statusChecked, setStatusChecked] = useState(false);
   const [statusUnlocking, setStatusUnlocking] = useState(false);
 
@@ -212,7 +218,7 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
     }
     if (ownerChanged) {
       setNeedsSignature(false);
-      setStatusResolved(false);
+      markStatusResolved(false);
       setStatusChecked(false);
       setStatusUnlocking(false);
     }
@@ -235,7 +241,7 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
       setStatusChecked(true);
       if (keeperStatusNeedsSignature(st)) {
         setNeedsSignature(true);
-        setStatusResolved(false);
+        markStatusResolved(false);
         setPrefsReady(true);
         return;
       }
@@ -243,7 +249,7 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
       const verdict = keeperEnabledForConnectedOwner(st, ownerKey);
       if (verdict === true || verdict === false) {
         setNeedsSignature(false);
-        setStatusResolved(true);
+        markStatusResolved(true);
       }
       if (verdict === true) {
         setEnabledState(true);
@@ -281,12 +287,12 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
             setStatusChecked(true);
             if (keeperStatusNeedsSignature(st)) {
               setNeedsSignature(true);
-              setStatusResolved(false);
+              markStatusResolved(false);
               return;
             }
             if (st.enabled === false) {
               setNeedsSignature(false);
-              setStatusResolved(true);
+              markStatusResolved(true);
               setPhase("idle");
               setMessage(tRef.current("auto.status.off"));
               return;
@@ -299,18 +305,22 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
             );
             return;
           }
-          const st = await keeperStatus(owner, sign, { interactive: true });
+          // Disable already signed once. State comes from that response.
+          // The follow-up read is silent: no second wallet window.
+          setEnabledState(false);
+          writeAutoWeeklyBuy(false, owner);
+          markStatusResolved(true);
+          setPhase("idle");
+          setBlockReason(null);
+          setMessage(tRef.current("auto.status.off"));
+          const st = await keeperStatus(owner, sign, { interactive: false });
           if (statusEpochRef.current !== epoch) return;
+          const patch = applyAutoBuyActionStatus(false, st);
           setStatusChecked(true);
-          if (keeperStatusNeedsSignature(st)) {
-            setNeedsSignature(true);
-            setStatusResolved(false);
-            return;
-          }
-          if (st.ok === true || typeof st.enabled === "boolean") {
-            setNeedsSignature(false);
-            setStatusResolved(true);
-          }
+          setNeedsSignature(patch.needsSignature);
+          if (patch.touchStatusResolved) markStatusResolved(patch.statusResolved);
+          setEnabledState(patch.enabled);
+          writeAutoWeeklyBuy(patch.enabled, owner);
         })();
       }
     }
@@ -435,19 +445,16 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
       );
       if (!stillCurrent()) return;
       const prior = await keeperStatus(cycleOwner, sign, { interactive: false });
-      const mintStatusSession = async () => {
-        const minted = await keeperStatus(cycleOwner, sign, { interactive: true });
+      // Enable signs once inside keeperEnable. This read never opens a prompt.
+      const readStatusAfterAction = async () => {
+        const st = await keeperStatus(cycleOwner, sign, { interactive: false });
         if (!stillCurrent()) return;
+        const patch = applyAutoBuyActionStatus(true, st);
         setStatusChecked(true);
-        if (keeperStatusNeedsSignature(minted)) {
-          setNeedsSignature(true);
-          setStatusResolved(false);
-          return;
-        }
-        if (minted.ok === true || typeof minted.enabled === "boolean") {
-          setNeedsSignature(false);
-          setStatusResolved(true);
-        }
+        setNeedsSignature(patch.needsSignature);
+        if (patch.touchStatusResolved) markStatusResolved(patch.statusResolved);
+        setEnabledState(patch.enabled);
+        writeAutoWeeklyBuy(patch.enabled, cycleOwner);
       };
       if (!stillCurrent()) return;
       const baseline: EnableStatusBaseline = {
@@ -461,6 +468,7 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
         bannerHoldUntilRef.current = Date.now() + BANNER_HOLD_MS;
         setEnabledState(true);
         writeAutoWeeklyBuy(true, cycleOwner);
+        markStatusResolved(true);
         if (ran.names && ran.names.length > 0) {
           setLastTop3(ran.names.map((name) => ({ name, score: 0 })));
         }
@@ -530,6 +538,10 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
         while (stillCurrent()) {
           const st = await keeperStatus(cycleOwner, sign, { interactive: false });
           if (!stillCurrent()) return;
+          if (keeperStatusNeedsSignature(st)) {
+            setNeedsSignature(true);
+            setStatusChecked(true);
+          }
           const verdict = resolvePendingEnable(
             st,
             cycleOwner,
@@ -544,7 +556,7 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
           }
           if (verdict === "on") {
             commitPurchase(st);
-            await mintStatusSession();
+            await readStatusAfterAction();
             return;
           }
           if (verdict === "off") {
@@ -560,7 +572,7 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
       // Already On with a finished purchase: do not POST /enable again.
       if (canCommitEnabledFromStatus(prior, cycleOwner)) {
         commitPurchase(prior);
-        await mintStatusSession();
+        await readStatusAfterAction();
         return;
       }
       // Already On and this week's buy is still in flight. Poll, do not force-buy.
@@ -612,7 +624,7 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
         return;
       }
       commitPurchase(ran);
-      await mintStatusSession();
+      await readStatusAfterAction();
     } catch (e) {
       enablePendingRef.current = false;
       enablePendingOwnerRef.current = null;
@@ -654,7 +666,12 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
     setStatusChecked(true);
     if (keeperStatusNeedsSignature(st)) {
       setNeedsSignature(true);
-      setStatusResolved(false);
+      // A finished enable/disable already set on/off. Do not hide it or
+      // open a prompt. Pending polls stay silent and keep their banner.
+      if (enablePendingRef.current || statusResolvedRef.current) {
+        return;
+      }
+      markStatusResolved(false);
       setPhase("idle");
       setMessage(null);
       setBlockReason(null);
@@ -727,7 +744,7 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
     const verdict = keeperEnabledForConnectedOwner(st, wallet);
     if (verdict === true || verdict === false) {
       setNeedsSignature(false);
-      setStatusResolved(true);
+      markStatusResolved(true);
     }
     const hold = isBannerHoldActive(bannerHoldUntilRef.current, Date.now());
     if (verdict === true && wallet && !enabledRef.current) {
@@ -863,23 +880,23 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
       setStatusChecked(true);
       if (keeperStatusNeedsSignature(st)) {
         setNeedsSignature(true);
-        setStatusResolved(false);
+        markStatusResolved(false);
         return;
       }
       const verdict = keeperEnabledForConnectedOwner(st, owner);
       if (verdict === true) {
         setNeedsSignature(false);
-        setStatusResolved(true);
+        markStatusResolved(true);
         setEnabledState(true);
         writeAutoWeeklyBuy(true, owner);
       } else if (verdict === false) {
         setNeedsSignature(false);
-        setStatusResolved(true);
+        markStatusResolved(true);
         setEnabledState(false);
         writeAutoWeeklyBuy(false, owner);
       } else if (st.ok === true || typeof st.enabled === "boolean") {
         setNeedsSignature(false);
-        setStatusResolved(true);
+        markStatusResolved(true);
       }
       setPrefsReady(true);
     } finally {

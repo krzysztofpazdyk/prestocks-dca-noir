@@ -45,3 +45,40 @@ export function keeperStatusNeedsSignature(st: { error?: string }): boolean {
     error.startsWith("sign_rejected")
   );
 }
+
+export type AutoBuyActionStatusPatch = {
+  /** On/off from the enable or disable response. A silent read must not replace it. */
+  enabled: boolean;
+  needsSignature: boolean;
+  /**
+   * False on `session_required`: the caller sets `needsSignature` only and
+   * leaves `statusResolved` (and the action bit) as the action left them.
+   */
+  touchStatusResolved: boolean;
+  statusResolved: boolean;
+};
+
+/**
+ * After a successful enable or disable. The action response owns on/off.
+ * A following silent status read never opens a wallet prompt. `session_required`
+ * only raises `needsSignature`.
+ */
+export function applyAutoBuyActionStatus(
+  actionEnabled: boolean,
+  st: { error?: string },
+): AutoBuyActionStatusPatch {
+  if (keeperStatusNeedsSignature(st)) {
+    return {
+      enabled: actionEnabled,
+      needsSignature: true,
+      touchStatusResolved: false,
+      statusResolved: true,
+    };
+  }
+  return {
+    enabled: actionEnabled,
+    needsSignature: false,
+    touchStatusResolved: true,
+    statusResolved: true,
+  };
+}
