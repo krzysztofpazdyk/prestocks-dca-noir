@@ -154,71 +154,94 @@ function parseExpiresFromMessage(message: string): number {
   return m ? Number(m[1]) : 0;
 }
 
-/** Origin-shared with noir/noir2. Do not read the unprefixed keeper session key. */
+/** Tab session only. Same prefix as older builds; those copies lived in localStorage. */
 export const KEEPER_SESSION_PREFIX = "noir3.predca.keeper.session.";
 
 function sessionStorageKey(owner: string): string {
   return `${KEEPER_SESSION_PREFIX}${owner.trim()}`;
 }
 
+/**
+ * Older builds kept the bearer token in localStorage, so it survived closing
+ * the tab. Delete those keys. Never read the values.
+ */
+function purgeLegacyLocalSessions(): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    const prefix = KEEPER_SESSION_PREFIX;
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(prefix)) localStorage.removeItem(k);
+    }
+  } catch {
+    /* private mode */
+  }
+}
+
 function readStoredSession(owner: string): SessionCached | null {
   const key = owner.trim();
-  if (typeof localStorage === "undefined") return null;
+  if (!key || typeof sessionStorage === "undefined") return null;
+  const sk = sessionStorageKey(key);
   try {
-    const sk = sessionStorageKey(key);
-    let raw = localStorage.getItem(sk);
-    // Migrate v3.38–3.43 sessionStorage → localStorage (12h TTL survives tab close).
-    if (!raw && typeof sessionStorage !== "undefined") {
-      try {
-        raw = sessionStorage.getItem(sk);
-        if (raw) {
-          localStorage.setItem(sk, raw);
-          sessionStorage.removeItem(sk);
-        }
-      } catch {
-        /* ignore */
-      }
-    }
+    const raw = sessionStorage.getItem(sk);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as SessionCached;
     if (
       !parsed ||
       typeof parsed.token !== "string" ||
+      !parsed.token ||
       typeof parsed.expiresAt !== "number" ||
       parsed.owner !== key
     ) {
+      sessionStorage.removeItem(sk);
       return null;
     }
-    return parsed;
+    return { token: parsed.token, expiresAt: parsed.expiresAt, owner: key };
   } catch {
+    try {
+      sessionStorage.removeItem(sk);
+    } catch {
+      /* ignore */
+    }
     return null;
   }
 }
 
 function writeStoredSession(session: SessionCached): void {
-  if (typeof localStorage === "undefined") return;
+  const owner = session.owner.trim();
+  if (!owner || session.owner !== owner) return;
+  if (typeof session.token !== "string" || !session.token) return;
+  if (typeof session.expiresAt !== "number") return;
+  if (typeof sessionStorage === "undefined") return;
   try {
-    localStorage.setItem(sessionStorageKey(session.owner), JSON.stringify(session));
+    sessionStorage.setItem(
+      sessionStorageKey(owner),
+      JSON.stringify({ token: session.token, expiresAt: session.expiresAt, owner }),
+    );
   } catch {
-    /* ignore quota / private mode */
+    /* quota / private mode */
   }
 }
 
 function removeStoredSession(owner?: string): void {
-  if (typeof localStorage === "undefined") return;
+  if (typeof sessionStorage === "undefined") return;
   try {
-    if (owner) localStorage.removeItem(sessionStorageKey(owner));
-    else {
-      const prefix = KEEPER_SESSION_PREFIX;
-      for (let i = localStorage.length - 1; i >= 0; i--) {
-        const k = localStorage.key(i);
-        if (k && k.startsWith(prefix)) localStorage.removeItem(k);
-      }
+    if (owner) {
+      const key = owner.trim();
+      if (key) sessionStorage.removeItem(sessionStorageKey(key));
+      return;
+    }
+    const prefix = KEEPER_SESSION_PREFIX;
+    for (let i = sessionStorage.length - 1; i >= 0; i--) {
+      const k = sessionStorage.key(i);
+      if (k && k.startsWith(prefix)) sessionStorage.removeItem(k);
     }
   } catch {
     /* ignore */
   }
 }
+
+purgeLegacyLocalSessions();
 
 function getCachedSession(owner: string): SessionCached | null {
   const key = owner.trim();
@@ -281,12 +304,12 @@ export async function getStatusAuth(
 }
 
 /**
- * Drop status signature, Bearer session, localStorage, and in-flight sign/mint
+ * Drop status signature, Bearer session, sessionStorage, and in-flight sign/mint
  * for one owner. Omit owner to drop every wallet. Wallet change and disconnect
- * call this. A 401 on Bearer uses clearSessionOnly so the status signature
- * can still be reused until SIG_TTL_S.
+ * call this. A silent 401 drops only the bearer token.
  */
 export function clearStatusAuthCache(owner?: string): void {
+  purgeLegacyLocalSessions();
   if (owner) {
     const key = owner.trim();
     if (!key) return;
@@ -667,7 +690,7 @@ function ingestSessionFromPayload(
   }
 }
 
-/** Drop session only — keep statusAuthCache so a 401 remint can stay silent. */
+/** Drop the bearer token only. A silent 401 must not open a signature prompt. */
 function clearSessionOnly(owner: string): void {
   const key = owner.trim();
   sessionCache.delete(key);
@@ -689,19 +712,46 @@ function statusErrorFrom(
   };
 }
 
+export type KeeperStatusOptions = {
+  /**
+   * `false` (default): never open a wallet prompt. Missing or rejected
+   * session returns `session_required`.
+   * `true`: one action:status signature mints the session. A 401 on the
+   * bearer GET signs at most once more; the next error is returned as-is.
+   */
+  interactive?: boolean;
+};
+
+function sessionRequired(): KeeperRunResult {
+  return { ok: false, error: "session_required" };
+}
+
+function bearerRejected(status: number): boolean {
+  return status === 401 || status === 403;
+}
+
 /**
- * Per-owner keeper status — one wallet sign mints a server session; polls use Bearer.
- * Without owner/signMessage returns wallet_required (use keeperHealth for alive).
- * On Bearer 401 soft-clears session (keeps status sig cache) and remints once.
+ * Per-owner keeper status. Polls reuse the tab session (sessionStorage).
+ * The default is silent: no token or a rejected token does not sign.
+ * `interactive: true` signs action:status once (twice only when a stored
+ * token is rejected, and then stops).
+ * Without owner returns wallet_required (use keeperHealth for alive).
  */
 export async function keeperStatus(
   owner?: string,
   signMessage?: KeeperSignFn,
+  options?: KeeperStatusOptions,
 ): Promise<KeeperRunResult> {
-  if (!owner?.trim() || !signMessage) {
+  purgeLegacyLocalSessions();
+  const interactive = options?.interactive === true;
+  if (!owner?.trim()) {
+    return { ok: false, error: "wallet_required" };
+  }
+  if (interactive && !signMessage) {
     return { ok: false, error: "wallet_required" };
   }
   const key = owner.trim();
+  const sign = signMessage;
 
   const fetchWithBearer = async (token: string) =>
     keeperFetch(
@@ -716,34 +766,47 @@ export async function keeperStatus(
       8000,
     );
 
+  const takeInflight = async (): Promise<KeeperRunResult | null> => {
+    const pending = sessionInflight.get(key);
+    if (!pending) return null;
+    const shared = await pending;
+    return shared.result;
+  };
+
+  // One POST /status. Called only from the interactive path, and only once
+  // per keeperStatus() call. A rejected POST is the second error: return it.
   const signAndMint = async (): Promise<StatusMintResult> => {
     const generation = authGeneration(key);
     const dropped = (): StatusMintResult => ({
       session: null,
       result: { ok: false, error: "keeper_unreachable" },
     });
-    // Another poll may have minted while we waited on inflight/401.
     const raced = getCachedSession(key);
     if (raced) {
       const br = await fetchWithBearer(raced.token);
       if (authGeneration(key) !== generation) return dropped();
-      if (
-        br.data &&
-        br.status !== 0 &&
-        br.ok &&
-        br.status !== 401 &&
-        br.status !== 403
-      ) {
+      if (br.data && br.status !== 0 && br.ok && !bearerRejected(br.status)) {
         ingestSessionFromPayload(key, br.data as StatusWithSession, generation);
         return {
           session: getCachedSession(key),
           result: { ...br.data, source: br.data.source ?? "daemon" },
         };
       }
+      if (bearerRejected(br.status)) {
+        clearSessionOnly(key);
+        statusAuthCache.delete(key);
+      } else if (br.data && br.status !== 0) {
+        return { session: null, result: statusErrorFrom(br.data as StatusWithSession, br.status) };
+      } else {
+        return { session: null, result: { ok: false, error: "keeper_unreachable" } };
+      }
+    }
+    if (!sign) {
+      return { session: null, result: sessionRequired() };
     }
     let auth;
     try {
-      auth = await getStatusAuth(key, signMessage);
+      auth = await getStatusAuth(key, sign);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       return {
@@ -763,23 +826,36 @@ export async function keeperStatus(
     );
     if (authGeneration(key) !== generation) return dropped();
     const data = r.data as StatusWithSession | null;
-    if (data && r.status !== 0 && r.ok && r.status !== 401 && r.status !== 403) {
+    if (data && r.status !== 0 && r.ok && !bearerRejected(r.status)) {
       ingestSessionFromPayload(key, data, generation);
       return {
         session: getCachedSession(key),
         result: { ...data, source: data.source ?? "daemon" },
       };
     }
-    // 401/403: keep the status signature. Clearing it made the connect poller
-    // open "Sign message" again on every tick. One approved action:status
-    // signature is reused until it expires (SIG_TTL_S).
+    // The remint failed. Do not sign again inside this call.
+    if (bearerRejected(r.status)) statusAuthCache.delete(key);
     if (data && r.status !== 0) {
       return { session: null, result: statusErrorFrom(data, r.status) };
     }
     return { session: null, result: { ok: false, error: "keeper_unreachable" } };
   };
 
-  // 1) Try existing session (memory + localStorage) — no wallet prompt
+  const mintOnce = async (): Promise<KeeperRunResult> => {
+    const joined = await takeInflight();
+    if (joined) return joined;
+    const mintPromise = signAndMint().finally(() => {
+      if (sessionInflight.get(key) === mintPromise) sessionInflight.delete(key);
+    });
+    sessionInflight.set(key, mintPromise);
+    const minted = await mintPromise;
+    if (minted.result) return minted.result;
+    return { ok: false, error: "keeper_unreachable" };
+  };
+
+  const inflight = await takeInflight();
+  if (inflight) return inflight;
+
   const existing = getCachedSession(key);
   if (existing) {
     const generation = authGeneration(key);
@@ -787,35 +863,33 @@ export async function keeperStatus(
     if (authGeneration(key) !== generation) {
       return { ok: false, error: "keeper_unreachable" };
     }
-    if (r.data && r.status !== 0 && r.ok && r.status !== 401 && r.status !== 403) {
+    if (r.data && r.status !== 0 && r.ok && !bearerRejected(r.status)) {
       ingestSessionFromPayload(key, r.data as StatusWithSession, generation);
       return { ...r.data, source: r.data.source ?? "daemon" };
     }
-    if (r.status === 401 || r.status === 403) {
-      // Soft-clear: keep statusAuthCache so remint can reuse ~5min sig silently.
+    if (bearerRejected(r.status)) {
       clearSessionOnly(key);
-      // fall through — remint below (Phantom only if status auth also expired)
-    } else if (r.data && r.status !== 0) {
-      return statusErrorFrom(r.data as StatusWithSession, r.status);
-    } else {
-      return { ok: false, error: "keeper_unreachable" };
+      if (!interactive) {
+        const joined = await takeInflight();
+        if (joined) return joined;
+        return sessionRequired();
+      }
+      // Force one new wallet prompt. The POST below is the only retry.
+      statusAuthCache.delete(key);
+      return mintOnce();
     }
+    if (r.data && r.status !== 0) {
+      return statusErrorFrom(r.data as StatusWithSession, r.status);
+    }
+    return { ok: false, error: "keeper_unreachable" };
   }
 
-  // 2) Dedupe concurrent sign+mint (status + prefs hydrate in parallel)
-  const pending = sessionInflight.get(key);
-  if (pending) {
-    const shared = await pending;
-    if (shared.result) return shared.result;
+  if (!interactive) {
+    const joined = await takeInflight();
+    if (joined) return joined;
+    return sessionRequired();
   }
-
-  const mintPromise = signAndMint().finally(() => {
-    if (sessionInflight.get(key) === mintPromise) sessionInflight.delete(key);
-  });
-  sessionInflight.set(key, mintPromise);
-  const minted = await mintPromise;
-  if (minted.result) return minted.result;
-  return { ok: false, error: "keeper_unreachable" };
+  return mintOnce();
 }
 
 export type KeeperPrefsPayload = {

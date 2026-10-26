@@ -285,8 +285,10 @@ export function SettingsView() {
         // Without wallet/sign: keep localStorage; do not call detailed status.
         // signMessage identity changes often — use ref so we do not re-hydrate
         // (and re-hit status) on every adapter render.
-        const status = await keeperStatus(wallet ?? undefined, sign);
+        const status = await keeperStatus(wallet ?? undefined, sign, { interactive: false });
         if (cancelled) return;
+        // No tab session: keep prefsReady false so local edits are not pushed.
+        if (status.error === "session_required") return;
 
         const configuredOwner =
           (typeof status.owner === "string" && status.owner.trim()) || null;
@@ -321,7 +323,7 @@ export function SettingsView() {
     return () => {
       cancelled = true;
     };
-  }, [publicKey]);
+  }, [publicKey, autoBuy.needsSignature]);
 
   // Persist exclusions (debounced) so ranking reads localStorage mid-session.
   useEffect(() => {
@@ -694,6 +696,13 @@ export function SettingsView() {
         {budgetTxNotice(predca.error, "error")}
         {budgetTxNotice(predca.okMsg, "ok")}
         <div className="border-t border-[#1e2633] pt-4">
+          {connected && autoBuy.needsSignature && !autoBuy.statusResolved ? (
+            <p className="text-sm text-[#e8eef5]">{t("settings.autoBuySignInBar")}</p>
+          ) : connected && !autoBuy.statusChecked ? (
+            <p className="text-xs text-[#8b95a8]">{t("settings.prefsLoading")}</p>
+          ) : connected && !autoBuy.statusResolved ? (
+            <p className="text-sm text-[#e8eef5]">{t("settings.autoBuyKeeperUnreachable")}</p>
+          ) : (
           <Toggle
             label={t("settings.autoWeekly")}
             checked={autoBuy.enabled}
@@ -714,6 +723,7 @@ export function SettingsView() {
               autoBuy.setEnabled(false);
             }}
           />
+          )}
           <p className="mt-2 text-xs leading-relaxed text-[#8b95a8] text-justify">
             {t("settings.autoWeeklyHint")}
           </p>
