@@ -9,6 +9,10 @@ import {
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
 import { PhantomWalletAdapter } from "@solana/wallet-adapter-phantom";
 import { SolflareWalletAdapter } from "@solana/wallet-adapter-solflare";
+import {
+  adapterAutoConnectFor,
+  readStoredWalletName,
+} from "@/lib/connect-wallet";
 import { rpcUrl } from "@/lib/predca";
 import { PredcaProvider } from "@/lib/hooks/usePredca";
 import { privyAppId } from "@/lib/privy-devnet";
@@ -54,6 +58,15 @@ export function SolanaWalletProvider({ children }: { children: ReactNode }) {
     [],
   );
   const config = useMemo(() => ({ commitment: "confirmed" as const }), []);
+  // Read once, when config is ready. Later selects must not flip this flag.
+  const autoConnect = useMemo(() => {
+    if (!configReady || typeof localStorage === "undefined") return false;
+    try {
+      return adapterAutoConnectFor(readStoredWalletName(localStorage));
+    } catch {
+      return false;
+    }
+  }, [configReady]);
 
   const tree = <PredcaProvider>{children}</PredcaProvider>;
 
@@ -61,7 +74,7 @@ export function SolanaWalletProvider({ children }: { children: ReactNode }) {
 
   return (
     <ConnectionProvider endpoint={endpoint} config={config}>
-      <WalletProvider wallets={wallets} autoConnect={false}>
+      <WalletProvider wallets={wallets} autoConnect={autoConnect}>
         <WalletModalProvider>
           {privyOn ? <PrivyWalletBridge>{tree}</PrivyWalletBridge> : tree}
         </WalletModalProvider>

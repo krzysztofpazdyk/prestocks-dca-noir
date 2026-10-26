@@ -27,10 +27,12 @@ import {
   failShowsError,
   nextPinnedAddress,
   privyOtpAfterLogout,
+  readStoredWalletName,
   replayLiveConnect,
   runSwitchAttempt,
   shouldEndPrivySession,
   shouldRestoreExternalWallet,
+  shouldRestorePrivySession,
   walletButtonLabel,
   type CapTimers,
   type OnceTask,
@@ -523,7 +525,9 @@ function PrivyConnect() {
   const { t } = useI18n();
   const tRef = useRef(t);
   const job = useConnectJob();
+  const { wallets } = useWallet();
   const { ready, authenticated, logout, user } = usePrivy();
+  const restoredPrivy = useRef(false);
   const { createWallet } = useCreateWallet();
   const wantPrivy = useRef(false);
   const requestRef = useRef(job.requestConnect);
@@ -565,8 +569,8 @@ function PrivyConnect() {
       onComplete: (params: {
         user?: Parameters<typeof hasSolanaEmbeddedWallet>[0];
       }) => {
-        // Fires on mount when a session already exists. Connect only after
-        // the user picked Privy (autoConnect stays false).
+        // Fires on mount when a session already exists. A reload restore
+        // goes through the effect below, not through this login callback.
         if (!wantPrivy.current) return;
         wantPrivy.current = false;
         void (async () => {
@@ -587,6 +591,29 @@ function PrivyConnect() {
     [],
   );
   const { login } = useLogin(loginCallbacks);
+
+  useEffect(() => {
+    if (restoredPrivy.current) return;
+    let storedName: string | null = null;
+    try {
+      storedName = readStoredWalletName(window.localStorage);
+    } catch {
+      storedName = null;
+    }
+    if (
+      !shouldRestorePrivySession({
+        storedName,
+        ready,
+        authenticated,
+        hasEmbeddedWallet: hasSolanaEmbeddedWallet(user),
+      })
+    ) {
+      return;
+    }
+    if (!wallets.some((item) => item.adapter.name === PRIVY_WALLET_NAME)) return;
+    restoredPrivy.current = true;
+    requestRef.current(PRIVY_WALLET_NAME);
+  }, [authenticated, ready, user, wallets]);
 
   const onPick = useCallback((): "login" | "connect" => {
     const action = decidePrivyPick({

@@ -350,6 +350,8 @@ export const FAUCET_POST_TIMEOUT_MS = 150_000;
 export const FAUCET_CONFIRM_POLL_MS = 3_000;
 /** Stop looking for a landed mint after this long. */
 export const FAUCET_CONFIRM_MAX_MS = 120_000;
+/** One balance read must not hold the faucet button if RPC never answers. */
+export const FAUCET_BALANCE_READ_TIMEOUT_MS = 8_000;
 /** Demo faucet mints this many mock USDC. */
 export const FAUCET_USDC_MIN_INCREASE = 1_000;
 
@@ -516,6 +518,45 @@ function defaultBalanceReader(): (wallet: string) => Promise<FaucetBalanceRead> 
   return (wallet) => readFaucetBalances(wallet, connection);
 }
 
+/** A gateway 504 can leave the body stream open. Do not wait on it. */
+export async function cancelFaucetBody(resp: Response): Promise<void> {
+  const body = resp.body;
+  if (!body) return;
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, 500);
+    body.cancel().then(
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+    );
+  });
+}
+
+async function readFaucetBalanceCapped(
+  wallet: string,
+  read: (wallet: string) => Promise<FaucetBalanceRead>,
+  timeoutMs: number,
+): Promise<FaucetBalanceRead> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      read(wallet),
+      new Promise<FaucetBalanceRead>((resolve) => {
+        timer = setTimeout(() => {
+          resolve({ usdc: null, sol: null, usdcOk: false, solOk: false });
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 function arrivedResponse(wallet: string): FaucetUsdcResponse {
   return {
     ok: true,
@@ -549,7 +590,7 @@ async function confirmFaucetByBalance(
     checks += 1;
     let after: FaucetBalanceRead;
     try {
-      after = await read(wallet);
+      after = await readFaucetBalanceCapped(wallet, read, FAUCET_BALANCE_READ_TIMEOUT_MS);
     } catch {
       after = { usdc: null, sol: null, usdcOk: false, solOk: false };
     }
@@ -611,6 +652,18 @@ export async function claimFaucetUsdc(
     );
   } catch (err) {
     if (!isAmbiguousFaucetTransport(err, url)) throw err;
+    return confirmFaucetByBalance(wallet, before, read, {
+      sleep,
+      now,
+      pollMs: confirmPollMs,
+      maxMs: confirmMaxMs,
+      onConfirming: options.onConfirming,
+      refresh: options.refresh,
+    });
+  }
+
+  if (FAUCET_GATEWAY_STATUSES.has(resp.status)) {
+    await cancelFaucetBody(resp);
     return confirmFaucetByBalance(wallet, before, read, {
       sleep,
       now,
