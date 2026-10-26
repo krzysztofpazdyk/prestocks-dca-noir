@@ -57,8 +57,10 @@ import {
 import { usePredca } from "@/lib/hooks/usePredca";
 import {
   applyAutoBuyActionStatus,
+  autoBuyStatusIsTransitional,
   keeperEnabledForConnectedOwner,
   keeperStatusNeedsSignature,
+  nextAutoBuyEnabled,
 } from "@/lib/keeper-enabled";
 import { readTypesafeKey } from "@/lib/keys";
 import { unresolvedSignatureBlocksTx } from "@/lib/vault-follow-up";
@@ -177,6 +179,13 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
   const enablePendingRef = useRef(false);
   const enablePendingOwnerRef = useRef<string | null>(null);
   const enableBaselineRef = useRef<EnableStatusBaseline | null>(null);
+  /**
+   * On/off from the enable or disable action. A silent status replaces it
+   * only when `nextAutoBuyEnabled` says the payload is authoritative.
+   */
+  const actionEnabledRef = useRef<boolean | null>(null);
+  /** Bumped with that bit so a read that started earlier cannot overwrite it. */
+  const enabledEpochRef = useRef(0);
 
   const signReady = typeof signMessage === "function";
 
@@ -205,6 +214,10 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
     enablePendingRef.current = false;
     enablePendingOwnerRef.current = null;
     enableBaselineRef.current = null;
+    if (ownerChanged) {
+      actionEnabledRef.current = null;
+      enabledEpochRef.current += 1;
+    }
     cycleInFlight = false;
     if (ownerKey) ignoreOffUntilRef.current = Date.now() + 2000;
     // Drop the previous owner's On immediately. Status below corrects it.
@@ -229,6 +242,7 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
     const epoch = statusEpochRef.current;
     let cancelled = false;
     void (async () => {
+      const seenAt = enabledEpochRef.current;
       const sign = signMessageRef.current;
       const [st, health] = await Promise.all([
         keeperStatus(ownerKey, sign ?? undefined, { interactive: false }),
@@ -245,18 +259,20 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
         setPrefsReady(true);
         return;
       }
+      // An enable/disable that started after this read owns the switch.
+      if (enabledEpochRef.current !== seenAt) {
+        setPrefsReady(true);
+        return;
+      }
       // Unknown status (no sign, unreachable, rejected) must not force Off.
-      const verdict = keeperEnabledForConnectedOwner(st, ownerKey);
-      if (verdict === true || verdict === false) {
+      // A transitional enabled:false must not undo the action bit.
+      const next = nextAutoBuyEnabled(actionEnabledRef.current, st, ownerKey);
+      if (next === true || next === false) {
         setNeedsSignature(false);
         markStatusResolved(true);
-      }
-      if (verdict === true) {
-        setEnabledState(true);
-        writeAutoWeeklyBuy(true, ownerKey);
-      } else if (verdict === false) {
-        setEnabledState(false);
-        writeAutoWeeklyBuy(false, ownerKey);
+        setEnabledState(next);
+        writeAutoWeeklyBuy(next, ownerKey);
+        if (!autoBuyStatusIsTransitional(st)) actionEnabledRef.current = next;
       }
       setPrefsReady(true);
     })();
@@ -271,6 +287,8 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
     // User changed enable — release the sticky startCycle banner.
     bannerHoldUntilRef.current = 0;
     const owner = ownerRef.current;
+    enabledEpochRef.current += 1;
+    actionEnabledRef.current = value;
     setEnabledState(value);
     writeAutoWeeklyBuy(value, owner);
     if (!value) {
@@ -319,6 +337,7 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
           setStatusChecked(true);
           setNeedsSignature(patch.needsSignature);
           if (patch.touchStatusResolved) markStatusResolved(patch.statusResolved);
+          actionEnabledRef.current = patch.enabled;
           setEnabledState(patch.enabled);
           writeAutoWeeklyBuy(patch.enabled, owner);
         })();
@@ -358,6 +377,8 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
     }
     if (!canPostAutoEnable(readTypesafeKey())) {
       bannerHoldUntilRef.current = Date.now() + BANNER_HOLD_MS;
+      enabledEpochRef.current += 1;
+      actionEnabledRef.current = false;
       setEnabledState(false);
       writeAutoWeeklyBuy(false, cycleOwner);
       setPhase("error");
@@ -453,6 +474,7 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
         setStatusChecked(true);
         setNeedsSignature(patch.needsSignature);
         if (patch.touchStatusResolved) markStatusResolved(patch.statusResolved);
+        actionEnabledRef.current = patch.enabled;
         setEnabledState(patch.enabled);
         writeAutoWeeklyBuy(patch.enabled, cycleOwner);
       };
@@ -466,6 +488,8 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
         enablePendingOwnerRef.current = null;
         enableBaselineRef.current = null;
         bannerHoldUntilRef.current = Date.now() + BANNER_HOLD_MS;
+        enabledEpochRef.current += 1;
+        actionEnabledRef.current = true;
         setEnabledState(true);
         writeAutoWeeklyBuy(true, cycleOwner);
         markStatusResolved(true);
@@ -513,6 +537,8 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
         );
         if (!cleanupOwner) return;
         bannerHoldUntilRef.current = Date.now() + BANNER_HOLD_MS;
+        enabledEpochRef.current += 1;
+        actionEnabledRef.current = false;
         setEnabledState(false);
         writeAutoWeeklyBuy(false, cleanupOwner);
         if (statusEpochRef.current !== epoch) return;
@@ -531,6 +557,13 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
         enablePendingRef.current = true;
         enablePendingOwnerRef.current = cycleOwner;
         enableBaselineRef.current = baseline;
+        // Enable was accepted or is still in flight. Do not wait for the
+        // purchase before showing On, and do not let the temporary Off clear it.
+        enabledEpochRef.current += 1;
+        actionEnabledRef.current = true;
+        setEnabledState(true);
+        writeAutoWeeklyBuy(true, cycleOwner);
+        markStatusResolved(true);
         setPhase("pending");
         setBlockReason(null);
         setMessage(tRef.current("auto.status.enablePending"));
@@ -582,6 +615,13 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
       }
       setPhase("buying");
       setMessage(tRef.current("auto.status.buyingKeeper"));
+      // The switch follows the enable action now, not the purchase result.
+      // Keeper writes enabled:false until the buy settles; that read is transitional.
+      enabledEpochRef.current += 1;
+      actionEnabledRef.current = true;
+      setEnabledState(true);
+      writeAutoWeeklyBuy(true, cycleOwner);
+      markStatusResolved(true);
       // One signature: daemon syncs prefs on enable.
       const ran = await keeperEnable(
         cycleOwner,
@@ -615,8 +655,14 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
         }
         throw new Error(err);
       }
-      // Do not commit On until the purchase itself is complete.
+      // A finished purchase commits the schedule banner. ok + enabled:true
+      // is already On even when the purchase fields have not arrived; a later
+      // transitional status must not clear that bit. Only a real miss turns Off.
       if (!shouldCommitAutoBuyEnabled(ran) || !ran.names) {
+        if (ran.enabled === true) {
+          await readStatusAfterAction();
+          return;
+        }
         const err = ran.skipped
           ? String(ran.error || ran.reason || "purchase skipped")
           : "Keeper returned success without a completed purchase.";
@@ -636,6 +682,8 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
       if (!cleanupOwner) return;
       const reason = e instanceof Error ? e.message : String(e);
       bannerHoldUntilRef.current = Date.now() + BANNER_HOLD_MS;
+      enabledEpochRef.current += 1;
+      actionEnabledRef.current = false;
       setEnabledState(false);
       writeAutoWeeklyBuy(false, cleanupOwner);
       if (statusEpochRef.current !== epoch) return;
@@ -659,10 +707,12 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
   const tick = useCallback(async () => {
     if (!prefsReady) return;
     const epoch = statusEpochRef.current;
+    const seenAt = enabledEpochRef.current;
     const wallet = ownerRef.current;
     const sign = signMessageRef.current;
     const st = await keeperStatus(wallet ?? undefined, sign ?? undefined, { interactive: false });
     if (statusEpochRef.current !== epoch) return;
+    if (enabledEpochRef.current !== seenAt) return;
     setStatusChecked(true);
     if (keeperStatusNeedsSignature(st)) {
       setNeedsSignature(true);
@@ -701,6 +751,8 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
         enableBaselineRef.current = null;
         cycleInFlight = false;
         bannerHoldUntilRef.current = Date.now() + BANNER_HOLD_MS;
+        enabledEpochRef.current += 1;
+        actionEnabledRef.current = true;
         setEnabledState(true);
         writeAutoWeeklyBuy(true, wallet);
         if (st.names && st.names.length > 0) {
@@ -727,6 +779,8 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
         enableBaselineRef.current = null;
         cycleInFlight = false;
         bannerHoldUntilRef.current = Date.now() + BANNER_HOLD_MS;
+        enabledEpochRef.current += 1;
+        actionEnabledRef.current = false;
         setEnabledState(false);
         writeAutoWeeklyBuy(false, wallet);
         setPhase("error");
@@ -736,21 +790,41 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
             reason: st.error || "enable_failed",
           }),
         );
+      } else {
+        const pendingNext = nextAutoBuyEnabled(actionEnabledRef.current, st, wallet);
+        // Settled off (phase off/error) may clear the bit. enabled:false with
+        // no settled phase, or a missing field, must not.
+        if (pendingNext === false && !autoBuyStatusIsTransitional(st)) {
+          enabledEpochRef.current += 1;
+          actionEnabledRef.current = false;
+          setEnabledState(false);
+          writeAutoWeeklyBuy(false, wallet);
+        }
       }
       return;
     }
-    // Toggle follows keeper for this owner. A stale Off during the banner hold
-    // must not clobber a just-confirmed enable. Unknown status must not force Off.
-    const verdict = keeperEnabledForConnectedOwner(st, wallet);
-    if (verdict === true || verdict === false) {
-      setNeedsSignature(false);
-      markStatusResolved(true);
+    // The enable/disable bit wins over a transitional silent read
+    // (enabled:false or no field while the purchase has not settled).
+    // A settled status for this wallet may replace it. Unknown must not force Off.
+    const next = nextAutoBuyEnabled(actionEnabledRef.current, st, wallet);
+    // Posted /enable has not returned. Status still shows the previous off
+    // (or the temporary off the daemon writes for the whole purchase).
+    if (cycleInFlight && actionEnabledRef.current === true && next !== true) {
+      return;
     }
     const hold = isBannerHoldActive(bannerHoldUntilRef.current, Date.now());
-    if (verdict === true && wallet && !enabledRef.current) {
+    if (next === true || next === false) {
+      setNeedsSignature(false);
+      markStatusResolved(true);
+      const holdBlocksOff = next === false && hold && enabledRef.current;
+      if (!autoBuyStatusIsTransitional(st) && !holdBlocksOff) {
+        actionEnabledRef.current = next;
+      }
+    }
+    if (next === true && wallet && !enabledRef.current) {
       setEnabledState(true);
       writeAutoWeeklyBuy(true, wallet);
-    } else if (verdict === false && wallet && !hold && enabledRef.current) {
+    } else if (next === false && wallet && !hold && enabledRef.current) {
       setEnabledState(false);
       writeAutoWeeklyBuy(false, wallet);
     }
@@ -764,12 +838,10 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
       }
       return;
     }
-    if (verdict === null) return;
-    const configuredOwner =
-      (typeof st.owner === "string" && st.owner.trim()) || null;
-    const sameOwner =
-      !!wallet && !!configuredOwner && wallet === configuredOwner;
-    const on = Boolean(sameOwner && st.enabled === true);
+    if (next === null) return;
+    // In-flight enable still publishes enabled:false. Keep the buying banner.
+    if (next === true && autoBuyStatusIsTransitional(st)) return;
+    const on = next === true;
     if (!on) {
       setPhase("idle");
       setDue(false);

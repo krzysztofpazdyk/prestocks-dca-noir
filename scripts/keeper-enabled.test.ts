@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   keeperEnabledForConnectedOwner,
   keeperStatusNeedsSignature,
+  nextAutoBuyEnabled,
 } from "../lib/keeper-enabled";
 
 const OWNER = "ownerA";
@@ -39,4 +41,59 @@ test("a real off from this owner stays off", () => {
     ),
     true,
   );
+});
+
+test("enable stays on across a transitional status; disable stays off", () => {
+  let action: boolean | null = true;
+  const transitional = [
+    { ok: true, enabled: false, owner: OWNER },
+    { ok: true, owner: OWNER },
+    { ok: true, enabled: false, owner: OWNER, phase: "enabling" },
+    { ok: true, enabled: false, owner: OWNER, phase: "buying" },
+    { enabled: false },
+    {},
+  ];
+  for (const st of transitional) {
+    const next = nextAutoBuyEnabled(action, st, OWNER);
+    assert.equal(next, true, JSON.stringify(st));
+    action = next;
+  }
+  action = false;
+  for (const st of transitional) {
+    const next = nextAutoBuyEnabled(action, st, OWNER);
+    assert.equal(next, false, JSON.stringify(st));
+    action = next;
+  }
+  assert.equal(
+    nextAutoBuyEnabled(
+      true,
+      { ok: true, enabled: false, owner: OWNER, phase: "off" },
+      OWNER,
+    ),
+    false,
+  );
+  assert.equal(nextAutoBuyEnabled(null, { ok: true, owner: OWNER }, OWNER), null);
+  assert.equal(
+    nextAutoBuyEnabled(null, { ok: true, enabled: false, owner: OWNER }, OWNER),
+    false,
+  );
+});
+
+test("the enable action commits the switch before a silent status can clear it", () => {
+  const hook = readFileSync(
+    new URL("../lib/hooks/useAutoWeeklyBuy.tsx", import.meta.url),
+    "utf8",
+  );
+  const post = hook.indexOf("await keeperEnable(");
+  assert.ok(post > 0);
+  const before = hook.slice(post - 700, post);
+  assert.match(before, /actionEnabledRef\.current = true/);
+  assert.match(before, /setEnabledState\(true\)/);
+  assert.match(hook, /nextAutoBuyEnabled\(actionEnabledRef\.current, st, wallet\)/);
+  assert.match(hook, /nextAutoBuyEnabled\(actionEnabledRef\.current, st, ownerKey\)/);
+  const settings = readFileSync(
+    new URL("../components/SettingsView.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(settings, /checked=\{autoBuy\.enabled\}/);
 });
