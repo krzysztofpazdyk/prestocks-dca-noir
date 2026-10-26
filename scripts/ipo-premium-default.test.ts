@@ -56,7 +56,7 @@ function installStorage(): { data: Map<string, string>; restore: () => void } {
 describe("IPO premium default", { concurrency: false }, () => {
   test("defaults on, and a saved choice still wins", () => {
     assert.equal(DEFAULT_SETTINGS.ipoPremiumMatters, true);
-    assert.equal(APP_VERSION, "5.0.11");
+    assert.equal(APP_VERSION, "5.0.12");
 
     const mem = installStorage();
     try {

@@ -1050,14 +1050,7 @@ function CompanyToggle({
         disabled={blocked}
         title={title}
       />
-      {disabled ? (
-        <p
-          className="text-[10px] normal-case tracking-normal text-[#8b95a8]"
-          title={title}
-        >
-          {t("settings.noData")}
-        </p>
-      ) : (
+      {disabled ? null : (
         <CompanyFacts bucket={bucket} kind={kind} byName={byName} />
       )}
     </div>

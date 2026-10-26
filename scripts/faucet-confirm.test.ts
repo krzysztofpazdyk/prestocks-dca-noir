@@ -26,7 +26,8 @@ type Mode =
   | { kind: "abort" }
   | { kind: "network" }
   | { kind: "throw"; error: Error }
-  | { kind: "status"; status: number; body: unknown };
+  | { kind: "status"; status: number; body: unknown }
+  | { kind: "hang-body"; status: number };
 
 function clock() {
   let t = 0;
@@ -65,6 +66,16 @@ function install(mode: Mode, balances: () => FaucetBalanceRead) {
       throw new TypeError("Failed to fetch");
     }
     if (mode.kind === "throw") throw mode.error;
+    if (mode.kind === "hang-body") {
+      return new Response(
+        new ReadableStream({
+          start() {
+            /* headers arrived; the gateway never closes the 504 body */
+          },
+        }),
+        { status: mode.status, headers: { "Content-Type": "text/html" } },
+      );
+    }
     if (typeof mode.body === "string") {
       return new Response(mode.body, {
         status: mode.status,
@@ -222,6 +233,35 @@ describe("faucet confirm", { concurrency: false }, () => {
     assert.equal(result.ok, true);
     assert.equal(result.fundsArrived, true);
     assert.equal(refreshed, 1);
+  });
+
+  test("a 504 whose body never ends still succeeds when funds arrived", async () => {
+    const ticks = clock();
+    let refreshed = 0;
+    const result = await withFaucet(
+      { kind: "hang-body", status: 504 },
+      scripted([
+        { usdc: 0, sol: 1 },
+        { usdc: FAUCET_USDC_MIN_INCREASE, sol: 1 },
+      ]),
+      async (ctx) => {
+        const res = await claimFaucetUsdc(
+          WALLET,
+          claimOpts(ctx, ticks, {
+            refresh: () => {
+              refreshed += 1;
+            },
+          }),
+        );
+        assert.equal(ctx.trace.includes("confirm"), true);
+        assert.equal(ctx.trace.includes("refresh"), true);
+        return res;
+      },
+    );
+    assert.equal(result.ok, true);
+    assert.equal(result.fundsArrived, true);
+    assert.equal(refreshed, 1);
+    assert.deepEqual(ticks.sleeps, []);
   });
 
   test("504 with no balance change does not treat the mint phrase as success", async () => {
@@ -498,6 +538,7 @@ describe("faucet confirm", { concurrency: false }, () => {
     const api = readFileSync(new URL("../lib/dca-api.ts", import.meta.url), "utf8");
     const claim = api.slice(api.indexOf("export async function claimFaucetUsdc"));
     assert.match(claim, /FAUCET_POST_TIMEOUT_MS/);
+    assert.match(claim, /cancelFaucetBody\(resp\)/);
     assert.match(api, /fetchOwnerUsdcBalance/);
     assert.match(api, /fetchSolBalance/);
     assert.doesNotMatch(claim, /90_000/);
@@ -515,6 +556,7 @@ describe("faucet confirm", { concurrency: false }, () => {
       overview.indexOf("const weeklyRev"),
     );
     const catchBody = fn.slice(fn.indexOf("} catch"));
+    assert.match(catchBody, /setFaucetBusy\(false\)/);
     assert.match(catchBody, /await predca\.refresh\(\)/);
     assert.match(fn, /setFaucetConfirming\(true\)/);
     assert.match(fn, /faucet\.arrived/);

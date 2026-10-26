@@ -167,7 +167,7 @@ test("Top-3 premium text uses the live helper and Settings disables both data to
   const settings = readFileSync(new URL("../components/SettingsView.tsx", import.meta.url), "utf8");
   assert.match(settings, /disabled=\{!availability\.buyDespiteIpo\.enabled\}/);
   assert.match(settings, /disabled=\{!availability\.deadlinesUnimportant\.enabled\}/);
-  assert.match(settings, /t\("settings\.noData"\)/);
+  assert.doesNotMatch(settings, /t\("settings\.noData"\)/);
   assert.match(settings, /t\("settings\.buyDespiteIpo"\)/);
   assert.match(settings, /t\("settings\.deadlineInvalid"\)/);
 

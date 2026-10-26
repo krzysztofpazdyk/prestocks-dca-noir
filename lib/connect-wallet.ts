@@ -19,7 +19,8 @@
  * finishes after the loop stops must not disconnect an external wallet that
  * is still live — callers restore the name instead of treating it as Rozłącz.
  * Once the target adapter itself drops (extension lock or disconnect), stop.
- * Do not reconnect it. `autoConnect` stays false.
+ * Do not reconnect it from this loop. A page reload may autoConnect Phantom
+ * or Solflare, and may restore a Privy session, but only for the last wallet.
  */
 
 /** Cap a post-connect Privy logout so a hung session cannot hold "Łączenie…". */
@@ -353,6 +354,54 @@ export type CapTimers = {
   setTimer: (fn: () => void, ms: number) => unknown;
   clearTimer: (handle: unknown) => void;
 };
+
+/** wallet-adapter stores the last selection under this key, JSON-encoded. */
+export const WALLET_NAME_STORAGE_KEY = "walletName";
+
+export function parseStoredWalletName(raw: string | null): string | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (typeof parsed === "string" && parsed.trim()) return parsed;
+  } catch {
+    if (raw.trim()) return raw.trim();
+  }
+  return null;
+}
+
+export function readStoredWalletName(
+  storage: { getItem(key: string): string | null } | null,
+): string | null {
+  if (!storage) return null;
+  try {
+    return parseStoredWalletName(storage.getItem(WALLET_NAME_STORAGE_KEY));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Phantom and Solflare reconnect on reload through wallet-adapter.
+ * Privy is not an adapter autoConnect target — its session is restored apart.
+ */
+export function adapterAutoConnectFor(storedName: string | null): boolean {
+  return storedName === "Phantom" || storedName === "Solflare";
+}
+
+/**
+ * Reload restores Privy only when that was the last wallet and the session
+ * still has an embedded Solana account. Otherwise the UI says to connect.
+ */
+export function shouldRestorePrivySession(input: {
+  storedName: string | null;
+  ready: boolean;
+  authenticated: boolean;
+  hasEmbeddedWallet: boolean;
+}): boolean {
+  if (input.storedName !== "Privy") return false;
+  if (!input.ready || !input.authenticated) return false;
+  return input.hasEmbeddedWallet;
+}
 
 /** Resolve when `p` settles or after `ms`, whichever is first. A throw is swallowed. */
 export function capPromise(

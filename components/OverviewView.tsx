@@ -44,6 +44,12 @@ import { usePredca } from "@/lib/hooks/usePredca";
 import { leaveManualBuy, tryEnterManualBuy } from "@/lib/manual-buy-guard";
 import { isOnChainSignatureReject } from "@/lib/vault-follow-up";
 import { depositUi, withdrawUi } from "@/lib/predca-status";
+import {
+  clearDepositFlight,
+  depositFlightStorage,
+  takeInterruptedDeposit,
+  writeDepositFlight,
+} from "@/lib/deposit-flight";
 import { dupOutcomeMessage } from "@/lib/dup-message";
 import {
   FAILED_EXPIRED_MSG,
@@ -138,11 +144,13 @@ function rankView(result: RankResult): RankView {
 }
 
 export function OverviewView() {
-  const { connected, publicKey } = useWallet();
+  const { connected, connecting, publicKey } = useWallet();
   const ownerBase58 = publicKey?.toBase58() ?? null;
   const predca = usePredca();
   const { locale, t } = useI18n();
   const [depositAmt, setDepositAmt] = useState(500);
+  const [depositSending, setDepositSending] = useState(false);
+  const [depositNote, setDepositNote] = useState<string | null>(null);
   const [withdrawAmt, setWithdrawAmt] = useState(10);
   const [generated, setGenerated] = useState<RankView | null>(null);
   const sessionSnap = useSyncExternalStore(
@@ -202,6 +210,17 @@ export function OverviewView() {
   const [priceNow, setPriceNow] = useState(UI_CLOCK_AT);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const sigUnresolved = predca.pendingSignature != null;
+  const refreshRef = useRef(predca.refresh);
+  refreshRef.current = predca.refresh;
+
+  useEffect(() => {
+    const storage = depositFlightStorage();
+    if (!storage) return;
+    const flight = takeInterruptedDeposit(storage, Date.now());
+    if (!flight) return;
+    setDepositNote(t("deposit.interrupted"));
+    void refreshRef.current();
+  }, [t]);
 
   useEffect(() => {
     if (predca.pendingSignature) {
@@ -246,6 +265,8 @@ export function OverviewView() {
         onConfirming: () => setFaucetConfirming(true),
         refresh: () => predca.refresh(),
       });
+      setFaucetBusy(false);
+      setFaucetConfirming(false);
       if (res.fundsArrived) {
         setFaucetMsg(t("faucet.arrived") + " " + t("faucet.nextSteps"));
       } else {
@@ -268,6 +289,8 @@ export function OverviewView() {
       await predca.refresh();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      setFaucetBusy(false);
+      setFaucetConfirming(false);
       setFaucetErr(t("faucet.error", { error: msg }));
       await predca.refresh();
     } finally {
@@ -416,15 +439,32 @@ export function OverviewView() {
     if (predca.pendingSignatureNow()) return;
     if (!tryEnterDupCheck(dupCheckRef)) return;
     setDupChecking(true);
+    setDepositSending(true);
+    setDepositNote(t("deposit.sending"));
+    let sent = false;
     try {
       const amt =
         ownerUsdcCap != null ? Math.min(depositAmt, ownerUsdcCap) : depositAmt;
-      if (!(await allowDuplicate("deposit", amt, acknowledged))) return;
+      if (!(await allowDuplicate("deposit", amt, acknowledged))) {
+        setDepositNote(null);
+        return;
+      }
+      const storage = depositFlightStorage();
+      if (storage) {
+        writeDepositFlight(storage, { amountUsd: amt, startedAtMs: Date.now() });
+      }
+      sent = true;
       await predca.depositUsdc(
         amt,
         predca.status === "no_config" ? purchaseAmount : undefined,
       );
     } finally {
+      if (sent) {
+        const storage = depositFlightStorage();
+        if (storage) clearDepositFlight(storage);
+        setDepositNote(null);
+      }
+      setDepositSending(false);
       leaveDupCheck(dupCheckRef);
       setDupChecking(false);
     }
@@ -977,13 +1017,13 @@ export function OverviewView() {
                 />
                 <button
                   type="button"
-                  disabled={depositDisabled}
+                  disabled={depositDisabled || depositSending}
                   onClick={() => {
                     void submitDeposit(false);
                   }}
                   className="rounded border border-[#2dd4bf44] bg-[#0c0e12] px-3 py-1.5 text-[10px] uppercase tracking-wider text-[#2dd4bf] hover:bg-[#2dd4bf11] disabled:opacity-40"
                 >
-                  {t("predca.deposit")}
+                  {depositSending ? t("deposit.sending") : t("predca.deposit")}
                 </button>
               </div>
               {depositPresentation === "disabled" ? (
@@ -993,6 +1033,9 @@ export function OverviewView() {
               ) : null}
               {dupNotice("deposit", ownerUsdcCap != null ? Math.min(depositAmt, ownerUsdcCap) : depositAmt)}
               {dupInfoNotice("deposit", ownerUsdcCap != null ? Math.min(depositAmt, ownerUsdcCap) : depositAmt)}
+              {depositNote ? (
+                <p className="mt-2 text-[10px] text-[#fbbf24]">{depositNote}</p>
+              ) : null}
             </div>
           )}
           {showWithdraw && (
@@ -1451,7 +1494,9 @@ export function OverviewView() {
             <p className="text-sm text-[#8b95a8]">
               {connected
                 ? t("lastPurchase.emptyConnected")
-                : t("lastPurchase.emptyDisconnected")}
+                : connecting
+                  ? t("connect.busy")
+                  : t("lastPurchase.emptyDisconnected")}
             </p>
           )}
         </div>

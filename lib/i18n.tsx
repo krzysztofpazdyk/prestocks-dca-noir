@@ -93,6 +93,9 @@ const pl: Dict = {
   "predca.depositTitle": "Wpłata",
   "predca.withdrawTitle": "Wypłata",
   "predca.deposit": "Wpłać",
+  "deposit.sending": "Wysyłam wpłatę…",
+  "deposit.interrupted":
+    "Odświeżenie przerwało oczekiwanie na wpłatę. Sprawdź saldo vaulta.",
   "predca.withdraw": "Wypłać",
   "predca.rpcActionHint": "Nieaktywne — brak połączenia z RPC. Kliknij Odśwież.",
   "predca.hintNoAta":
@@ -150,7 +153,7 @@ const pl: Dict = {
   "lastPurchase.emptyConnected":
     "Brak RunRecord — wykonaj pierwszy zakup (simulate_buy_v2).",
   "lastPurchase.empty": "Brak zapisanych zakupów.",
-  "lastPurchase.emptyDisconnected": "Podłącz portfel, by zobaczyć zakupy on-chain.",
+  "lastPurchase.emptyDisconnected": "Połącz portfel",
   "lastPurchase.date": "Data:",
   "lastPurchase.budget": "Budżet:",
   "lastPurchase.perToken":
@@ -563,6 +566,9 @@ const en: Dict = {
   "predca.depositTitle": "Deposit",
   "predca.withdrawTitle": "Withdraw",
   "predca.deposit": "Deposit",
+  "deposit.sending": "Sending deposit…",
+  "deposit.interrupted":
+    "Reload interrupted the deposit wait. Check the vault balance.",
   "predca.withdraw": "Withdraw",
   "predca.rpcActionHint": "Inactive — no RPC connection. Click Refresh.",
   "predca.hintNoAta":
@@ -620,7 +626,7 @@ const en: Dict = {
   "lastPurchase.emptyConnected":
     "No RunRecord — make the first purchase (simulate_buy_v2).",
   "lastPurchase.empty": "No saved purchases.",
-  "lastPurchase.emptyDisconnected": "Connect wallet to see on-chain purchases.",
+  "lastPurchase.emptyDisconnected": "Connect Wallet",
   "lastPurchase.date": "Date:",
   "lastPurchase.budget": "Budget:",
   "lastPurchase.perToken":

@@ -8,15 +8,16 @@ import { historyView } from "@/lib/history-view";
 import { useI18n } from "@/lib/i18n";
 
 export function HistoryView() {
-  const { connected } = useWallet();
+  const { connected, connecting } = useWallet();
   const predca = usePredca();
   const { t } = useI18n();
   const mode = historyView(predca.status, predca.runs.length, connected);
   const showRuns = mode === "list" || mode === "list_stale";
+  const disconnectedCopy = connecting ? t("connect.busy") : t("connect.title");
 
   let intro: string;
   if (mode === "disconnected") {
-    intro = t("history.connectHint");
+    intro = disconnectedCopy;
   } else if (mode === "loading") {
     intro = t("history.loading");
   } else if (showRuns) {
@@ -47,7 +48,7 @@ export function HistoryView() {
 
       {mode === "disconnected" && (
         <p className="rounded border border-dashed border-[#1e2633] px-3 py-6 text-center text-xs text-[#8b95a8]">
-          {t("history.connectHint")}
+          {disconnectedCopy}
         </p>
       )}
 
