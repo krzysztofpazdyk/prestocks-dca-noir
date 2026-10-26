@@ -250,6 +250,14 @@ const pl: Dict = {
   "auto.error.slippage": "Cena się zmieniła. Spróbuj ponownie później.",
   "auto.error.network": "Problem z siecią. Spróbuj ponownie później.",
   "auto.error.simulation": "Symulacja transakcji nie powiodła się.",
+  "auto.error.jevNoKey":
+    "Brak klucza Jev (TypeSafe). Wklej go w Ustawieniach i włącz auto-zakup ponownie.",
+  "auto.error.jevKeyRejected":
+    "Jev odrzucił klucz TypeSafe. Sprawdź klucz w Ustawieniach.",
+  "auto.error.jevUnavailable":
+    "Jev niedostępny, zakup nie został wysłany. Spróbuj później.",
+  "auto.error.spendLimit":
+    "Budżet tygodniowy przekracza limit wydatków keepera.",
   "auto.error.predca.6000": "Brak uprawnień (Unauthorized).",
   "auto.error.predca.6001": "Kwota musi być większa od zera.",
   "auto.error.predca.6002": "Niewystarczające saldo w vault.",
@@ -712,6 +720,14 @@ const en: Dict = {
   "auto.error.slippage": "The price moved. Try again later.",
   "auto.error.network": "Network problem. Try again later.",
   "auto.error.simulation": "The transaction simulation failed.",
+  "auto.error.jevNoKey":
+    "Missing Jev (TypeSafe) key. Paste it in Settings and turn auto-buy on again.",
+  "auto.error.jevKeyRejected":
+    "Jev rejected the TypeSafe key. Check the key in Settings.",
+  "auto.error.jevUnavailable":
+    "Jev is unavailable, no purchase was sent. Try again later.",
+  "auto.error.spendLimit":
+    "The weekly budget is above the keeper spending limit.",
   "auto.error.predca.6000": "Missing permission.",
   "auto.error.predca.6001": "The amount must be greater than zero.",
   "auto.error.predca.6002": "Not enough balance in the vault.",

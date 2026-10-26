@@ -79,6 +79,30 @@ const samples: Array<{ name: string; raw: string; pl: string; en: string }> = [
     pl: "Auto-zakup nieudany. Spróbuj ponownie później.",
     en: "Auto-buy failed. Try again later.",
   },
+  {
+    name: "missing Jev key",
+    raw: "Jev niedostępny: brak klucza",
+    pl: "Brak klucza Jev (TypeSafe). Wklej go w Ustawieniach i włącz auto-zakup ponownie.",
+    en: "Missing Jev (TypeSafe) key. Paste it in Settings and turn auto-buy on again.",
+  },
+  {
+    name: "rejected Jev key",
+    raw: "Jev niedostępny: klucz odrzucony (401)",
+    pl: "Jev odrzucił klucz TypeSafe. Sprawdź klucz w Ustawieniach.",
+    en: "Jev rejected the TypeSafe key. Check the key in Settings.",
+  },
+  {
+    name: "Jev time limit",
+    raw: "Jev niedostępny: limit czasu",
+    pl: "Jev niedostępny, zakup nie został wysłany. Spróbuj później.",
+    en: "Jev is unavailable, no purchase was sent. Try again later.",
+  },
+  {
+    name: "keeper spend limit",
+    raw: "Spending limit exceeded; execute_buy_v2 blocked: weekly budget $150 > max_usd $100",
+    pl: "Budżet tygodniowy przekracza limit wydatków keepera.",
+    en: "The weekly budget is above the keeper spending limit.",
+  },
 ];
 
 test("friendly auto-buy errors are short sentences in Polish and English", () => {
@@ -162,6 +186,56 @@ test("a very long unknown input stays the short fallback", () => {
     assert.equal(text.includes("weird_internal"), false);
     assert.equal(text.includes("nope nope"), false);
   }
+});
+
+test("keeper Jev reasons win over network, and the raw line stays on the title", () => {
+  const cases: Array<{ raw: string; key: string }> = [
+    { raw: "Jev niedostępny: brak klucza", key: "auto.error.jevNoKey" },
+    { raw: "typesafe_key_required", key: "auto.error.jevNoKey" },
+    {
+      raw: "Jev niedostępny: klucz odrzucony (401)",
+      key: "auto.error.jevKeyRejected",
+    },
+    { raw: "Jev niedostępny: limit czasu", key: "auto.error.jevUnavailable" },
+    { raw: "Jev niedostępny: timeout", key: "auto.error.jevUnavailable" },
+    { raw: "Jev niedostępny: http_504", key: "auto.error.jevUnavailable" },
+    {
+      raw: "Spending limit exceeded; execute_buy_v2 blocked: weekly budget $150 > max_usd $100",
+      key: "auto.error.spendLimit",
+    },
+  ];
+  for (const sample of cases) {
+    const pl = translate("pl", sample.key);
+    const en = translate("en", sample.key);
+    assert.equal(friendlyAutoBuyError(sample.raw, "pl"), pl, sample.raw);
+    assert.equal(friendlyAutoBuyError(sample.raw, "en"), en, sample.raw);
+    assert.notEqual(pl, translate("pl", "auto.error.network"), sample.raw);
+    assert.notEqual(en, translate("en", "auto.error.network"), sample.raw);
+    assert.notEqual(pl, translate("pl", "auto.error.fallback"), sample.raw);
+    const view = presentAutoBuyError(sample.raw, "pl");
+    assert.equal(view.text, pl, sample.raw);
+    assert.equal(view.title, sample.raw, sample.raw);
+    assert.equal(view.text.includes("max_usd"), false, sample.raw);
+    assert.equal(view.text.includes("typesafe_key"), false, sample.raw);
+  }
+  const wrapped = presentAutoBuyError(
+    "Auto-zakup nieudany: Jev niedostępny: limit czasu",
+    "pl",
+  );
+  assert.equal(
+    wrapped.text,
+    translate("pl", "auto.error.jevUnavailable"),
+  );
+  assert.notEqual(wrapped.text, translate("pl", "auto.error.network"));
+  assert.equal(wrapped.title, "Jev niedostępny: limit czasu");
+  assert.equal(
+    friendlyAutoBuyError("timeout", "en"),
+    translate("en", "auto.error.network"),
+  );
+  assert.equal(
+    friendlyAutoBuyError("enable_timeout", "pl"),
+    translate("pl", "auto.error.network"),
+  );
 });
 
 test("the banner keeps friendly status lines and hides raw errors behind a title", () => {

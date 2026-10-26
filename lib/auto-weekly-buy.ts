@@ -51,6 +51,14 @@ export function shouldSendEnable(cycleInFlight: boolean): boolean {
   return !cycleInFlight;
 }
 
+/**
+ * Auto-buy enable posts /enable only when the settings field holds a Jev key.
+ * An empty field must not call the keeper.
+ */
+export function canPostAutoEnable(typesafeKey: string | null | undefined): boolean {
+  return typeof typesafeKey === "string" && typesafeKey.trim().length > 0;
+}
+
 /** Off stays available while a transaction is in flight. On does not. */
 export function autoToggleBlocked(next: boolean, chainBusy: boolean): boolean {
   return chainBusy && next === true;
