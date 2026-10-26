@@ -10,9 +10,11 @@ export function keeperEnabledForConnectedOwner(
 ): boolean | null {
   if (!wallet) return null;
   const error = typeof st.error === "string" ? st.error : "";
+  // No keeper session yet: unknown, never Off. A signed read fills this in.
   if (
     error === "wallet_required" ||
     error === "signature_rejected" ||
+    error === "session_required" ||
     error.startsWith("sign_rejected")
   ) {
     return null;
@@ -28,4 +30,18 @@ export function keeperEnabledForConnectedOwner(
   if (!configured) return null;
   if (configured !== wallet) return false;
   return st.enabled;
+}
+
+/**
+ * The status toggle must ask for a signature instead of looking Off.
+ * Silent reads use `session_required`. An interactive read that the wallet
+ * rejects stays in the same unknown state.
+ */
+export function keeperStatusNeedsSignature(st: { error?: string }): boolean {
+  const error = typeof st.error === "string" ? st.error : "";
+  return (
+    error === "session_required" ||
+    error === "signature_rejected" ||
+    error.startsWith("sign_rejected")
+  );
 }

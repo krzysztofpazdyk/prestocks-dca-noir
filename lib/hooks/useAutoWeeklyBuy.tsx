@@ -55,7 +55,10 @@ import {
   useIsomorphicLayoutEffect,
 } from "@/lib/hooks/useLatestRef";
 import { usePredca } from "@/lib/hooks/usePredca";
-import { keeperEnabledForConnectedOwner } from "@/lib/keeper-enabled";
+import {
+  keeperEnabledForConnectedOwner,
+  keeperStatusNeedsSignature,
+} from "@/lib/keeper-enabled";
 import { readTypesafeKey } from "@/lib/keys";
 import { unresolvedSignatureBlocksTx } from "@/lib/vault-follow-up";
 
@@ -82,6 +85,16 @@ export type AutoWeeklyBuyApi = {
   due: boolean;
   /** From daemon /health|/status — same flag that gates real txs. */
   keeperMode: KeeperMode | null;
+  /** No tab session yet. The toggle must not look Off. */
+  needsSignature: boolean;
+  /** This owner's on/off bit was read. False while the first silent read is in flight. */
+  statusResolved: boolean;
+  /** A silent or interactive read for this owner has finished. */
+  statusChecked: boolean;
+  /** Interactive status signature is open. */
+  statusUnlocking: boolean;
+  /** One action:status signature, then a normal read. Click only. */
+  unlockStatus: () => Promise<void>;
 };
 
 const AutoWeeklyBuyContext = createContext<AutoWeeklyBuyApi | null>(null);
@@ -115,6 +128,10 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
   const [lastTop3, setLastTop3] = useState<JevRank[]>([]);
   const [due, setDue] = useState(false);
   const [keeperMode, setKeeperMode] = useState<KeeperMode | null>(null);
+  const [needsSignature, setNeedsSignature] = useState(false);
+  const [statusResolved, setStatusResolved] = useState(false);
+  const [statusChecked, setStatusChecked] = useState(false);
+  const [statusUnlocking, setStatusUnlocking] = useState(false);
 
   const ownerKey = publicKey?.toBase58() ?? null;
   // These eight follow the latest render. The copy is a layout effect, so
@@ -193,6 +210,12 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
       setPrefsReady(false);
       setKeeperMode(null);
     }
+    if (ownerChanged) {
+      setNeedsSignature(false);
+      setStatusResolved(false);
+      setStatusChecked(false);
+      setStatusUnlocking(false);
+    }
   }, [ownerKey, resetBannerState]);
 
   useEffect(() => {
@@ -202,15 +225,26 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
     void (async () => {
       const sign = signMessageRef.current;
       const [st, health] = await Promise.all([
-        keeperStatus(ownerKey, sign ?? undefined),
+        keeperStatus(ownerKey, sign ?? undefined, { interactive: false }),
         keeperHealthInfo(),
       ]);
       if (cancelled || statusEpochRef.current !== epoch) return;
       const modeFromStatus =
         st.mode === "live" || st.mode === "dry-run" ? st.mode : null;
       setKeeperMode(modeFromStatus ?? health.mode);
+      setStatusChecked(true);
+      if (keeperStatusNeedsSignature(st)) {
+        setNeedsSignature(true);
+        setStatusResolved(false);
+        setPrefsReady(true);
+        return;
+      }
       // Unknown status (no sign, unreachable, rejected) must not force Off.
       const verdict = keeperEnabledForConnectedOwner(st, ownerKey);
+      if (verdict === true || verdict === false) {
+        setNeedsSignature(false);
+        setStatusResolved(true);
+      }
       if (verdict === true) {
         setEnabledState(true);
         writeAutoWeeklyBuy(true, ownerKey);
@@ -242,9 +276,17 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
           if (statusEpochRef.current !== epoch) return;
           if (!res.ok) {
             // Idempotent off: keeper already off → success (no scary mismatch error).
-            const st = await keeperStatus(owner, sign);
+            const st = await keeperStatus(owner, sign, { interactive: false });
             if (statusEpochRef.current !== epoch) return;
+            setStatusChecked(true);
+            if (keeperStatusNeedsSignature(st)) {
+              setNeedsSignature(true);
+              setStatusResolved(false);
+              return;
+            }
             if (st.enabled === false) {
+              setNeedsSignature(false);
+              setStatusResolved(true);
               setPhase("idle");
               setMessage(tRef.current("auto.status.off"));
               return;
@@ -255,6 +297,19 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
                 ? tRef.current("auto.signRejected", { error: res.error ?? "" })
                 : res.error || "Keeper disable failed",
             );
+            return;
+          }
+          const st = await keeperStatus(owner, sign, { interactive: true });
+          if (statusEpochRef.current !== epoch) return;
+          setStatusChecked(true);
+          if (keeperStatusNeedsSignature(st)) {
+            setNeedsSignature(true);
+            setStatusResolved(false);
+            return;
+          }
+          if (st.ok === true || typeof st.enabled === "boolean") {
+            setNeedsSignature(false);
+            setStatusResolved(true);
           }
         })();
       }
@@ -379,7 +434,21 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
         cycleOwner,
       );
       if (!stillCurrent()) return;
-      const prior = await keeperStatus(cycleOwner, sign);
+      const prior = await keeperStatus(cycleOwner, sign, { interactive: false });
+      const mintStatusSession = async () => {
+        const minted = await keeperStatus(cycleOwner, sign, { interactive: true });
+        if (!stillCurrent()) return;
+        setStatusChecked(true);
+        if (keeperStatusNeedsSignature(minted)) {
+          setNeedsSignature(true);
+          setStatusResolved(false);
+          return;
+        }
+        if (minted.ok === true || typeof minted.enabled === "boolean") {
+          setNeedsSignature(false);
+          setStatusResolved(true);
+        }
+      };
       if (!stillCurrent()) return;
       const baseline: EnableStatusBaseline = {
         error: prior.error ?? null,
@@ -459,7 +528,7 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
         setMessage(tRef.current("auto.status.enablePending"));
         const started = Date.now();
         while (stillCurrent()) {
-          const st = await keeperStatus(cycleOwner, sign);
+          const st = await keeperStatus(cycleOwner, sign, { interactive: false });
           if (!stillCurrent()) return;
           const verdict = resolvePendingEnable(
             st,
@@ -475,6 +544,7 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
           }
           if (verdict === "on") {
             commitPurchase(st);
+            await mintStatusSession();
             return;
           }
           if (verdict === "off") {
@@ -490,6 +560,7 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
       // Already On with a finished purchase: do not POST /enable again.
       if (canCommitEnabledFromStatus(prior, cycleOwner)) {
         commitPurchase(prior);
+        await mintStatusSession();
         return;
       }
       // Already On and this week's buy is still in flight. Poll, do not force-buy.
@@ -541,6 +612,7 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
         return;
       }
       commitPurchase(ran);
+      await mintStatusSession();
     } catch (e) {
       enablePendingRef.current = false;
       enablePendingOwnerRef.current = null;
@@ -577,8 +649,17 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
     const epoch = statusEpochRef.current;
     const wallet = ownerRef.current;
     const sign = signMessageRef.current;
-    const st = await keeperStatus(wallet ?? undefined, sign ?? undefined);
+    const st = await keeperStatus(wallet ?? undefined, sign ?? undefined, { interactive: false });
     if (statusEpochRef.current !== epoch) return;
+    setStatusChecked(true);
+    if (keeperStatusNeedsSignature(st)) {
+      setNeedsSignature(true);
+      setStatusResolved(false);
+      setPhase("idle");
+      setMessage(null);
+      setBlockReason(null);
+      return;
+    }
     const runMarker = keeperRunMarker(st);
     if (runMarker && runMarker !== seenKeeperRunRef.current) {
       seenKeeperRunRef.current = runMarker;
@@ -644,6 +725,10 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
     // Toggle follows keeper for this owner. A stale Off during the banner hold
     // must not clobber a just-confirmed enable. Unknown status must not force Off.
     const verdict = keeperEnabledForConnectedOwner(st, wallet);
+    if (verdict === true || verdict === false) {
+      setNeedsSignature(false);
+      setStatusResolved(true);
+    }
     const hold = isBannerHoldActive(bannerHoldUntilRef.current, Date.now());
     if (verdict === true && wallet && !enabledRef.current) {
       setEnabledState(true);
@@ -765,6 +850,43 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
   const nextLabel =
     nextAt != null ? formatWarsawWhen(nextAt, locale) : null;
 
+  const unlockStatus = useCallback(async () => {
+    const owner = ownerRef.current;
+    const sign = signMessageRef.current;
+    if (!owner || !sign) return;
+    const epoch = statusEpochRef.current;
+    setStatusUnlocking(true);
+    try {
+      const st = await keeperStatus(owner, sign, { interactive: true });
+      if (statusEpochRef.current !== epoch) return;
+      if (st.mode === "live" || st.mode === "dry-run") setKeeperMode(st.mode);
+      setStatusChecked(true);
+      if (keeperStatusNeedsSignature(st)) {
+        setNeedsSignature(true);
+        setStatusResolved(false);
+        return;
+      }
+      const verdict = keeperEnabledForConnectedOwner(st, owner);
+      if (verdict === true) {
+        setNeedsSignature(false);
+        setStatusResolved(true);
+        setEnabledState(true);
+        writeAutoWeeklyBuy(true, owner);
+      } else if (verdict === false) {
+        setNeedsSignature(false);
+        setStatusResolved(true);
+        setEnabledState(false);
+        writeAutoWeeklyBuy(false, owner);
+      } else if (st.ok === true || typeof st.enabled === "boolean") {
+        setNeedsSignature(false);
+        setStatusResolved(true);
+      }
+      setPrefsReady(true);
+    } finally {
+      if (statusEpochRef.current === epoch) setStatusUnlocking(false);
+    }
+  }, []);
+
   return useMemo(
     () => ({
       enabled,
@@ -778,6 +900,11 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
       lastTop3,
       due,
       keeperMode,
+      needsSignature,
+      statusResolved,
+      statusChecked,
+      statusUnlocking,
+      unlockStatus,
     }),
     [
       enabled,
@@ -791,6 +918,11 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
       lastTop3,
       due,
       keeperMode,
+      needsSignature,
+      statusResolved,
+      statusChecked,
+      statusUnlocking,
+      unlockStatus,
     ],
   );
 }
@@ -801,6 +933,30 @@ export function AutoWeeklyBuyProvider({ children }: { children: ReactNode }) {
     <AutoWeeklyBuyContext.Provider value={value}>
       {children}
     </AutoWeeklyBuyContext.Provider>
+  );
+}
+
+export function KeeperSessionSignPrompt({
+  className = "",
+}: {
+  className?: string;
+}) {
+  const { t } = useI18n();
+  const { unlockStatus, statusUnlocking } = useAutoWeeklyBuy();
+  return (
+    <div className={`flex flex-wrap items-center gap-2 ${className}`}>
+      <p className="text-xs text-[#fbbf24]">{t("auto.status.signToSee")}</p>
+      <button
+        type="button"
+        disabled={statusUnlocking}
+        onClick={() => {
+          void unlockStatus();
+        }}
+        className="rounded border border-[#fbbf2466] bg-[#0c0e12] px-3 py-1.5 text-[10px] uppercase tracking-wider text-[#fbbf24] hover:bg-[#fbbf2411] disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        {t("auto.status.sign")}
+      </button>
+    </div>
   );
 }
 
@@ -816,6 +972,17 @@ export function AutoWeeklyBuyBanner() {
     if (!errorView?.title) return;
     console.debug("auto-buy error", errorView.title);
   }, [errorView?.title]);
+
+  if (value.needsSignature) {
+    return (
+      <div
+        role="status"
+        className="border-b border-[#fbbf2433] bg-[#fbbf2411] px-4 py-2"
+      >
+        <KeeperSessionSignPrompt className="justify-center" />
+      </div>
+    );
+  }
 
   const showBanner =
     value.phase === "ranking" ||

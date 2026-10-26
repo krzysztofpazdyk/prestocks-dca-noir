@@ -136,6 +136,7 @@ function isNewDaemonFailure(
     err === "enable_timeout" ||
     err === "wallet_required" ||
     err === "signature_rejected" ||
+    err === "session_required" ||
     err.startsWith("sign_rejected")
   ) {
     return false;

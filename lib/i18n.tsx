@@ -222,6 +222,8 @@ const pl: Dict = {
   "msg.autoNoRecs": "Auto-zakup: ranking nie zwrócił top-3.",
 
   "auto.status.off": "Auto-zakup wyłączony — włącz w Ustawieniach.",
+  "auto.status.signToSee": "Podpisz, aby zobaczyć stan",
+  "auto.status.sign": "Podpisz",
   "auto.status.next": "Następny automatyczny zakup z vaulta: {when}",
   "auto.status.due":
     "Auto-zakup zaległy — ranking i zakup z vaulta odpalą się same.",
@@ -695,6 +697,8 @@ const en: Dict = {
   "msg.autoNoRecs": "Auto-buy: ranking did not return a top-3.",
 
   "auto.status.off": "Auto-buy is off — enable it in Settings.",
+  "auto.status.signToSee": "Sign to see status",
+  "auto.status.sign": "Sign",
   "auto.status.next": "Next automatic vault purchase: {when}",
   "auto.status.due":
     "Auto-buy is due — ranking and vault purchase will run on their own.",
