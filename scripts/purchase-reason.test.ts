@@ -43,11 +43,10 @@ test("Overview uses the disconnected copy and has no offline purchase path", () 
   for (const key of [
     "holdings.titleDisconnected",
     "holdings.emptyDisconnected",
-    "lastPurchase.titleDisconnected",
-    "lastPurchase.emptyDisconnected",
   ]) {
     assert.match(overview, new RegExp(key.replace(".", "\\.")));
   }
+  assert.equal(overview.includes("lastPurchase"), false);
   assert.doesNotMatch(overview, /msg\.purchaseOffline/);
   assert.doesNotMatch(overview, /applyPurchase/);
   const purchase = overview.slice(

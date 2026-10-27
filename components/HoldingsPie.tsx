@@ -6,13 +6,42 @@ import {
   Cell,
   ResponsiveContainer,
   Tooltip,
+  type TooltipContentProps,
 } from "recharts";
+import { allocationShareText, allocationTooltipText } from "@/lib/allocation-label";
 import { HOLDINGS, type Holding } from "@/lib/mock-data";
 import { useI18n } from "@/lib/i18n";
 
 type Props = {
   holdings?: Holding[];
 };
+
+// Recharts applies `contentStyle` only inside DefaultTooltipContent.
+// Custom content has to paint the box itself or that style is skipped.
+const allocationTooltipStyle = {
+  background: "var(--background)",
+  color: "var(--foreground)",
+  border: "none",
+  boxShadow: "none",
+  outline: "none",
+  padding: "4px 8px",
+  fontSize: 12,
+} as const;
+
+function AllocationTooltip({ active, payload }: TooltipContentProps) {
+  if (!active || payload.length === 0) return null;
+  const item = payload[0];
+  const name = String(item?.name ?? "");
+  const raw = item?.value;
+  const share =
+    typeof raw === "number" ? raw : Number(Array.isArray(raw) ? raw[0] : raw);
+  if (!name || !Number.isFinite(share)) return null;
+  return (
+    <div style={allocationTooltipStyle}>
+      <span className="mono-num">{allocationTooltipText(name, share)}</span>
+    </div>
+  );
+}
 
 export function HoldingsPie({ holdings = HOLDINGS }: Props) {
   const { t } = useI18n();
@@ -39,14 +68,13 @@ export function HoldingsPie({ holdings = HOLDINGS }: Props) {
               ))}
             </Pie>
             <Tooltip
-              contentStyle={{
-                background: "#141820",
-                border: "1px solid #1e2633",
-                borderRadius: 6,
-                fontSize: 12,
-                color: "#e8eef5",
+              content={AllocationTooltip}
+              wrapperStyle={{
+                background: "transparent",
+                border: "none",
+                boxShadow: "none",
+                outline: "none",
               }}
-              formatter={(value) => [`${value}%`, t("holdings.share")]}
             />
           </PieChart>
         </ResponsiveContainer>
@@ -67,7 +95,7 @@ export function HoldingsPie({ holdings = HOLDINGS }: Props) {
               />
               {h.name}
             </span>
-            <span className="mono-num text-[#8b95a8]">{h.value}%</span>
+            <span className="mono-num text-[#8b95a8]">{allocationShareText(h.value)}</span>
           </li>
         ))}
       </ul>

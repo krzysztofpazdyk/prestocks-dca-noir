@@ -146,20 +146,6 @@ const pl: Dict = {
   "empty.generateTips": "Kliknij Wygeneruj rekomendacje.",
   "empty.connectWallet": "Podłącz portfel, potem wygeneruj rekomendacje.",
 
-  "lastPurchase.titleOnChain": "Ostatni zakup",
-  "lastPurchase.titleConnected": "Ostatni zakup",
-  "lastPurchase.titleOffline": "Ostatni zakup (offline)",
-  "lastPurchase.titleDisconnected": "Ostatni zakup",
-  "lastPurchase.emptyConnected":
-    "Brak RunRecord — wykonaj pierwszy zakup (simulate_buy_v2).",
-  "lastPurchase.empty": "Brak zapisanych zakupów.",
-  "lastPurchase.emptyDisconnected": "Połącz portfel",
-  "lastPurchase.date": "Data:",
-  "lastPurchase.budget": "Budżet:",
-  "lastPurchase.perToken":
-    "· po równo na 3 spółki (~${amount} na każdą, liczba akcji zależy od ceny)",
-  "lastPurchase.bought": "Kupione:",
-
   "msg.noTop3Proxy": "Proxy /rank nie zwróciło top3.",
   "msg.noTypesafeKey": "Brak TYPESAFE_API_KEY w Ustawieniach",
   "msg.tooFewProducts": "Za mało produktów PreStocks do rankingu (<3).",
@@ -366,10 +352,11 @@ const pl: Dict = {
   "settings.saveKeys": "Zapisz klucze w localStorage",
   "settings.keysSaved": "Zapisano w localStorage ✓",
 
-  "history.kicker": "Przebiegi DCA",
+  "history.kicker": "Purchases (auto & manual)",
   "history.title": "Historia",
-  "history.onChainIntro":
-    "RunRecord on-chain · {count} wpis(ów).",
+  "history.entries.one": "{count} wpis",
+  "history.entries.few": "{count} wpisy",
+  "history.entries.many": "{count} wpisów",
   "history.connectHint":
     "Podłącz portfel, aby zobaczyć historię zakupów (RunRecord) z Predca.",
   "history.noRuns":
@@ -624,20 +611,6 @@ const en: Dict = {
   "empty.generateTips": "Click Generate recommendations.",
   "empty.connectWallet": "Connect wallet, then generate recommendations.",
 
-  "lastPurchase.titleOnChain": "Last purchase",
-  "lastPurchase.titleConnected": "Last purchase",
-  "lastPurchase.titleOffline": "Last purchase (offline)",
-  "lastPurchase.titleDisconnected": "Last purchase",
-  "lastPurchase.emptyConnected":
-    "No RunRecord — make the first purchase (simulate_buy_v2).",
-  "lastPurchase.empty": "No saved purchases.",
-  "lastPurchase.emptyDisconnected": "Connect Wallet",
-  "lastPurchase.date": "Date:",
-  "lastPurchase.budget": "Budget:",
-  "lastPurchase.perToken":
-    "· split equally across 3 companies (~${amount} each; share count depends on price)",
-  "lastPurchase.bought": "Bought:",
-
   "msg.noTop3Proxy": "Proxy /rank returned no top3.",
   "msg.noTypesafeKey": "Missing TYPESAFE_API_KEY in Settings",
   "msg.tooFewProducts": "Too few PreStocks products for ranking (<3).",
@@ -844,10 +817,11 @@ const en: Dict = {
   "settings.saveKeys": "Save keys to localStorage",
   "settings.keysSaved": "Saved to localStorage ✓",
 
-  "history.kicker": "DCA runs",
+  "history.kicker": "Purchases (auto & manual)",
   "history.title": "History",
-  "history.onChainIntro":
-    "RunRecord on-chain · {count} entries.",
+  "history.entries.one": "{count} entry",
+  "history.entries.few": "{count} entries",
+  "history.entries.many": "{count} entries",
   "history.connectHint":
     "Connect your wallet to see purchase history (RunRecord) from Predca.",
   "history.noRuns":

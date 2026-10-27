@@ -41,7 +41,7 @@ test("a BN runIndex still picks the highest index, then ts", () => {
   assert.equal(runsNewestFirst(runs)[0], card);
 });
 
-test("overview and history both use that newest-run order", () => {
+test("history uses the newest-run order and overview does not render it", () => {
   const hook = readFileSync(new URL("../lib/hooks/usePredca.ts", import.meta.url), "utf8");
   const history = readFileSync(
     new URL("../components/HistoryView.tsx", import.meta.url),
@@ -54,5 +54,6 @@ test("overview and history both use that newest-run order", () => {
   assert.match(hook, /const lastRun = newestRunRecord\(runs\)/);
   assert.match(history, /runsNewestFirst\(predca\.runs\)/);
   assert.equal(history.includes(".reverse()"), false);
-  assert.match(overview, /predca\.lastRun/);
+  assert.equal(overview.includes("predca.lastRun"), false);
+  assert.equal(overview.includes("lastPurchase"), false);
 });

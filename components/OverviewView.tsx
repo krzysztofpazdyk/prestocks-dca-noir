@@ -2,9 +2,8 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { claimFaucetUsdc } from "@/lib/dca-api";
+import { claimFaucetUsdc, withFaucetButtonCap } from "@/lib/dca-api";
 import { HoldingsPie } from "./HoldingsPie";
-import { HistoryRunEntry } from "@/components/HistoryRunEntry";
 import { fmtPriceClock, fmtSignedPnl, fmtUsdAmount } from "@/lib/format-usd";
 import { formatDollars, formatGrouped } from "@/lib/number-format";
 import {
@@ -21,6 +20,7 @@ import {
 import { priceRows, type PriceRowFlag } from "@/lib/price-rows";
 import {
   pnlSummary,
+  portfolioProfitPct,
   portfolioTileState,
   positionPnlKind,
   type PositionRow,
@@ -144,7 +144,7 @@ function rankView(result: RankResult): RankView {
 }
 
 export function OverviewView() {
-  const { connected, connecting, publicKey } = useWallet();
+  const { connected, publicKey } = useWallet();
   const ownerBase58 = publicKey?.toBase58() ?? null;
   const predca = usePredca();
   const { locale, t } = useI18n();
@@ -261,10 +261,15 @@ export function OverviewView() {
     setFaucetMsg(null);
     setFaucetErr(null);
     try {
-      const res = await claimFaucetUsdc(publicKey.toBase58(), {
-        onConfirming: () => setFaucetConfirming(true),
-        refresh: () => predca.refresh(),
-      });
+      const res = await withFaucetButtonCap(
+        claimFaucetUsdc(publicKey.toBase58(), {
+          onConfirming: () => {
+            setFaucetConfirming(true);
+            setFaucetBusy(false);
+          },
+          refresh: () => predca.refresh(),
+        }),
+      );
       setFaucetBusy(false);
       setFaucetConfirming(false);
       if (res.fundsArrived) {
@@ -339,13 +344,6 @@ export function OverviewView() {
   // Connected: on-chain ATAs for ALL mints in devnet-mock-mints (via allMockMints).
   // Disconnected: holdings stay empty; never render the mock allocation pie.
   const displayHoldings: Holding[] = connected ? predca.holdingsOnChain : [];
-
-  const lastRunEntry =
-    connected &&
-    predca.lastRun &&
-    (predca.status === "ready" || predca.status === "error")
-      ? predca.lastRun
-      : null;
 
   async function handleGenerateRecommendations() {
     setRankError(null);
@@ -1209,7 +1207,7 @@ export function OverviewView() {
           {
             label: t("tile.sol"),
             value: fmtTile(displaySol, 4),
-            unit: "SOL",
+            unit: "",
           },
           {
             label: t("tile.usdcWallet"),
@@ -1220,7 +1218,7 @@ export function OverviewView() {
             label: t("tile.portfolioPreStock"),
             value: portfolioUnknown
               ? t("runPrice.unknown")
-              : fmtMoney(displayPortfolioUsd, 0),
+              : fmtMoney(displayPortfolioUsd),
             unit: "",
           },
         ].map((c) => (
@@ -1446,6 +1444,7 @@ export function OverviewView() {
               rows={predca.positions}
               locale={locale}
               balancesStale={portfolioBalanceStale}
+              vaultUsdc={predca.vaultUsdc}
             />
           )}
         </div>
@@ -1475,38 +1474,12 @@ export function OverviewView() {
         />
       )}
 
-      <section className="relative flex min-h-[11rem] flex-1 flex-col rounded-lg border border-[#1e2633] bg-[#141820] p-5">
-        <h2 className="mb-3 text-[11px] uppercase tracking-[0.15em] text-[#a78bfa]">
-          {connected && onChainReady
-            ? t("lastPurchase.titleOnChain")
-            : connected
-              ? t("lastPurchase.titleConnected")
-              : t("lastPurchase.titleDisconnected")}
-        </h2>
-        <div className="flex-1 pb-5">
-          {lastRunEntry ? (
-            <HistoryRunEntry
-              run={lastRunEntry}
-              fills={predca.runFills}
-              quotes={predca.jupPrices.quotes}
-            />
-          ) : (
-            <p className="text-sm text-[#8b95a8]">
-              {connected
-                ? t("lastPurchase.emptyConnected")
-                : connecting
-                  ? t("connect.busy")
-                  : t("lastPurchase.emptyDisconnected")}
-            </p>
-          )}
-        </div>
-        <span
-          className="pointer-events-none absolute bottom-2 right-3 mono-num text-[10px] tabular-nums text-[#5c6578]"
-          title={`v${APP_VERSION}`}
-        >
-          v{APP_VERSION}
-        </span>
-      </section>
+      <p
+        className="pointer-events-none text-right mono-num text-[10px] tabular-nums text-[#5c6578]"
+        title={`v${APP_VERSION}`}
+      >
+        v{APP_VERSION}
+      </p>
     </div>
   );
 }
@@ -1640,19 +1613,23 @@ function PnlSection({
   rows,
   locale,
   balancesStale = false,
+  vaultUsdc,
 }: {
   rows: PositionRow[];
   locale: string;
   /** Hide the USD total. It is summed from the previous token balances. */
   balancesStale?: boolean;
+  /** Live vault cash. A deposit updates this without a reload. */
+  vaultUsdc: number | null;
 }) {
   const { t } = useI18n();
   const summary = pnlSummary(rows);
   const pnl = summary.pnlUsd;
+  const pct = portfolioProfitPct(pnl, vaultUsdc, rows);
   const pos = pnl != null && pnl > 0;
   const neg = pnl != null && pnl < 0;
   const pnlClass = pos ? "text-[#34d399]" : neg ? "text-[#f87171]" : "text-[#8b95a8]";
-  const money = summary.hasPriced ? fmtSignedPnl(pnl, summary.pnlPct, locale) : null;
+  const money = summary.hasPriced ? fmtSignedPnl(pnl, pct, locale) : null;
   const atCost = fmtUsdAmount(summary.unpricedCostUsd, locale);
   return (
     <section className="rounded-lg border border-[#1e2633] bg-[#141820] p-5">

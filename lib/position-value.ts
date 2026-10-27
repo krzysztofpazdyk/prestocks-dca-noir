@@ -363,6 +363,52 @@ export function pnlSummary(rows: PositionRow[]): PnlSummary {
   };
 }
 
+/**
+ * Profit divided by the sum of vault deposits.
+ * `pnlSummary.pnlPct` stays profit over priced v2 cost only. That base does
+ * not include USDC still sitting in the vault, so a later top-up never
+ * moved the portfolio percent.
+ */
+export function profitPercentOnDeposits(
+  pnlUsd: number | null,
+  depositsUsd: readonly number[],
+): number | null {
+  if (pnlUsd == null || !Number.isFinite(pnlUsd)) return null;
+  let total = 0;
+  for (const amount of depositsUsd) {
+    if (Number.isFinite(amount) && amount > 0) total += amount;
+  }
+  if (!(total > DUST)) return null;
+  return (pnlUsd / total) * 100;
+}
+
+/**
+ * Deposits still in the strategy. Spending moves USDC from the vault into
+ * position cost, so the two do not overlap. A new deposit raises `vaultUsdc`
+ * and this sum in the same snapshot.
+ */
+export function strategyDepositUsd(
+  vaultUsdc: number,
+  rows: readonly { costUsd: number }[],
+): number {
+  const vault = Number.isFinite(vaultUsdc) ? Math.max(0, vaultUsdc) : 0;
+  let cost = 0;
+  for (const row of rows) {
+    if (Number.isFinite(row.costUsd) && row.costUsd > 0) cost += row.costUsd;
+  }
+  return vault + cost;
+}
+
+/** Null until the vault balance is known. Otherwise profit / (vault + cost). */
+export function portfolioProfitPct(
+  pnlUsd: number | null,
+  vaultUsdc: number | null,
+  rows: readonly { costUsd: number }[],
+): number | null {
+  if (vaultUsdc == null || !Number.isFinite(vaultUsdc)) return null;
+  return profitPercentOnDeposits(pnlUsd, [strategyDepositUsd(vaultUsdc, rows)]);
+}
+
 /** Legacy cost basis shows an em dash. A v2 row with no price shows „brak danych”. */
 export function positionPnlKind(
   row: Pick<PositionRow, "basis" | "pricedUnits" | "pnlUsd">,

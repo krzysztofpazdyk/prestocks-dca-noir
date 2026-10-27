@@ -13,9 +13,10 @@ test("allocation toggles positions and the price panel above the last purchase",
   const pnl = overview.indexOf("<PnlSection");
   const positions = overview.indexOf("<PositionsCard");
   const panel = overview.indexOf("<PricesPanel");
-  const lastPurchase = overview.lastIndexOf('t("lastPurchase.');
+  const version = overview.lastIndexOf("APP_VERSION");
   assert.ok(holdings > 0 && holdings < detailsBtn && detailsBtn < pnl);
-  assert.ok(pnl < positions && positions < panel && panel < lastPurchase);
+  assert.ok(pnl < positions && positions < panel && panel < version);
+  assert.equal(overview.includes('t("lastPurchase.'), false);
   assert.match(
     overview,
     /const showPnl = connected && predca\.positions\.length > 0;/,
