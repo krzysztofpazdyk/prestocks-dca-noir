@@ -403,6 +403,25 @@ export function shouldRestorePrivySession(input: {
   return input.hasEmbeddedWallet;
 }
 
+/**
+ * One reload attempt, and only after the embedded adapter has an account.
+ * An empty Privy wallet makes `connect()` fail. Burning the attempt then
+ * leaves the session disconnected after F5, while Phantom autoConnects.
+ */
+export function shouldAttemptPrivyRestore(input: {
+  storedName: string | null;
+  ready: boolean;
+  authenticated: boolean;
+  hasEmbeddedWallet: boolean;
+  adapterListed: boolean;
+  adapterHasAccount: boolean;
+  alreadyAttempted: boolean;
+}): boolean {
+  if (input.alreadyAttempted) return false;
+  if (!input.adapterListed || !input.adapterHasAccount) return false;
+  return shouldRestorePrivySession(input);
+}
+
 /** Resolve when `p` settles or after `ms`, whichever is first. A throw is swallowed. */
 export function capPromise(
   p: Promise<unknown>,

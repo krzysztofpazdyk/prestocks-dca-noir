@@ -4,14 +4,14 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { usePredca } from "@/lib/hooks/usePredca";
 import { TxNotice } from "@/components/TxNotice";
 import { HistoryRunEntry } from "@/components/HistoryRunEntry";
-import { historyView } from "@/lib/history-view";
+import { historyEntriesLine, historyView } from "@/lib/history-view";
 import { runsNewestFirst } from "@/lib/run-order";
 import { useI18n } from "@/lib/i18n";
 
 export function HistoryView() {
   const { connected, connecting } = useWallet();
   const predca = usePredca();
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const mode = historyView(predca.status, predca.runs.length, connected);
   const showRuns = mode === "list" || mode === "list_stale";
   const disconnectedCopy = connecting ? t("connect.busy") : t("connect.title");
@@ -22,9 +22,7 @@ export function HistoryView() {
   } else if (mode === "loading") {
     intro = t("history.loading");
   } else if (showRuns) {
-    intro = t("history.onChainIntro", {
-      count: predca.runs.length,
-    });
+    intro = historyEntriesLine(predca.runs.length, locale);
   } else if (mode === "empty") {
     intro = t("history.noRuns");
   } else if (mode === "not_ready") {

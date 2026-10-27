@@ -7,6 +7,7 @@ import {
   ResponsiveContainer,
   Tooltip,
 } from "recharts";
+import { allocationShareText, allocationTooltipText } from "@/lib/allocation-label";
 import { HOLDINGS, type Holding } from "@/lib/mock-data";
 import { useI18n } from "@/lib/i18n";
 
@@ -46,7 +47,16 @@ export function HoldingsPie({ holdings = HOLDINGS }: Props) {
                 fontSize: 12,
                 color: "#e8eef5",
               }}
-              formatter={(value) => [`${value}%`, t("holdings.share")]}
+              content={({ active, payload }) => {
+                if (!active || !payload || payload.length === 0) return null;
+                const item = payload[0];
+                const name = String(item?.name ?? "");
+                const raw = item?.value;
+                const share =
+                  typeof raw === "number" ? raw : Number(Array.isArray(raw) ? raw[0] : raw);
+                if (!name || !Number.isFinite(share)) return null;
+                return <span className="mono-num">{allocationTooltipText(name, share)}</span>;
+              }}
             />
           </PieChart>
         </ResponsiveContainer>
@@ -67,7 +77,7 @@ export function HoldingsPie({ holdings = HOLDINGS }: Props) {
               />
               {h.name}
             </span>
-            <span className="mono-num text-[#8b95a8]">{h.value}%</span>
+            <span className="mono-num text-[#8b95a8]">{allocationShareText(h.value)}</span>
           </li>
         ))}
       </ul>

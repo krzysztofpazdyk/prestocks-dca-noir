@@ -352,6 +352,13 @@ export const FAUCET_CONFIRM_POLL_MS = 3_000;
 export const FAUCET_CONFIRM_MAX_MS = 120_000;
 /** One balance read must not hold the faucet button if RPC never answers. */
 export const FAUCET_BALANCE_READ_TIMEOUT_MS = 8_000;
+/**
+ * Backstop for the faucet button. Longer than the POST plus the balance
+ * poll, so a mint that lands inside those windows still counts as success.
+ * If the claim never settles, the button leaves "Sending" with an error.
+ */
+export const FAUCET_BUTTON_CAP_MS =
+  FAUCET_POST_TIMEOUT_MS + FAUCET_CONFIRM_MAX_MS + FAUCET_BALANCE_READ_TIMEOUT_MS;
 /** Demo faucet mints this many mock USDC. */
 export const FAUCET_USDC_MIN_INCREASE = 1_000;
 
@@ -557,6 +564,38 @@ async function readFaucetBalanceCapped(
   }
 }
 
+type FaucetCapTimers = {
+  setTimer: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>;
+  clearTimer: (handle: ReturnType<typeof setTimeout>) => void;
+};
+
+/**
+ * Reject when `work` stays pending past `ms`. A settled claim wins and
+ * clears the timer. The Overview button uses this so a hung faucet cannot
+ * leave the label on Sending.
+ */
+export function withFaucetButtonCap<T>(
+  work: Promise<T>,
+  ms = FAUCET_BUTTON_CAP_MS,
+  timers: FaucetCapTimers = { setTimer: setTimeout, clearTimer: clearTimeout },
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const handle = timers.setTimer(() => {
+      reject(new Error(shown("faucet.unconfirmed")));
+    }, ms);
+    work.then(
+      (value) => {
+        timers.clearTimer(handle);
+        resolve(value);
+      },
+      (error) => {
+        timers.clearTimer(handle);
+        reject(error);
+      },
+    );
+  });
+}
+
 function arrivedResponse(wallet: string): FaucetUsdcResponse {
   return {
     ok: true,
@@ -663,6 +702,9 @@ export async function claimFaucetUsdc(
   }
 
   if (FAUCET_GATEWAY_STATUSES.has(resp.status)) {
+    // Leave "Sending" as soon as the gateway status is known. Body cancel
+    // must not keep that label up.
+    options.onConfirming?.();
     await cancelFaucetBody(resp);
     return confirmFaucetByBalance(wallet, before, read, {
       sleep,

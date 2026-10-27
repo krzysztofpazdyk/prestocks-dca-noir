@@ -277,8 +277,8 @@ test("Overview shows the Jev message in place of the Top-3 list", () => {
   );
   assert.equal(translate("pl", "holdings.titleOnChain"), "Alokacja");
   assert.equal(translate("en", "holdings.titleOnChain"), "Allocation");
-  assert.equal(translate("pl", "lastPurchase.titleOnChain"), "Ostatni zakup");
-  assert.equal(translate("en", "lastPurchase.titleOnChain"), "Last purchase");
+  assert.equal(overview.includes("lastPurchase"), false);
+  assert.equal(overview.includes("Ostatni zakup"), false);
   const i18n = readFileSync(new URL("../lib/i18n.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(i18n, /Awaryjny ranking metryczny/);
   assert.doesNotMatch(i18n, /Fallback metric/);

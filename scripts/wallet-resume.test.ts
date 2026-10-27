@@ -61,15 +61,14 @@ test("reload wires Phantom autoConnect, Privy restore, and the connect prompt", 
     new URL("../components/ConnectWalletButton.tsx", import.meta.url),
     "utf8",
   );
-  assert.match(button, /shouldRestorePrivySession/);
+  assert.match(button, /shouldAttemptPrivyRestore/);
   assert.match(button, /requestRef\.current\(PRIVY_WALLET_NAME\)/);
 
   const overview = readFileSync(
     new URL("../components/OverviewView.tsx", import.meta.url),
     "utf8",
   );
-  assert.match(overview, /t\("lastPurchase\.emptyDisconnected"\)/);
-  assert.match(overview, /t\("connect\.busy"\)/);
+  assert.equal(overview.includes("lastPurchase"), false);
 
   const history = readFileSync(
     new URL("../components/HistoryView.tsx", import.meta.url),

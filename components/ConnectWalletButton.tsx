@@ -30,9 +30,9 @@ import {
   readStoredWalletName,
   replayLiveConnect,
   runSwitchAttempt,
+  shouldAttemptPrivyRestore,
   shouldEndPrivySession,
   shouldRestoreExternalWallet,
-  shouldRestorePrivySession,
   walletButtonLabel,
   type CapTimers,
   type OnceTask,
@@ -600,17 +600,20 @@ function PrivyConnect() {
     } catch {
       storedName = null;
     }
+    const listed = wallets.find((item) => item.adapter.name === PRIVY_WALLET_NAME);
     if (
-      !shouldRestorePrivySession({
+      !shouldAttemptPrivyRestore({
         storedName,
         ready,
         authenticated,
         hasEmbeddedWallet: hasSolanaEmbeddedWallet(user),
+        adapterListed: Boolean(listed),
+        adapterHasAccount: adapterHasAccount(listed?.adapter),
+        alreadyAttempted: restoredPrivy.current,
       })
     ) {
       return;
     }
-    if (!wallets.some((item) => item.adapter.name === PRIVY_WALLET_NAME)) return;
     restoredPrivy.current = true;
     requestRef.current(PRIVY_WALLET_NAME);
   }, [authenticated, ready, user, wallets]);
