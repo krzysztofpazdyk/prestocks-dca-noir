@@ -61,7 +61,7 @@ const pl: Dict = {
   "privy.blockhashExpired":
     "Transakcja nie została wysłana. Środki nie zostały ruszone. Spróbuj ponownie i szybciej zamknij okno Privy.",
 
-  "overview.kicker": "Trading desk · PreStocks Weekly DCA",
+  "overview.kicker": "Trading desk",
   "overview.title": "Overview",
   "overview.maxDepositHint": "Maks. wpłata: {amount} (saldo portfela)",
   "overview.maxWithdrawHint": "Maks. wypłata: {amount} (saldo vaulta)",
@@ -384,6 +384,7 @@ const pl: Dict = {
   "positions.legacyHint":
     "Wcześniejsze zakupy mintowały tokeny 1:1 do USDC — wyceniamy je po koszcie.",
   "positions.mismatch": "Saldo tokenów różni się od historii zakupów.",
+  "positions.outsideApp": "spoza aplikacji",
   "runPrice.loading": "dane o cenie zakupu się ładują",
   "runPrice.unknown": "—",
   "balances.warning":
@@ -407,7 +408,7 @@ const pl: Dict = {
   "prices.lastRead": "ostatni odczyt · {time}",
   "prices.refresh": "Odśwież ceny",
 
-  "pnl.title": "Zysk/strata",
+  "pnl.title": "Profit/loss made by PreStocks DCA application",
   "pnl.total": "Łącznie",
   "pnl.atCostValue": "Wartość po koszcie: {value}",
   "pnl.legacyNote": "PnL dostępny dla zakupów po cenie rynkowej (wkrótce).",
@@ -526,7 +527,7 @@ const en: Dict = {
   "privy.blockhashExpired":
     "The transaction was not sent. No funds moved. Try again and close the Privy window sooner.",
 
-  "overview.kicker": "Trading desk · PreStocks Weekly DCA",
+  "overview.kicker": "Trading desk",
   "overview.title": "Overview",
   "overview.maxDepositHint": "Max deposit: {amount} (wallet balance)",
   "overview.maxWithdrawHint": "Max withdraw: {amount} (vault balance)",
@@ -849,6 +850,7 @@ const en: Dict = {
   "positions.legacyHint":
     "Earlier buys minted tokens 1:1 to USDC — they are valued at cost.",
   "positions.mismatch": "Token balance differs from purchase history.",
+  "positions.outsideApp": "spoza aplikacji",
   "runPrice.loading": "purchase price is loading",
   "runPrice.unknown": "—",
   "balances.warning":
@@ -872,7 +874,7 @@ const en: Dict = {
   "prices.lastRead": "last read · {time}",
   "prices.refresh": "Refresh prices",
 
-  "pnl.title": "Profit/loss",
+  "pnl.title": "Profit/loss made by PreStocks DCA application",
   "pnl.total": "Total",
   "pnl.atCostValue": "Value at cost: {value}",
   "pnl.legacyNote": "PnL available for purchases at market price (coming soon).",

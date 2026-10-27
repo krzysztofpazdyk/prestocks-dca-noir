@@ -1,7 +1,11 @@
 /**
  * Portfolio marks for Devnet mock balances.
- * Legacy buys minted 1 token per 1 USDC — those units stay at cost.
+ * Legacy buys (RunPrice confirmed missing) minted 1 token per 1 USDC and stay
+ * at cost. Those are purchase records, not a wallet surplus.
  * v2 lots (RunPrice) are marked at the Jupiter UI price when we have one.
+ * Tokens above the recorded buys are outside the app: marked at Jupiter
+ * `priceNow`, left out of cost and P/L. No price → that surplus is unknown,
+ * never $1 per token.
  */
 
 import { nameByMint } from "@/lib/devnet-mock-mints";
@@ -74,6 +78,16 @@ export type PositionRow = {
   mismatch: boolean;
   /** False when a v2 buy price is still unknown. Absent means known. */
   valueKnown?: boolean;
+  /**
+   * Wallet tokens above recorded app purchases.
+   * Distinct from `legacyCostUsd`, which is a pre-v2 1:1 buy record.
+   */
+  outsideUnits?: number;
+  /**
+   * Jupiter value of `outsideUnits`. Null when that price is missing.
+   * Zero when there is no surplus. Never a $1 stand-in.
+   */
+  outsideValueUsd?: number | null;
 };
 
 export const DUST = 0.000001;
@@ -198,7 +212,7 @@ function listed(names: string[], name: string): boolean {
  * One row per token balance > 0.
  * Legacy units are $1 of cost each. A smaller balance scales v2 units and
  * legacy cost together (and the v2 USDC cost, so avg buy stays put).
- * A larger balance is extra legacy at $1.
+ * A larger balance is tokens outside the app, not extra legacy at $1.
  */
 export function buildPositions(
   lots: RunLot[],
@@ -243,6 +257,8 @@ export function buildPositions(
         stale,
         mismatch: false,
         valueKnown: false,
+        outsideUnits: 0,
+        outsideValueUsd: 0,
       });
       continue;
     }
@@ -261,6 +277,7 @@ export function buildPositions(
     const balance = bal.amount;
     const expected = pricedUnits + legacyCost;
     let mismatch = false;
+    let outsideUnits = 0;
     if (relDiff(balance, expected)) {
       mismatch = true;
       if (balance < expected) {
@@ -269,27 +286,41 @@ export function buildPositions(
         v2Cost *= scale;
         legacyCost *= scale;
       } else {
-        legacyCost += balance - expected;
+        // Excess over recorded buys. A pre-v2 lot stays in legacyCost above.
+        outsideUnits = balance - expected;
       }
     }
 
     const v2Active = pricedUnits > DUST;
     const legacyActive = legacyCost > DUST;
+    const outsideActive = outsideUnits > DUST;
+    const outsideValueUsd: number | null = !outsideActive
+      ? 0
+      : priceNow != null
+        ? outsideUnits * priceNow
+        : null;
+    const outsideKnown = outsideValueUsd != null;
+
     let valueUsd: number;
     let pnlUsd: number | null;
     let pnlPct: number | null;
     let basis: PositionRow["basis"];
     if (v2Active && priceNow != null) {
       const market = pricedUnits * priceNow;
-      valueUsd = market + legacyCost;
+      valueUsd = market + legacyCost + (outsideValueUsd ?? 0);
       pnlUsd = market - v2Cost;
       pnlPct = v2Cost > DUST ? (pnlUsd / v2Cost) * 100 : null;
       basis = legacyActive ? "mixed" : "market";
     } else {
-      valueUsd = v2Cost + legacyCost;
+      valueUsd = v2Cost + legacyCost + (outsideValueUsd ?? 0);
       pnlUsd = null;
       pnlPct = null;
       basis = "cost";
+    }
+    if (!outsideKnown) {
+      // No honest total: $1 per extra token would be false, and a partial
+      // sum would hide the unpriced surplus.
+      valueUsd = 0;
     }
 
     rows.push({
@@ -298,6 +329,8 @@ export function buildPositions(
       costUsd: v2Cost + legacyCost,
       pricedUnits,
       legacyCostUsd: legacyCost,
+      outsideUnits: outsideActive ? outsideUnits : 0,
+      outsideValueUsd,
       priceNow,
       valueUsd,
       pnlUsd,
@@ -306,7 +339,7 @@ export function buildPositions(
       basis,
       stale,
       mismatch,
-      valueKnown: true,
+      valueKnown: outsideKnown,
     });
   }
 

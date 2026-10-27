@@ -122,7 +122,7 @@ test("missing price values v2 at cost and clears P/L", () => {
   assert.equal(row.priceNow, null);
 });
 
-test("a smaller balance scales both slices and a larger one is legacy surplus", () => {
+test("a sale outside the app scales recorded buys and adds no outside units", () => {
   const small = buildPositions(
     [lot({ name: "Anthropic", usdcCost: 100, units: 10, buyPrice: 10 })],
     [{ name: "Anthropic", amount: 4 }],
@@ -132,17 +132,93 @@ test("a smaller balance scales both slices and a larger one is legacy surplus", 
   assert.equal(small.pricedUnits, 4);
   assert.equal(small.valueUsd, 80);
   assert.equal(small.pnlUsd, 40);
+  assert.equal(small.pnlPct, 100);
   assert.equal(small.avgBuyPrice, 10);
+  assert.equal(small.costUsd, 40);
+  assert.equal(small.outsideUnits, 0);
+  assert.equal(small.outsideValueUsd, 0);
+  assert.equal(small.valueKnown, true);
+});
 
-  const large = buildPositions(
+test("no wallet surplus leaves cost and P/L on the recorded buy", () => {
+  const row = buildPositions(
+    [lot({ name: "Anthropic", usdcCost: 100, units: 2, buyPrice: 50 })],
+    [{ name: "Anthropic", amount: 2 }],
+    prices({ Anthropic: 80 }),
+  )[0];
+  assert.equal(row.outsideUnits, 0);
+  assert.equal(row.outsideValueUsd, 0);
+  assert.equal(row.mismatch, false);
+  assert.equal(row.costUsd, 100);
+  assert.equal(row.legacyCostUsd, 0);
+  assert.equal(row.valueUsd, 160);
+  assert.equal(row.pnlUsd, 60);
+  assert.equal(row.pnlPct, 60);
+  assert.equal(row.valueKnown, true);
+});
+
+test("wallet surplus above app buys is marked at the jupiter price and left out of P/L", () => {
+  const row = buildPositions(
+    [lot({ name: "Anthropic", usdcCost: 100, units: 2, buyPrice: 50 })],
+    [{ name: "Anthropic", amount: 5 }],
+    prices({ Anthropic: 80 }),
+  )[0];
+  assert.equal(row.mismatch, true);
+  assert.equal(row.pricedUnits, 2);
+  assert.equal(row.outsideUnits, 3);
+  assert.equal(row.outsideValueUsd, 240);
+  assert.equal(row.valueUsd, 400);
+  assert.equal(row.costUsd, 100);
+  assert.equal(row.legacyCostUsd, 0);
+  assert.equal(row.pnlUsd, 60);
+  assert.equal(row.pnlPct, 60);
+  assert.equal(row.valueKnown, true);
+  assert.equal(row.basis, "market");
+});
+
+test("wallet surplus without a jupiter price is unknown and is not one dollar", () => {
+  const row = buildPositions(
+    [lot({ name: "Anthropic", usdcCost: 100, units: 2, buyPrice: 50 })],
+    [{ name: "Anthropic", amount: 5 }],
+    prices({ Anthropic: null }),
+  )[0];
+  assert.equal(row.outsideUnits, 3);
+  assert.equal(row.outsideValueUsd, null);
+  assert.equal(row.valueKnown, false);
+  assert.equal(row.valueUsd, 0);
+  assert.equal(row.costUsd, 100);
+  assert.equal(row.legacyCostUsd, 0);
+  assert.equal(row.pnlUsd, null);
+  assert.equal(row.pnlPct, null);
+  assert.notEqual(row.valueUsd, 3);
+  assert.notEqual(row.costUsd, 103);
+});
+
+test("a pre-v2 lot stays at one dollar and only the extra tokens are outside the app", () => {
+  const matched = buildPositions(
+    [lot({ name: "OpenAI", usdcCost: 100 })],
+    [{ name: "OpenAI", amount: 100 }],
+    prices({ OpenAI: 40 }),
+  )[0];
+  assert.equal(matched.legacyCostUsd, 100);
+  assert.equal(matched.outsideUnits, 0);
+  assert.equal(matched.valueUsd, 100);
+  assert.equal(matched.pnlUsd, null);
+  assert.equal(matched.valueKnown, true);
+
+  const extra = buildPositions(
     [lot({ name: "OpenAI", usdcCost: 100 })],
     [{ name: "OpenAI", amount: 130 }],
     prices({ OpenAI: 40 }),
   )[0];
-  assert.equal(large.mismatch, true);
-  assert.equal(large.legacyCostUsd, 130);
-  assert.equal(large.valueUsd, 130);
-  assert.equal(large.basis, "cost");
+  assert.equal(extra.legacyCostUsd, 100);
+  assert.equal(extra.costUsd, 100);
+  assert.equal(extra.outsideUnits, 30);
+  assert.equal(extra.outsideValueUsd, 1200);
+  assert.equal(extra.valueUsd, 1300);
+  assert.equal(extra.pnlUsd, null);
+  assert.equal(extra.basis, "cost");
+  assert.equal(extra.valueKnown, true);
 });
 
 test("pie weights follow value, which equals units for legacy", () => {
@@ -180,7 +256,13 @@ test("Figure AI matches the FigureAI quote and cache or suspect marks the row st
     prices({ FigureAI: 10 }),
   )[0];
   assert.equal(row.priceNow, 10);
-  assert.equal(row.valueUsd, 5);
+  assert.equal(row.outsideUnits, 5);
+  assert.equal(row.outsideValueUsd, 50);
+  assert.equal(row.valueUsd, 50);
+  assert.equal(row.costUsd, 0);
+  assert.equal(row.pnlUsd, null);
+  assert.equal(row.legacyCostUsd, 0);
+  assert.equal(row.valueKnown, true);
   assert.equal(row.basis, "cost");
   assert.equal(row.mismatch, true);
 

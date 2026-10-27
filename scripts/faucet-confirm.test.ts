@@ -8,6 +8,7 @@ import {
   FAUCET_POST_TIMEOUT_MS,
   FAUCET_USDC_MIN_INCREASE,
   claimFaucetUsdc,
+  faucetErrorForUser,
   faucetFundsArrived,
   readFaucetBalances,
   type FaucetBalanceRead,
@@ -522,6 +523,71 @@ describe("faucet confirm", { concurrency: false }, () => {
       if (prevMint === undefined) delete process.env.NEXT_PUBLIC_USDC_MINT;
       else process.env.NEXT_PUBLIC_USDC_MINT = prevMint;
     }
+  });
+
+  test("the faucet calls fetch with the window as this", async () => {
+    const ticks = clock();
+    const prevFetch = globalThis.fetch;
+    const prevApi = process.env.NEXT_PUBLIC_DCA_API_URL;
+    process.env.NEXT_PUBLIC_DCA_API_URL = API;
+    resetRuntimeConfigForTests();
+    const prevWarn = console.warn;
+    console.warn = () => {};
+    const receivers: unknown[] = [];
+    globalThis.fetch = function (this: unknown, input: RequestInfo | URL) {
+      receivers.push(this);
+      const url = String(input);
+      if (!url.includes("/faucet/usdc")) {
+        return Promise.resolve(new Response("no", { status: 404 }));
+      }
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            signature: "sig123",
+            amountUi: 1000,
+            mint: "mint",
+            wallet: WALLET,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    } as typeof fetch;
+    try {
+      const res = await claimFaucetUsdc(WALLET, {
+        readBalances: async () => ({ usdc: 0, sol: 0, usdcOk: true, solOk: true }),
+        sleep: ticks.sleep,
+        now: ticks.now,
+      });
+      assert.equal(res.ok, true);
+      assert.ok(receivers.length >= 1);
+      for (const receiver of receivers) assert.equal(receiver, globalThis);
+    } finally {
+      globalThis.fetch = prevFetch;
+      console.warn = prevWarn;
+      if (prevApi === undefined) delete process.env.NEXT_PUBLIC_DCA_API_URL;
+      else process.env.NEXT_PUBLIC_DCA_API_URL = prevApi;
+      resetRuntimeConfigForTests();
+    }
+  });
+
+  test("Illegal invocation is not a faucet message for the user", () => {
+    assert.equal(faucetErrorForUser("Illegal invocation"), null);
+    assert.equal(
+      faucetErrorForUser("Failed to execute 'fetch' on 'Window': Illegal invocation"),
+      null,
+    );
+    assert.equal(faucetErrorForUser("API /faucet/usdc HTTP 500"), "API /faucet/usdc HTTP 500");
+    const overview = readFileSync(
+      new URL("../components/OverviewView.tsx", import.meta.url),
+      "utf8",
+    );
+    const fn = overview.slice(
+      overview.indexOf("async function onClaimFaucet"),
+      overview.indexOf("const weeklyRev"),
+    );
+    assert.match(fn, /faucetErrorForUser/);
+    assert.match(fn, /if \(userErr\) setFaucetErr/);
   });
 
   test("new faucet copy exists in Polish and English, and the card title matches the header", () => {

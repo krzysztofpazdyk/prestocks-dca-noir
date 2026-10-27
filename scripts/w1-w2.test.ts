@@ -126,8 +126,14 @@ test("state b stays legacy 1:1 and state a stays priced", () => {
     emptyJupPrices(NOW),
   );
   assert.equal(extra[0].mismatch, true);
-  assert.equal(extra[0].valueUsd, 60);
-  assert.equal(extra[0].valueKnown, true);
+  assert.equal(extra[0].legacyCostUsd, 50);
+  assert.equal(extra[0].costUsd, 50);
+  assert.equal(extra[0].outsideUnits, 10);
+  assert.equal(extra[0].outsideValueUsd, null);
+  assert.equal(extra[0].valueUsd, 0);
+  assert.equal(extra[0].valueKnown, false);
+  assert.equal(extra[0].pnlUsd, null);
+  assert.equal(portfolioUsdKnown(20, extra), null);
 
   const decoded = runLots(runs, new Map([[1, priced(ANTHROPIC)]]), NOW);
   assert.equal(decoded[0].priceState, "priced");

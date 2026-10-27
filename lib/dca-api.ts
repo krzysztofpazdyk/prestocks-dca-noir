@@ -51,6 +51,20 @@ export type LatestRunJson = {
 const API_TIMEOUT_MS = 8000;
 const RANK_TIMEOUT_MS = 60000;
 
+/**
+ * Native `fetch` is a method of the window. A call with the wrong `this`
+ * throws TypeError "Illegal invocation" in the browser.
+ */
+function callFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return Reflect.apply(globalThis.fetch, globalThis, [input, init]) as Promise<Response>;
+}
+
+/** Hide the unbound-fetch error. The claim itself stays. */
+export function faucetErrorForUser(message: string): string | null {
+  if (/illegal invocation/i.test(message)) return null;
+  return message;
+}
+
 async function fetchWithTimeout(
   url: string,
   init: RequestInit = {},
@@ -59,7 +73,7 @@ async function fetchWithTimeout(
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    return await fetch(url, { ...init, signal: ctrl.signal });
+    return await callFetch(url, { ...init, signal: ctrl.signal });
   } catch (e) {
     const aborted =
       (typeof DOMException !== "undefined" &&

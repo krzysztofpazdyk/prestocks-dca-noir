@@ -117,10 +117,15 @@ async function readConfig(
   const ctrl = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const fetchPromise = Promise.resolve().then(() =>
-    fetchImpl(runtimeConfigRequestUrl(now), {
-      cache: "no-store",
-      signal: ctrl.signal,
-    }),
+    // Default `fetch` is the window method. Calling the extracted function
+    // without `this` throws "Illegal invocation" in the browser.
+    Reflect.apply(fetchImpl, globalThis, [
+      runtimeConfigRequestUrl(now),
+      {
+        cache: "no-store",
+        signal: ctrl.signal,
+      },
+    ]) as Promise<Response>,
   );
   void fetchPromise.catch(() => {
     /* abort after a timeout must not become an unhandled rejection */

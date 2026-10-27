@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { claimFaucetUsdc, withFaucetButtonCap } from "@/lib/dca-api";
+import { claimFaucetUsdc, faucetErrorForUser, withFaucetButtonCap } from "@/lib/dca-api";
 import { HoldingsPie } from "./HoldingsPie";
 import { fmtPriceClock, fmtSignedPnl, fmtUsdAmount } from "@/lib/format-usd";
 import { formatDollars, formatGrouped } from "@/lib/number-format";
@@ -19,6 +19,7 @@ import {
 } from "@/lib/jup-prices";
 import { priceRows, type PriceRowFlag } from "@/lib/price-rows";
 import {
+  DUST,
   pnlSummary,
   portfolioProfitPct,
   portfolioTileState,
@@ -294,9 +295,10 @@ export function OverviewView() {
       await predca.refresh();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      const userErr = faucetErrorForUser(msg);
       setFaucetBusy(false);
       setFaucetConfirming(false);
-      setFaucetErr(t("faucet.error", { error: msg }));
+      if (userErr) setFaucetErr(t("faucet.error", { error: userErr }));
       await predca.refresh();
     } finally {
       setFaucetBusy(false);
@@ -839,11 +841,13 @@ export function OverviewView() {
   const allAtCost =
     predca.positions.length > 0 &&
     predca.positions.every(
-      (row) => row.basis === "cost" && row.valueKnown !== false,
+      (row) =>
+        row.basis === "cost" &&
+        row.valueKnown !== false &&
+        (row.outsideUnits ?? 0) <= DUST,
     );
   const showPortfolioNotes = Boolean(
-    (pricesReady && predca.jupPrices.source === "cache") ||
-      (pricesReady && !predca.pricesLoading && !anyTokenPrice) ||
+    (pricesReady && !predca.pricesLoading && !anyTokenPrice) ||
       portfolioPriceUnknown ||
       (portfolioBalanceStale && predca.balanceWarning) ||
       (connected && predca.rpcWarning) ||
@@ -1240,9 +1244,6 @@ export function OverviewView() {
       </div>
       {connected && showPortfolioNotes && (
         <div className="space-y-1 text-[10px] text-[#8b95a8]">
-          {pricesReady && predca.jupPrices.source === "cache" && (
-            <p>{t("prices.stale", { time: priceClock })}</p>
-          )}
           {pricesReady && !predca.pricesLoading && !anyTokenPrice && (
             <p>{t("prices.unavailable")}</p>
           )}
@@ -1474,12 +1475,6 @@ export function OverviewView() {
         />
       )}
 
-      <p
-        className="pointer-events-none text-right mono-num text-[10px] tabular-nums text-[#5c6578]"
-        title={`v${APP_VERSION}`}
-      >
-        v{APP_VERSION}
-      </p>
     </div>
   );
 }
@@ -1609,6 +1604,15 @@ function fmtPanelPct(value: number, locale: string): string {
   return formatPremiumPct(value, locale);
 }
 
+function outsideOf(row: PositionRow): number {
+  return row.outsideUnits ?? 0;
+}
+
+/** Unknown RunPrice. An unpriced wallet surplus is a different gap. */
+function purchasePriceUnknown(rows: PositionRow[]): boolean {
+  return rows.some((row) => row.valueKnown === false && outsideOf(row) <= DUST);
+}
+
 function PnlSection({
   rows,
   locale,
@@ -1631,23 +1635,35 @@ function PnlSection({
   const pnlClass = pos ? "text-[#34d399]" : neg ? "text-[#f87171]" : "text-[#8b95a8]";
   const money = summary.hasPriced ? fmtSignedPnl(pnl, pct, locale) : null;
   const atCost = fmtUsdAmount(summary.unpricedCostUsd, locale);
+  const purchaseUnknown = purchasePriceUnknown(rows);
+  const valueBlocked = rows.some((row) => row.valueKnown === false);
   return (
     <section className="rounded-lg border border-[#1e2633] bg-[#141820] p-5">
-      <h2 className="mb-2 text-[11px] uppercase tracking-[0.15em] text-[#a78bfa]">
-        {t("pnl.title")}
-      </h2>
+      <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
+        <h2 className="text-[11px] uppercase tracking-[0.15em] text-[#a78bfa]">
+          {t("pnl.title")}
+        </h2>
+        <p
+          className="shrink-0 mono-num text-[10px] tabular-nums text-[#5c6578]"
+          title={`v${APP_VERSION}`}
+        >
+          v{APP_VERSION}
+        </p>
+      </div>
       {balancesStale ? (
         <p className="mono-num text-sm text-[#c5cedb]">{t("runPrice.unknown")}</p>
       ) : money ? (
         <p className={`mono-num text-lg ${pnlClass}`}>
           {t("pnl.total")} {money}
         </p>
-      ) : rows.some((row) => row.valueKnown === false) ? (
+      ) : valueBlocked ? (
         <p className="mono-num text-sm text-[#c5cedb]">
           {t("runPrice.unknown")}
-          <span className="mt-1 block text-[10px] text-[#8b95a8]">
-            {t("runPrice.loading")}
-          </span>
+          {purchaseUnknown ? (
+            <span className="mt-1 block text-[10px] text-[#8b95a8]">
+              {t("runPrice.loading")}
+            </span>
+          ) : null}
         </p>
       ) : (
         <p className="mono-num text-sm text-[#c5cedb]">
@@ -1657,7 +1673,7 @@ function PnlSection({
       {summary.hasUnpricedV2 && (
         <p className="mt-1 text-[10px] text-[#8b95a8]">{t("pnl.noPriceNote")}</p>
       )}
-      {rows.some((row) => row.valueKnown === false) && money ? (
+      {purchaseUnknown && money ? (
         <p className="mt-1 text-[10px] text-[#8b95a8]">{t("runPrice.loading")}</p>
       ) : null}
       {!summary.hasPriced && summary.hasLegacy && (
@@ -1726,10 +1742,14 @@ function PositionsCard({
               if (pnlPos) pnlClass = "text-[#34d399]";
               else if (pnlNeg) pnlClass = "text-[#f87171]";
               const lowLiq = Boolean(quote && isLowLiquidity(quote));
-              const valueUnknown = row.valueKnown === false;
+              const outside = outsideOf(row) > DUST;
+              const outsideUnpriced = outside && row.outsideValueUsd == null;
+              const purchaseUnknown = row.valueKnown === false && !outsideUnpriced;
+              const valueHidden = row.valueKnown === false;
               const showBadges =
-                (row.basis === "cost" && !valueUnknown) ||
-                valueUnknown ||
+                (row.basis === "cost" && !valueHidden && !outside) ||
+                outside ||
+                purchaseUnknown ||
                 suspect ||
                 lowLiq ||
                 Boolean(quote?.multiplierChange);
@@ -1739,10 +1759,11 @@ function PositionsCard({
                     <div>{row.name}</div>
                     {showBadges && (
                       <div className="mt-1 flex flex-wrap gap-1">
-                        {row.basis === "cost" && !valueUnknown && (
+                        {row.basis === "cost" && !valueHidden && !outside && (
                           <Badge>{t("positions.atCost")}</Badge>
                         )}
-                        {valueUnknown && <Badge>{t("runPrice.loading")}</Badge>}
+                        {outside && <Badge>{t("positions.outsideApp")}</Badge>}
+                        {purchaseUnknown && <Badge>{t("runPrice.loading")}</Badge>}
                         {suspect && <Badge>{t("prices.suspect")}</Badge>}
                         {lowLiq && <Badge>{t("prices.lowLiquidity")}</Badge>}
                         {quote?.multiplierChange && (
@@ -1772,17 +1793,17 @@ function PositionsCard({
                     {fmtUsdAmount(row.priceNow, locale) ?? t("positions.noData")}
                   </td>
                   <td className="mono-num py-2 pr-3 text-[#2dd4bf]">
-                    {valueUnknown
+                    {valueHidden
                       ? t("runPrice.unknown")
                       : (fmtUsdAmount(row.valueUsd, locale) ?? t("positions.noData"))}
                   </td>
                   <td className="mono-num hidden py-2 pr-3 sm:table-cell">
-                    {valueUnknown
+                    {purchaseUnknown
                       ? t("runPrice.unknown")
                       : (fmtUsdAmount(row.avgBuyPrice, locale) ?? "—")}
                   </td>
                   <td className={`mono-num py-2 ${pnlClass}`}>
-                    {valueUnknown ? (
+                    {purchaseUnknown ? (
                       t("runPrice.unknown")
                     ) : positionPnlKind(row) === "legacy" ? (
                       <span title={t("pnl.legacyNote")}>—</span>
