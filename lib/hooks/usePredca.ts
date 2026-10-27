@@ -38,6 +38,7 @@ import {
   retryRefresh,
   vaultMoved,
 } from "@/lib/predca-refresh";
+import { newestRunRecord } from "@/lib/run-order";
 import {
   EMPTY_SNAPSHOT,
   rpcReadErrorMessage,
@@ -830,7 +831,7 @@ function usePredcaImpl() {
     ? rawToDollars(config.weeklyBudgetUsdc)
     : null;
 
-  const lastRun = runs.length > 0 ? runs[runs.length - 1] : null;
+  const lastRun = newestRunRecord(runs);
 
   const lots = useMemo(
     () => runLots(runSources(runs), runPriceByIndex),

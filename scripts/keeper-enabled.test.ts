@@ -24,6 +24,33 @@ test("session_required is unknown, never off", () => {
   assert.equal(keeperStatusNeedsSignature({ error: "session_required" }), true);
   assert.equal(keeperStatusNeedsSignature({ error: "keeper_unreachable" }), false);
   assert.equal(keeperStatusNeedsSignature({ error: "sign_rejected: closed" }), true);
+  assert.equal(keeperStatusNeedsSignature({ error: "public_status_unavailable" }), false);
+  assert.equal(
+    keeperEnabledForConnectedOwner(
+      { ok: false, error: "public_status_unavailable", enabled: false, owner: OWNER },
+      OWNER,
+    ),
+    null,
+  );
+  assert.equal(
+    keeperEnabledForConnectedOwner(
+      { ok: false, error: "keeper_unreachable" },
+      OWNER,
+    ),
+    null,
+  );
+  assert.equal(
+    nextAutoBuyEnabled(
+      null,
+      { ok: false, error: "public_status_unavailable" },
+      OWNER,
+    ),
+    null,
+  );
+  assert.equal(
+    nextAutoBuyEnabled(null, { ok: false, error: "keeper_unreachable" }, OWNER),
+    null,
+  );
 });
 
 test("a real off from this owner stays off", () => {
@@ -50,6 +77,10 @@ test("enable stays on across a transitional status; disable stays off", () => {
     { ok: true, owner: OWNER },
     { ok: true, enabled: false, owner: OWNER, phase: "enabling" },
     { ok: true, enabled: false, owner: OWNER, phase: "buying" },
+    { ok: true, enabled: false, owner: OWNER, phase: "checking" },
+    { ok: true, enabled: false, owner: OWNER, phase: "ranking" },
+    { ok: true, enabled: false, owner: OWNER, phase: "confirming" },
+    { ok: true, enabled: false, owner: OWNER, phase: "pending" },
     { enabled: false },
     {},
   ];

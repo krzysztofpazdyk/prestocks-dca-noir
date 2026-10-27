@@ -5,6 +5,7 @@ import { usePredca } from "@/lib/hooks/usePredca";
 import { TxNotice } from "@/components/TxNotice";
 import { HistoryRunEntry } from "@/components/HistoryRunEntry";
 import { historyView } from "@/lib/history-view";
+import { runsNewestFirst } from "@/lib/run-order";
 import { useI18n } from "@/lib/i18n";
 
 export function HistoryView() {
@@ -76,7 +77,7 @@ export function HistoryView() {
 
       {showRuns && (
         <ul className="space-y-3">
-          {[...predca.runs].reverse().map((run) => (
+          {runsNewestFirst(predca.runs).map((run) => (
             <li
               key={run.runIndex.toString()}
               className="rounded-lg border border-[#1e2633] bg-[#141820] p-4"

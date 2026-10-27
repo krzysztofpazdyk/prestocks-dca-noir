@@ -27,11 +27,16 @@ import { presentAutoBuyError } from "@/lib/auto-buy-error";
 import { autoToggleBlocked } from "@/lib/auto-weekly-buy";
 import { useI18n } from "@/lib/i18n";
 import {
-  parseExclusions,
   readExclusionsRaw,
   userExclusions,
   writeExclusionsRaw,
 } from "@/lib/exclusions";
+import {
+  decidePrefsSave,
+  makePrefsEditBaseline,
+  prefsEditBaselinesEqual,
+  type PrefsEditBaseline,
+} from "@/lib/keeper-prefs-sync";
 import {
   applyApiPrefsToLocal,
   rankPrefsForApi,
@@ -44,8 +49,8 @@ import {
   writeIpoPremiumMatters,
 } from "@/lib/rank-prefs";
 import {
+  keeperPublicStatus,
   keeperPushPrefs,
-  keeperStatus,
   type KeeperPrefsPayload,
 } from "@/lib/keeper-client";
 import {
@@ -75,35 +80,7 @@ import {
   settingsWeeklyFromStorage,
 } from "@/lib/settings-weekly";
 
-/** Keeper-synced ranking prefs snapshot for dirty detection. */
-type PrefsBaseline = {
-  exclusionsKey: string;
-  deadlineInvalid: boolean;
-  ipoPremium: boolean;
-  buyDespiteIpo: boolean;
-};
 
-function exclusionsKey(raw: string): string {
-  return parseExclusions(raw)
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean)
-    .sort()
-    .join("\0");
-}
-
-function makeBaseline(
-  exclusionsRaw: string,
-  deadlineInvalid: boolean,
-  ipoPremium: boolean,
-  buyDespiteIpo: boolean,
-): PrefsBaseline {
-  return {
-    exclusionsKey: exclusionsKey(exclusionsRaw),
-    deadlineInvalid,
-    ipoPremium,
-    buyDespiteIpo,
-  };
-}
 
 function budgetTxNotice(
   message: string | null,
@@ -116,15 +93,7 @@ function budgetTxNotice(
   return <TxNotice message={message} tone={tone} />;
 }
 
-function baselinesEqual(a: PrefsBaseline | null, b: PrefsBaseline): boolean {
-  if (!a) return false;
-  return (
-    a.exclusionsKey === b.exclusionsKey &&
-    a.deadlineInvalid === b.deadlineInvalid &&
-    a.ipoPremium === b.ipoPremium &&
-    a.buyDespiteIpo === b.buyDespiteIpo
-  );
-}
+
 
 export function SettingsView() {
   const predca = usePredca();
@@ -157,9 +126,11 @@ export function SettingsView() {
   const [byokSaved, setByokSaved] = useState(false);
   const [hydratedOwner, setHydratedOwner] = useState<string | null>(null);
   const [autoConfirmOpen, setAutoConfirmOpen] = useState(false);
-  const [syncedBaseline, setSyncedBaseline] = useState<PrefsBaseline | null>(
+  const [syncedBaseline, setSyncedBaseline] = useState<PrefsEditBaseline | null>(
     null,
   );
+  /** Public status says a Jev key is stored. The value itself is never shown. */
+  const [keeperHasJevKey, setKeeperHasJevKey] = useState(false);
   const [prefsSaving, setPrefsSaving] = useState(false);
   const [prefsSaveMsg, setPrefsSaveMsg] = useState<string | null>(null);
   const [prefsOk, setPrefsOk] = useState(false);
@@ -255,10 +226,9 @@ export function SettingsView() {
     void refreshStaleCompanyData(base);
   }, []);
 
-  // Hydrate ranking toggles from keeper GET /prefs (authoritative for buys).
-  // prefsReady stays false until hydrate finishes so we never push stale local
-  // over keeper. Prefs file is global on the demo daemon; still skip apply when
-  // a connected wallet differs from the registered owner.
+  // Hydrate ranking toggles from the public keeper read (authoritative for buys).
+  // prefsReady stays false until that read succeeds, so fields are not edited
+  // from a stale local copy. Skip apply when the payload owner is someone else.
   const ownerKey = publicKey?.toBase58() ?? "";
   const prefsReady = hydratedOwner === ownerKey;
   useEffect(() => {
@@ -278,34 +248,32 @@ export function SettingsView() {
       let deadline = readDeadlineInvalid();
       let ipo = readIpoPremiumMatters();
       let buyDespite = readBuyDespiteIpo();
+      setKeeperHasJevKey(false);
 
-      try {
-        const wallet = publicKey?.toBase58() ?? null;
-        const sign = signMessageRef.current ?? undefined;
-        // Without wallet/sign: keep localStorage; do not call detailed status.
-        // signMessage identity changes often — use ref so we do not re-hydrate
-        // (and re-hit status) on every adapter render.
-        const status = await keeperStatus(wallet ?? undefined, sign, { interactive: false });
-        if (cancelled) return;
-        // No tab session: keep prefsReady false so local edits are not pushed.
-        if (status.error === "session_required") return;
+      const wallet = publicKey?.toBase58() ?? null;
+      if (wallet) {
+        try {
+          const status = await keeperPublicStatus(wallet);
+          if (cancelled) return;
+          if (!status.ok) return;
 
-        const configuredOwner =
-          (typeof status.owner === "string" && status.owner.trim()) || null;
-        const ownerConflict =
-          !!configuredOwner && !!wallet && configuredOwner !== wallet;
-
-        const statusPrefs = (status as typeof status & { prefs?: KeeperPrefsPayload }).prefs;
-        // Per-owner prefs when wallet known. Skip apply on owner mismatch.
-        if (status.ok && statusPrefs && !ownerConflict) {
-          const applied = applyApiPrefsToLocal(statusPrefs);
-          exclusionsRaw = applied.exclusionsRaw;
-          deadline = applied.deadlineInvalid;
-          ipo = applied.ipoPremiumMatters;
-          buyDespite = applied.buyDespiteIpo;
+          setKeeperHasJevKey(status.hasJevKey === true);
+          const configuredOwner =
+            (typeof status.owner === "string" && status.owner.trim()) || null;
+          const ownerConflict =
+            !!configuredOwner && configuredOwner !== wallet;
+          const statusPrefs = status.prefs as KeeperPrefsPayload | undefined;
+          if (statusPrefs && !ownerConflict) {
+            const applied = applyApiPrefsToLocal(statusPrefs);
+            exclusionsRaw = applied.exclusionsRaw;
+            deadline = applied.deadlineInvalid;
+            ipo = applied.ipoPremiumMatters;
+            buyDespite = applied.buyDespiteIpo;
+          }
+        } catch {
+          if (cancelled) return;
+          return;
         }
-      } catch {
-        /* keeper down / empty → keep localStorage */
       }
 
       if (cancelled) return;
@@ -315,7 +283,7 @@ export function SettingsView() {
       setIpoPremium(ipo);
       setBuyDespiteIpo(buyDespite);
       setSyncedBaseline(
-        makeBaseline(shown, deadline, ipo, buyDespite),
+        makePrefsEditBaseline(shown, deadline, ipo, buyDespite),
       );
       setPrefsSaveMsg(null);
       setHydratedOwner(ownerKeyAtStart);
@@ -323,7 +291,7 @@ export function SettingsView() {
     return () => {
       cancelled = true;
     };
-  }, [publicKey, autoBuy.needsSignature]);
+  }, [publicKey]);
 
   // Persist exclusions (debounced) so ranking reads localStorage mid-session.
   useEffect(() => {
@@ -357,7 +325,7 @@ export function SettingsView() {
     if (!prefsReady) return;
     if (prev === "buying" && autoBuy.phase === "ok") {
       setSyncedBaseline(
-        makeBaseline(exclusions, deadlineInvalid, ipoPremium, buyDespiteIpo),
+        makePrefsEditBaseline(exclusions, deadlineInvalid, ipoPremium, buyDespiteIpo),
       );
       setPrefsSaveMsg(null);
     }
@@ -397,14 +365,14 @@ export function SettingsView() {
 
   const currentBaseline = useMemo(
     () =>
-      makeBaseline(exclusions, deadlineInvalid, ipoPremium, buyDespiteIpo),
+      makePrefsEditBaseline(exclusions, deadlineInvalid, ipoPremium, buyDespiteIpo),
     [exclusions, deadlineInvalid, ipoPremium, buyDespiteIpo],
   );
 
   const prefsDirty =
     prefsReady &&
     syncedBaseline != null &&
-    !baselinesEqual(syncedBaseline, currentBaseline);
+    !prefsEditBaselinesEqual(syncedBaseline, currentBaseline);
 
   const onChainWeekly = predca.weeklyBudgetUsd;
   const weeklyParsed = parseWeeklyDraft(weeklyDraft);
@@ -432,20 +400,49 @@ export function SettingsView() {
   async function signAndSavePrefs() {
     setPrefsSaveMsg(null);
     const owner = publicKey?.toBase58();
-    if (!owner || !signMessage) {
+    const sign = signMessageRef.current;
+    if (!owner || !sign) {
       setPrefsSaveMsg(t("settings.prefsSignNeedWallet"));
       return;
     }
     setPrefsSaving(true);
     try {
+      const fresh = await keeperPublicStatus(owner);
+      const decision = decidePrefsSave(fresh, syncedBaseline);
+      if (decision.kind === "unreachable") {
+        setPrefsOk(false);
+        if (prefsOkTimer.current != null) window.clearTimeout(prefsOkTimer.current);
+        setPrefsSaveMsg(t("settings.autoBuyKeeperUnreachable"));
+        return;
+      }
+      setKeeperHasJevKey(fresh.hasJevKey === true);
+      if (decision.kind === "reload") {
+        const applied = applyApiPrefsToLocal(decision.prefs);
+        const reloaded = userExclusions(applied.exclusionsRaw).join(", ");
+        setExclusions(reloaded);
+        setDeadlineInvalid(applied.deadlineInvalid);
+        setIpoPremium(applied.ipoPremiumMatters);
+        setBuyDespiteIpo(applied.buyDespiteIpo);
+        setSyncedBaseline(
+          makePrefsEditBaseline(
+            reloaded,
+            applied.deadlineInvalid,
+            applied.ipoPremiumMatters,
+            applied.buyDespiteIpo,
+          ),
+        );
+        setPrefsOk(false);
+        if (prefsOkTimer.current != null) window.clearTimeout(prefsOkTimer.current);
+        setPrefsSaveMsg(t("settings.prefsKeeperChanged"));
+        return;
+      }
       const shown = userExclusions(exclusions).join(", ");
       writeExclusionsRaw(shown);
       if (shown !== exclusions) setExclusions(shown);
       writeDeadlineInvalid(deadlineInvalid);
       writeIpoPremiumMatters(ipoPremium);
       writeBuyDespiteIpo(buyDespiteIpo);
-      // Current Jev field rides along on the signed prefs push, so a new key
-      // replaces the keeper copy without turning auto-buy off.
+      // A non-empty field replaces the keeper copy. An empty field does not delete it.
       const nextTypesafe = typesafeKey.trim();
       if (nextTypesafe) {
         try {
@@ -458,7 +455,7 @@ export function SettingsView() {
       const res = await keeperPushPrefs(
         rankPrefsForApi(readRankPrefs()),
         owner,
-        signMessage,
+        sign,
       );
       if (!res.ok) {
         setPrefsOk(false);
@@ -470,8 +467,9 @@ export function SettingsView() {
         );
         return;
       }
+      if (typeof res.hasJevKey === "boolean") setKeeperHasJevKey(res.hasJevKey);
       setSyncedBaseline(
-        makeBaseline(shown, deadlineInvalid, ipoPremium, buyDespiteIpo),
+        makePrefsEditBaseline(shown, deadlineInvalid, ipoPremium, buyDespiteIpo),
       );
       setPrefsSaveMsg(null);
       if (prefsOkTimer.current != null) window.clearTimeout(prefsOkTimer.current);
@@ -696,9 +694,7 @@ export function SettingsView() {
         {budgetTxNotice(predca.error, "error")}
         {budgetTxNotice(predca.okMsg, "ok")}
         <div className="border-t border-[#1e2633] pt-4">
-          {connected && autoBuy.needsSignature && !autoBuy.statusResolved ? (
-            <p className="text-sm text-[#e8eef5]">{t("settings.autoBuySignInBar")}</p>
-          ) : connected && !autoBuy.statusChecked ? (
+          {connected && !autoBuy.statusChecked ? (
             <p className="text-xs text-[#8b95a8]">{t("settings.prefsLoading")}</p>
           ) : connected && !autoBuy.statusResolved ? (
             <p className="text-sm text-[#e8eef5]">{t("settings.autoBuyKeeperUnreachable")}</p>
@@ -860,6 +856,9 @@ export function SettingsView() {
               {showTypesafe ? t("settings.hide") : t("settings.show")}
             </button>
           </div>
+          {keeperHasJevKey ? (
+            <p className="text-[10px] text-[#2dd4bf]">{t("settings.jevKeySaved")}</p>
+          ) : null}
         </label>
 
         <label className="block space-y-1.5">

@@ -222,8 +222,6 @@ const pl: Dict = {
   "msg.autoNoRecs": "Auto-zakup: ranking nie zwrócił top-3.",
 
   "auto.status.off": "Auto-zakup wyłączony — włącz w Ustawieniach.",
-  "auto.status.signToSee": "Podpisz, aby zobaczyć stan",
-  "auto.status.sign": "Podpisz",
   "auto.status.next": "Następny automatyczny zakup z vaulta: {when}",
   "auto.status.due":
     "Auto-zakup zaległy — ranking i zakup z vaulta odpalą się same.",
@@ -311,10 +309,11 @@ const pl: Dict = {
     "Kontynuacja podzieli ${amount} z vaulta po równo na 3 spółki PreStock. Dostaniesz różną liczbę akcji, zależnie od ceny każdej. Ta transakcja uruchamia cotygodniowy harmonogram. Późniejszych zakupów nie musisz już potwierdzać.",
   "settings.autoWeeklyConfirmOk": "Kontynuuj",
   "settings.autoWeeklyConfirmCancel": "Anuluj",
-  "settings.autoBuySignInBar":
-    "Auto-zakup: podpisz w pasku u góry, aby zobaczyć stan",
   "settings.autoBuyKeeperUnreachable":
     "Auto-zakup: keeper nieosiągalny, stan nieznany",
+  "settings.prefsKeeperChanged":
+    "Ustawienia w keeperze zmieniły się – wczytano je, sprawdź i zapisz ponownie",
+  "settings.jevKeySaved": "Klucz zapisany w keeperze",
   "settings.keeperModeLive": "Tryb: Live (prawdziwe zakupy)",
   "settings.keeperModeDryRun": "Tryb: Dry-run (bez transakcji)",
   "settings.keeperModeUnknown": "Tryb keepersa: nieznany",
@@ -701,8 +700,6 @@ const en: Dict = {
   "msg.autoNoRecs": "Auto-buy: ranking did not return a top-3.",
 
   "auto.status.off": "Auto-buy is off — enable it in Settings.",
-  "auto.status.signToSee": "Sign to see status",
-  "auto.status.sign": "Sign",
   "auto.status.next": "Next automatic vault purchase: {when}",
   "auto.status.due":
     "Auto-buy is due — ranking and vault purchase will run on their own.",
@@ -790,10 +787,11 @@ const en: Dict = {
     "Continuing will split ${amount} from the vault equally across 3 PreStock companies. You will receive a different number of shares depending on each price. This transaction starts the weekly schedule. You will not need to confirm later purchases.",
   "settings.autoWeeklyConfirmOk": "Continue",
   "settings.autoWeeklyConfirmCancel": "Cancel",
-  "settings.autoBuySignInBar":
-    "Auto-buy: sign in the bar at the top to see status",
   "settings.autoBuyKeeperUnreachable":
     "Auto-buy: keeper unreachable, status unknown",
+  "settings.prefsKeeperChanged":
+    "Keeper settings changed – reloaded, review and save again",
+  "settings.jevKeySaved": "Key saved in keeper",
   "settings.keeperModeLive": "Mode: Live (real buys)",
   "settings.keeperModeDryRun": "Mode: Dry-run (no transactions)",
   "settings.keeperModeUnknown": "Keeper mode: unknown",
