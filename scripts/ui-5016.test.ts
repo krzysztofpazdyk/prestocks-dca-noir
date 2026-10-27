@@ -168,6 +168,14 @@ test("allocation hover uses the same share text as the legend", () => {
   assert.match(pieSrc, /allocationTooltipText\(name, share\)/);
   assert.match(pieSrc, /allocationShareText\(h\.value\)/);
   assert.match(pieSrc, />100%</);
+  assert.match(pieSrc, /content=\{AllocationTooltip\}/);
+  assert.match(pieSrc, /background:\s*"var\(--background\)"/);
+  assert.match(pieSrc, /color:\s*"var\(--foreground\)"/);
+  assert.match(pieSrc, /border:\s*"none"/);
+  assert.match(pieSrc, /boxShadow:\s*"none"/);
+  assert.doesNotMatch(pieSrc, /contentStyle=\{/);
+  assert.equal(pieSrc.includes("#141820"), false);
+  assert.equal(pieSrc.includes("1px solid"), false);
 });
 
 test("the SOL tile keeps its title and drops the unit beside the number", () => {
