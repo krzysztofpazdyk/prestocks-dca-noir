@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { clusterLabel } from "@/lib/predca";
 import { useI18n, type Locale } from "@/lib/i18n";
 import { ConnectWalletButton } from "@/components/ConnectWalletButton";
 import { useIsClient } from "@/lib/hooks/useIsClient";
@@ -80,9 +79,6 @@ export function Nav() {
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
           <div className="hidden sm:flex items-center gap-2">
-            <span className="mono-num text-[10px] text-[#8b95a8] tracking-wider">
-              {clusterLabel()}
-            </span>
             <div
               className="flex items-center gap-0.5 rounded border border-[#1e2633] bg-[#0c0e12] p-0.5"
               role="group"
@@ -92,7 +88,6 @@ export function Nav() {
               <LocaleBtn code="en" locale={locale} setLocale={setLocale} />
             </div>
           </div>
-          {/* Mobile: show toggle without cluster */}
           <div
             className="flex sm:hidden items-center gap-0.5 rounded border border-[#1e2633] bg-[#0c0e12] p-0.5"
             role="group"

@@ -23,6 +23,7 @@ test("LocaleBtn is defined at module scope, not inside Nav", () => {
   assert.match(nav, /border border-transparent text-\[#8b95a8\] hover:text-\[#e8eef5\]/);
   assert.match(nav, /useIsClient\(\)/);
   assert.doesNotMatch(nav, /setWalletReady/);
+  assert.doesNotMatch(nav, /clusterLabel/);
 });
 
 test("run-price does not import BN", () => {

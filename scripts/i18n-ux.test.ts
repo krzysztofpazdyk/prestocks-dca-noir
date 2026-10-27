@@ -49,6 +49,7 @@ test("jupiter price and position keys exist in Polish and English", () => {
     "positions.atCost",
     "positions.legacyHint",
     "positions.mismatch",
+    "positions.outsideApp",
     "prices.stale",
     "prices.unavailable",
     "prices.suspect",
@@ -135,6 +136,12 @@ test("Overview and Trading desk stay English in the Polish dictionary", () => {
   assert.equal(values("history.buyPrice")[1], "at {price} · {units} units");
   assert.equal(values("prices.panelTitle")[0], "Ceny tokenów vs wycena spółek");
   assert.equal(values("prices.lastRead")[0], "ostatni odczyt · {time}");
+  assert.deepEqual(values("overview.kicker"), ["Trading desk", "Trading desk"]);
+  assert.deepEqual(values("pnl.title"), [
+    "Profit/loss made by PreStocks DCA application",
+    "Profit/loss made by PreStocks DCA application",
+  ]);
+  assert.deepEqual(values("positions.outsideApp"), ["spoza aplikacji", "spoza aplikacji"]);
   assert.equal(values("pnl.legacyNote")[1], "PnL available for purchases at market price (coming soon).");
   assert.deepEqual(values("pnl.details"), ["Dodatkowe informacje", "Additional Info"]);
   assert.deepEqual(values("pnl.hideDetails"), ["Ukryj dodatkowe informacje", "Hide additional info"]);
