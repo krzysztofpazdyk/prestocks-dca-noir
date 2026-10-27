@@ -15,6 +15,7 @@ export function keeperEnabledForConnectedOwner(
     error === "wallet_required" ||
     error === "signature_rejected" ||
     error === "session_required" ||
+    error === "public_status_unavailable" ||
     error.startsWith("sign_rejected")
   ) {
     return null;

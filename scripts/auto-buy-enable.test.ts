@@ -2,16 +2,22 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 import { canPostAutoEnable, shouldCommitAutoBuyEnabled } from "../lib/auto-weekly-buy";
-import { applyAutoBuyActionStatus } from "../lib/keeper-enabled";
+import { applyAutoBuyActionStatus, nextAutoBuyEnabled } from "../lib/keeper-enabled";
 import { translate } from "../lib/i18n";
 import {
   KEEPER_SESSION_PREFIX,
   clearStatusAuthCache,
   keeperDisable,
   keeperEnable,
+  keeperPublicStatus,
   keeperPushPrefs,
-  keeperStatus,
 } from "../lib/keeper-client";
+import {
+  baselineFromKeeperPrefs,
+  decidePrefsSave,
+  makePrefsEditBaseline,
+  prefsEditBaselinesEqual,
+} from "../lib/keeper-prefs-sync";
 import { LS_TYPESAFE } from "../lib/keys";
 import { resetRuntimeConfigForTests } from "../lib/runtime-config";
 
@@ -304,74 +310,69 @@ function settingsSource(): string {
   return readFileSync(new URL("../components/SettingsView.tsx", import.meta.url), "utf8");
 }
 
-test("interactive status is only the Sign button", () => {
+test("status is a public read and there is no Sign bar", () => {
   const hook = hookSource();
   const settings = settingsSource();
-  assert.equal(hook.includes("mintStatusSession"), false);
-  const prompted = hook.match(/interactive:\s*true/g) ?? [];
-  assert.deepEqual(prompted, ["interactive: true"]);
-  const unlockAt = hook.indexOf("const unlockStatus = useCallback");
-  assert.ok(unlockAt > 0);
-  assert.match(
-    hook.slice(unlockAt),
-    /keeperStatus\(owner, sign, \{ interactive: true \}\)/,
-  );
-  assert.equal(hook.slice(0, unlockAt).includes("interactive: true"), false);
-  assert.equal(settings.includes("interactive: true"), false);
-  assert.equal(settings.includes("KeeperSessionSignPrompt"), false);
-  assert.equal(settings.includes("auto.status.sign"), false);
-
-  const prompts = hook.match(/<KeeperSessionSignPrompt/g) ?? [];
-  assert.deepEqual(prompts, ["<KeeperSessionSignPrompt"]);
+  const layout = readFileSync(new URL("../app/layout.tsx", import.meta.url), "utf8");
   const banner = hook.slice(hook.indexOf("export function AutoWeeklyBuyBanner"));
-  assert.match(banner, /<KeeperSessionSignPrompt/);
+  for (const source of [hook, settings, layout, banner]) {
+    assert.equal(source.includes("KeeperSessionSignPrompt"), false);
+    assert.equal(source.includes("unlockStatus"), false);
+    assert.equal(source.includes("interactive: true"), false);
+    assert.equal(source.includes("auto.status.sign"), false);
+    assert.equal(source.includes("autoBuySignInBar"), false);
+  }
+  assert.equal(hook.includes("POST /status"), false);
+  assert.equal(settings.includes('t("auto.status.sign")'), false);
 
   const startCycle = hook.slice(
     hook.indexOf("const startCycle = useCallback"),
     hook.indexOf("const tick = useCallback"),
   );
-  assert.equal(startCycle.includes("interactive: true"), false);
+  assert.match(startCycle, /await keeperPublicStatus\(cycleOwner\)/);
   assert.match(startCycle, /await keeperEnable\(/);
   assert.match(startCycle, /applyAutoBuyActionStatus\(true, st\)/);
-  assert.match(startCycle, /keeperStatus\(cycleOwner, sign, \{ interactive: false \}\)/);
+  assert.match(startCycle, /sign_rejected/);
   const catchBlock = startCycle.slice(
     startCycle.indexOf("} catch (e) {"),
     startCycle.indexOf("} finally {"),
   );
-  assert.doesNotMatch(catchBlock, /keeperStatus/);
+  assert.doesNotMatch(catchBlock, /keeperPublicStatus|keeperStatus/);
   const forceOff = startCycle.slice(
     startCycle.indexOf("const forceOff"),
     startCycle.indexOf("const pollPendingEnable"),
   );
-  assert.doesNotMatch(forceOff, /keeperStatus|interactive:\s*true/);
+  assert.doesNotMatch(forceOff, /keeperPublicStatus|keeperStatus|interactive:\s*true/);
 
   const setEnabled = hook.slice(
     hook.indexOf("const setEnabled = useCallback"),
     hook.indexOf("const startCycle = useCallback"),
   );
-  assert.equal(setEnabled.includes("interactive: true"), false);
   assert.match(setEnabled, /await keeperDisable\(/);
   assert.match(setEnabled, /applyAutoBuyActionStatus\(false, st\)/);
-  assert.match(setEnabled, /keeperStatus\(owner, sign, \{ interactive: false \}\)/);
+  assert.match(setEnabled, /keeperPublicStatus\(owner\)/);
+  assert.match(setEnabled, /sign_rejected/);
 
-  const exclusionsAt = settings.indexOf('t("settings.exclusions")');
-  const rankingAt = settings.indexOf('t("settings.buyDespiteIpo")');
-  const toggleAt = settings.indexOf('t("settings.autoBuySignInBar")');
-  assert.ok(exclusionsAt > 0 && rankingAt > exclusionsAt && toggleAt > rankingAt);
-  assert.doesNotMatch(
-    settings.slice(exclusionsAt, toggleAt),
-    /KeeperSessionSignPrompt|autoBuySignInBar|autoBuyKeeperUnreachable|auto\.status\.sign/,
-  );
+  const saveAt = settings.indexOf("async function signAndSavePrefs");
+  const readAt = settings.indexOf("keeperPublicStatus(owner)", saveAt);
+  const pushAt = settings.indexOf("keeperPushPrefs(", saveAt);
+  const reloadAt = settings.indexOf('t("settings.prefsKeeperChanged")', saveAt);
+  assert.ok(saveAt > 0 && readAt > saveAt && reloadAt > readAt && pushAt > reloadAt);
+
   assert.match(settings, /t\("settings\.autoBuyKeeperUnreachable"\)/);
+  assert.match(settings, /t\("settings\.jevKeySaved"\)/);
   assert.match(settings, /disabled=\{!prefsReady\}/);
+  assert.equal(settings.includes("value={typesafeKey}"), true);
   assert.equal(
-    translate("pl", "settings.autoBuySignInBar"),
-    "Auto-zakup: podpisz w pasku u góry, aby zobaczyć stan",
+    translate("pl", "settings.prefsKeeperChanged"),
+    "Ustawienia w keeperze zmieniły się – wczytano je, sprawdź i zapisz ponownie",
   );
   assert.equal(
-    translate("en", "settings.autoBuySignInBar"),
-    "Auto-buy: sign in the bar at the top to see status",
+    translate("en", "settings.prefsKeeperChanged"),
+    "Keeper settings changed – reloaded, review and save again",
   );
+  assert.equal(translate("pl", "settings.jevKeySaved"), "Klucz zapisany w keeperze");
+  assert.equal(translate("en", "settings.jevKeySaved"), "Key saved in keeper");
   assert.equal(
     translate("pl", "settings.autoBuyKeeperUnreachable"),
     "Auto-zakup: keeper nieosiągalny, stan nieznany",
@@ -380,6 +381,44 @@ test("interactive status is only the Sign button", () => {
     translate("en", "settings.autoBuyKeeperUnreachable"),
     "Auto-buy: keeper unreachable, status unknown",
   );
+});
+
+test("a prefs save is skipped when the keeper copy changed since the edit started", () => {
+  const start = makePrefsEditBaseline("OpenAI", false, true, false);
+  const same = {
+    ok: true,
+    prefs: {
+      exclusions: ["OpenAI"],
+      deadlines_unimportant: false,
+      premiums_matter: true,
+      premiums_especially_near_ipo: true,
+      buy_despite_ipo: false,
+    },
+  };
+  assert.equal(decidePrefsSave(same, start).kind, "save");
+  assert.equal(
+    prefsEditBaselinesEqual(start, baselineFromKeeperPrefs(same.prefs, start)),
+    true,
+  );
+  const changed = decidePrefsSave(
+    {
+      ok: true,
+      prefs: {
+        exclusions: ["Kalshi"],
+        deadlines_unimportant: false,
+        premiums_matter: true,
+        buy_despite_ipo: false,
+      },
+    },
+    start,
+  );
+  assert.equal(changed.kind, "reload");
+  if (changed.kind === "reload") {
+    assert.equal(prefsEditBaselinesEqual(start, baselineFromKeeperPrefs(changed.prefs, start)), false);
+    assert.deepEqual(changed.prefs?.exclusions, ["Kalshi"]);
+  }
+  assert.equal(decidePrefsSave({ ok: false, error: "keeper_unreachable" }, start).kind, "unreachable");
+  assert.equal(decidePrefsSave({ ok: false, error: "public_status_unavailable" }, start).kind, "unreachable");
 });
 
 test("a silent miss keeps the action bit and only asks for a signature", () => {
@@ -510,30 +549,26 @@ describe("enable and disable sign once", { concurrency: false }, () => {
         const enabled = await keeperEnable(owner, true, sign, { exclusions: ["xAI"] });
         assert.equal(enabled.ok, true);
         assert.equal(signs, 1);
-        const afterEnable = await keeperStatus(owner, sign, { interactive: false });
+        const afterEnable = await keeperPublicStatus(owner);
         assert.equal(signs, 1, withSession ? "session enable" : "no-session enable");
+        assert.equal(afterEnable.ok, true);
+        assert.equal(afterEnable.enabled, true);
         const on = applyAutoBuyActionStatus(true, afterEnable);
         assert.equal(on.enabled, true);
-        assert.equal(on.needsSignature, !withSession);
-        if (!withSession) {
-          assert.equal(afterEnable.error, "session_required");
-          assert.equal(on.touchStatusResolved, false);
-          assert.equal(session.getItem(`${KEEPER_SESSION_PREFIX}${owner}`), null);
-        } else {
-          assert.equal(on.needsSignature, false);
-          assert.equal(session.getItem(`${KEEPER_SESSION_PREFIX}${owner}`), keptSession);
-        }
+        assert.equal(on.needsSignature, false);
+        assert.equal(on.touchStatusResolved, true);
+        assert.equal(session.getItem(`${KEEPER_SESSION_PREFIX}${owner}`), keptSession);
 
         signs = 0;
         const disabled = await keeperDisable(owner, sign);
         assert.equal(disabled.ok, true);
         assert.equal(signs, 1);
-        const afterDisable = await keeperStatus(owner, sign, { interactive: false });
+        const afterDisable = await keeperPublicStatus(owner);
         assert.equal(signs, 1, withSession ? "session disable" : "no-session disable");
+        assert.equal(afterDisable.enabled, false);
         const off = applyAutoBuyActionStatus(false, afterDisable);
         assert.equal(off.enabled, false);
-        assert.equal(off.needsSignature, !withSession);
-        if (!withSession) assert.equal(afterDisable.error, "session_required");
+        assert.equal(off.needsSignature, false);
       } finally {
         resetRuntimeConfigForTests();
         clearStatusAuthCache();
@@ -602,13 +637,15 @@ describe("enable and disable sign once", { concurrency: false }, () => {
       assert.equal(disabled.ok, false);
       assert.equal(signs, 1);
       assert.equal(statusGets, 0);
-      const silent = await keeperStatus(OWNER, sign, { interactive: false });
+      const silent = await keeperPublicStatus(OWNER);
       assert.equal(signs, 1);
-      assert.equal(silent.error, "session_required");
-      assert.equal(statusGets, 0);
-      const patch = applyAutoBuyActionStatus(false, silent);
-      assert.equal(patch.needsSignature, true);
+      assert.equal(silent.ok, false);
+      assert.equal(typeof silent.enabled, "undefined");
+      assert.equal(statusGets, 1);
+      const patch = applyAutoBuyActionStatus(false, { error: "keeper_unreachable" });
+      assert.equal(patch.needsSignature, false);
       assert.equal(patch.enabled, false);
+      assert.equal(patch.touchStatusResolved, true);
     } finally {
       resetRuntimeConfigForTests();
       clearStatusAuthCache();
@@ -623,4 +660,231 @@ describe("enable and disable sign once", { concurrency: false }, () => {
       } else globalThis.sessionStorage = previousSession;
     }
   });
+});
+
+test("enable, disable, and prefs each sign once and omit session:status", async () => {
+  await withKeeper(DUMMY_KEY, async (calls) => {
+    const actions: string[] = [];
+    const sign = async (message: Uint8Array) => {
+      const text = new TextDecoder().decode(message);
+      const action = /^Predca keeper authorization\naction:(\w+)\nowner:/m.exec(text)?.[1];
+      assert.equal(typeof action, "string");
+      assert.equal(text.includes("session:"), false);
+      actions.push(action ?? "");
+      return Uint8Array.of(actions.length);
+    };
+    const enabled = await keeperEnable(OWNER, true, sign, { exclusions: ["xAI"] });
+    const disabled = await keeperDisable(OWNER, sign);
+    const pushed = await keeperPushPrefs({ exclusions: ["OpenAI"] }, OWNER, sign);
+    assert.equal(enabled.ok, true);
+    assert.equal(disabled.ok, true);
+    assert.equal(pushed.ok, true);
+    assert.deepEqual(actions, ["enable", "disable", "prefs"]);
+    assert.equal(posts(calls, "/enable").length, 1);
+    assert.equal(posts(calls, "/disable").length, 1);
+    assert.equal(posts(calls, "/prefs").length, 1);
+    assert.equal(posts(calls, "/status").length, 0);
+    assert.equal(posts(calls, "/session").length, 0);
+    const reads = calls.filter(
+      (call) => call.method === "GET" && call.url.includes("/public/status?owner="),
+    );
+    assert.equal(reads.length, 3);
+  });
+});
+
+test("a rejected wallet signature sends no keeper request", async () => {
+  await withKeeper(DUMMY_KEY, async (calls) => {
+    const sign = async () => {
+      throw new Error("User rejected the request.");
+    };
+    const enabled = await keeperEnable(OWNER, true, sign, { exclusions: ["xAI"] });
+    const disabled = await keeperDisable(OWNER, sign);
+    const pushed = await keeperPushPrefs({ exclusions: ["OpenAI"] }, OWNER, sign);
+    assert.match(enabled.error ?? "", /^sign_rejected:/);
+    assert.match(disabled.error ?? "", /^sign_rejected:/);
+    assert.match(pushed.error ?? "", /^sign_rejected:/);
+    assert.equal(enabled.ok, false);
+    assert.equal(disabled.ok, false);
+    assert.equal(pushed.ok, false);
+    assert.equal(calls.length, 0);
+  });
+});
+
+test("a changed public prefs read does not sign or post", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousWindow = globalThis.window;
+  const previousKeeper = process.env.NEXT_PUBLIC_KEEPER_URL;
+  const previousApi = process.env.NEXT_PUBLIC_DCA_API_URL;
+  delete process.env.NEXT_PUBLIC_KEEPER_URL;
+  delete process.env.NEXT_PUBLIC_DCA_API_URL;
+  Object.defineProperty(globalThis, "window", { configurable: true, value: globalThis });
+  const calls: Captured[] = [];
+  let signs = 0;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    calls.push({
+      url,
+      method: init?.method ?? "GET",
+      body: typeof init?.body === "string" ? init.body : "",
+      headers: headerText(init?.headers),
+    });
+    if (url.includes("config.json")) {
+      return new Response(JSON.stringify({ dcaApiUrl: "", keeperUrl: "" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if ((init?.method ?? "GET").toUpperCase() === "POST") {
+      return new Response(JSON.stringify({ ok: false, error: "should_not_post" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        enabled: true,
+        owner: OWNER,
+        phase: "idle",
+        hasJevKey: true,
+        prefs: {
+          exclusions: ["Kalshi"],
+          deadlines_unimportant: true,
+          premiums_matter: false,
+          buy_despite_ipo: true,
+        },
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  }) as typeof fetch;
+  resetRuntimeConfigForTests();
+  try {
+    const start = makePrefsEditBaseline("OpenAI", false, true, false);
+    const fresh = await keeperPublicStatus(OWNER);
+    const decision = decidePrefsSave(fresh, start);
+    assert.equal(decision.kind, "reload");
+    if (decision.kind === "reload") {
+      assert.deepEqual(decision.prefs?.exclusions, ["Kalshi"]);
+      assert.equal(decision.prefs?.deadlines_unimportant, true);
+      assert.equal(
+        prefsEditBaselinesEqual(start, baselineFromKeeperPrefs(decision.prefs, start)),
+        false,
+      );
+    }
+    assert.equal(signs, 0);
+    assert.equal(posts(calls, "/prefs").length, 0);
+    assert.equal(posts(calls, "/enable").length, 0);
+    assert.equal(posts(calls, "/disable").length, 0);
+    assert.equal(calls.some((call) => call.method === "POST"), false);
+  } finally {
+    resetRuntimeConfigForTests();
+    globalThis.fetch = previousFetch;
+    if (previousWindow === undefined) delete (globalThis as { window?: Window }).window;
+    else globalThis.window = previousWindow;
+    if (previousKeeper === undefined) delete process.env.NEXT_PUBLIC_KEEPER_URL;
+    else process.env.NEXT_PUBLIC_KEEPER_URL = previousKeeper;
+    if (previousApi === undefined) delete process.env.NEXT_PUBLIC_DCA_API_URL;
+    else process.env.NEXT_PUBLIC_DCA_API_URL = previousApi;
+  }
+});
+
+test("a transitional public read keeps enable on and disable off", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousWindow = globalThis.window;
+  const previousLocal = globalThis.localStorage;
+  const previousDefault = process.env.NEXT_PUBLIC_TYPESAFE_DEFAULT_KEY;
+  const previousKeeper = process.env.NEXT_PUBLIC_KEEPER_URL;
+  const previousApi = process.env.NEXT_PUBLIC_DCA_API_URL;
+  delete process.env.NEXT_PUBLIC_TYPESAFE_DEFAULT_KEY;
+  delete process.env.NEXT_PUBLIC_KEEPER_URL;
+  delete process.env.NEXT_PUBLIC_DCA_API_URL;
+  const store = new Map<string, string>([[LS_TYPESAFE, DUMMY_KEY]]);
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: {
+      getItem: (item: string) => (store.has(item) ? store.get(item)! : null),
+      setItem: (item: string, value: string) => {
+        store.set(item, value);
+      },
+      removeItem: (item: string) => {
+        store.delete(item);
+      },
+      clear: () => store.clear(),
+      key: () => null,
+      length: 0,
+    },
+  });
+  Object.defineProperty(globalThis, "window", { configurable: true, value: globalThis });
+  let phase = "buying";
+  let signs = 0;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = (init?.method ?? "GET").toUpperCase();
+    if (url.includes("config.json")) {
+      return new Response(JSON.stringify({ dcaApiUrl: "", keeperUrl: "" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (method === "POST" && url.includes("/enable")) {
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          enabled: true,
+          signature: "buy-sig",
+          names: NAMES,
+          phase: "ok",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    if (method === "POST" && url.includes("/disable")) {
+      return new Response(JSON.stringify({ ok: true, enabled: false, phase: "off" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        enabled: false,
+        phase,
+        owner: OWNER,
+        jev_key: "ZZSECRETVALUEZZ",
+        rpc: "https://rpc.example/?api-key=ZZSECRETVALUEZZ",
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  }) as typeof fetch;
+  resetRuntimeConfigForTests();
+  try {
+    const sign = async () => Uint8Array.of(++signs);
+    const enabled = await keeperEnable(OWNER, true, sign, { exclusions: ["xAI"] });
+    assert.equal(signs, 1);
+    assert.equal(enabled.ok, true);
+    assert.equal(enabled.enabled, true);
+    assert.equal(JSON.stringify(enabled).includes("ZZSECRETVALUEZZ"), false);
+    assert.equal(nextAutoBuyEnabled(true, enabled, OWNER), true);
+    phase = "off";
+    const disabled = await keeperDisable(OWNER, sign);
+    assert.equal(signs, 2);
+    assert.equal(disabled.ok, true);
+    assert.equal(disabled.enabled, false);
+    assert.equal(nextAutoBuyEnabled(false, disabled, OWNER), false);
+    assert.equal(JSON.stringify(disabled).includes("ZZSECRETVALUEZZ"), false);
+  } finally {
+    resetRuntimeConfigForTests();
+    globalThis.fetch = previousFetch;
+    if (previousWindow === undefined) delete (globalThis as { window?: Window }).window;
+    else globalThis.window = previousWindow;
+    if (previousLocal === undefined) {
+      delete (globalThis as { localStorage?: Storage }).localStorage;
+    } else globalThis.localStorage = previousLocal;
+    if (previousDefault === undefined) delete process.env.NEXT_PUBLIC_TYPESAFE_DEFAULT_KEY;
+    else process.env.NEXT_PUBLIC_TYPESAFE_DEFAULT_KEY = previousDefault;
+    if (previousKeeper === undefined) delete process.env.NEXT_PUBLIC_KEEPER_URL;
+    else process.env.NEXT_PUBLIC_KEEPER_URL = previousKeeper;
+    if (previousApi === undefined) delete process.env.NEXT_PUBLIC_DCA_API_URL;
+    else process.env.NEXT_PUBLIC_DCA_API_URL = previousApi;
+  }
 });

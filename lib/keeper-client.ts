@@ -1,4 +1,8 @@
-/** Predca keeper client — public HTTPS (rank API /keeper proxy) + wallet sig auth. */
+/**
+ * Predca keeper client — public HTTPS (rank API /keeper proxy).
+ * Status and prefs are a public read for one wallet (`GET /public/status`).
+ * A wallet signature is required only for enable, disable, and prefs.
+ */
 
 import { readTypesafeKey } from "@/lib/keys";
 import {
@@ -56,6 +60,18 @@ export type KeeperRunResult = {
   detail?: string;
   /** Client gave up waiting. The daemon may still finish /enable. */
   pending?: boolean;
+  /** Ranking prefs from the public status read. Never includes a Jev key. */
+  prefs?: KeeperPrefsPayload;
+  /** True when the keeper has a Jev key stored. The key itself is never returned. */
+  hasJevKey?: boolean;
+};
+
+export type KeeperPrefsPayload = {
+  exclusions?: string[];
+  deadlines_unimportant?: boolean;
+  premiums_matter?: boolean;
+  premiums_especially_near_ipo?: boolean;
+  buy_despite_ipo?: boolean;
 };
 
 export type KeeperSignFn = (message: Uint8Array) => Promise<Uint8Array>;
@@ -111,223 +127,40 @@ export async function signKeeperAuth(
   };
 }
 
-type StatusAuthCached = {
-  wallet: string;
-  message: string;
-  signature: string;
-  owner: string;
-  expiresAt: number;
-};
-
-type SessionCached = {
-  token: string;
-  expiresAt: number;
-  owner: string;
-};
-
-/** Module-level cache: reuse status sig until expires-30s (SIG_TTL_S=300). */
-const statusAuthCache = new Map<string, StatusAuthCached>();
-/** Short-lived server session (Bearer) — avoids Phantom re-prompt every ~5 min. */
-const sessionCache = new Map<string, SessionCached>();
-/** Dedupe concurrent sign prompts (status + prefs hydrate in parallel). */
-const statusAuthInflight = new Map<
-  string,
-  Promise<{ wallet: string; message: string; signature: string; owner: string }>
->();
-const sessionInflight = new Map<
-  string,
-  Promise<{ session: SessionCached | null; result: KeeperRunResult | null }>
->();
 /**
- * Bumped on clear so an in-flight sign cannot write the cache back after
- * disconnect. Per-owner bumps do not invalidate other wallets.
+ * Older builds kept a bearer token under this prefix (localStorage, then
+ * sessionStorage). Status no longer uses a session. Delete the keys.
+ * Never read or log the values.
  */
-let statusAuthEpoch = 0;
-const statusAuthEpochByOwner = new Map<string, number>();
-
-function authGeneration(owner: string): number {
-  return statusAuthEpoch + (statusAuthEpochByOwner.get(owner) ?? 0);
-}
-
-function parseExpiresFromMessage(message: string): number {
-  const m = /expires:(\d+)/i.exec(message);
-  return m ? Number(m[1]) : 0;
-}
-
-/** Tab session only. Same prefix as older builds; those copies lived in localStorage. */
 export const KEEPER_SESSION_PREFIX = "noir3.predca.keeper.session.";
 
-function sessionStorageKey(owner: string): string {
-  return `${KEEPER_SESSION_PREFIX}${owner.trim()}`;
-}
-
-/**
- * Older builds kept the bearer token in localStorage, so it survived closing
- * the tab. Delete those keys. Never read the values.
- */
-function purgeLegacyLocalSessions(): void {
-  if (typeof localStorage === "undefined") return;
+function purgeStoragePrefix(storage: Storage | undefined): void {
+  if (!storage) return;
   try {
     const prefix = KEEPER_SESSION_PREFIX;
-    for (let i = localStorage.length - 1; i >= 0; i--) {
-      const k = localStorage.key(i);
-      if (k && k.startsWith(prefix)) localStorage.removeItem(k);
+    for (let i = storage.length - 1; i >= 0; i--) {
+      const k = storage.key(i);
+      if (k && k.startsWith(prefix)) storage.removeItem(k);
     }
   } catch {
     /* private mode */
   }
 }
 
-function readStoredSession(owner: string): SessionCached | null {
-  const key = owner.trim();
-  if (!key || typeof sessionStorage === "undefined") return null;
-  const sk = sessionStorageKey(key);
-  try {
-    const raw = sessionStorage.getItem(sk);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as SessionCached;
-    if (
-      !parsed ||
-      typeof parsed.token !== "string" ||
-      !parsed.token ||
-      typeof parsed.expiresAt !== "number" ||
-      parsed.owner !== key
-    ) {
-      sessionStorage.removeItem(sk);
-      return null;
-    }
-    return { token: parsed.token, expiresAt: parsed.expiresAt, owner: key };
-  } catch {
-    try {
-      sessionStorage.removeItem(sk);
-    } catch {
-      /* ignore */
-    }
-    return null;
-  }
+/** Drop leftover keeper session tokens. Does not read or log them. */
+export function purgeStoredKeeperSessions(): void {
+  if (typeof localStorage !== "undefined") purgeStoragePrefix(localStorage);
+  if (typeof sessionStorage !== "undefined") purgeStoragePrefix(sessionStorage);
 }
 
-function writeStoredSession(session: SessionCached): void {
-  const owner = session.owner.trim();
-  if (!owner || session.owner !== owner) return;
-  if (typeof session.token !== "string" || !session.token) return;
-  if (typeof session.expiresAt !== "number") return;
-  if (typeof sessionStorage === "undefined") return;
-  try {
-    sessionStorage.setItem(
-      sessionStorageKey(owner),
-      JSON.stringify({ token: session.token, expiresAt: session.expiresAt, owner }),
-    );
-  } catch {
-    /* quota / private mode */
-  }
-}
-
-function removeStoredSession(owner?: string): void {
-  if (typeof sessionStorage === "undefined") return;
-  try {
-    if (owner) {
-      const key = owner.trim();
-      if (key) sessionStorage.removeItem(sessionStorageKey(key));
-      return;
-    }
-    const prefix = KEEPER_SESSION_PREFIX;
-    for (let i = sessionStorage.length - 1; i >= 0; i--) {
-      const k = sessionStorage.key(i);
-      if (k && k.startsWith(prefix)) sessionStorage.removeItem(k);
-    }
-  } catch {
-    /* ignore */
-  }
-}
-
-purgeLegacyLocalSessions();
-
-function getCachedSession(owner: string): SessionCached | null {
-  const key = owner.trim();
-  const now = Math.floor(Date.now() / 1000);
-  const mem = sessionCache.get(key);
-  if (mem && mem.expiresAt - 60 > now) return mem;
-  const stored = readStoredSession(key);
-  if (stored && stored.expiresAt - 60 > now) {
-    sessionCache.set(key, stored);
-    return stored;
-  }
-  if (mem) sessionCache.delete(key);
-  if (stored) removeStoredSession(key);
-  return null;
-}
-
-function setCachedSession(
-  owner: string,
-  token: string,
-  expiresAt: number,
-  generation?: number,
-): void {
-  const key = owner.trim();
-  if (generation !== undefined && generation !== authGeneration(key)) return;
-  const session: SessionCached = { token, expiresAt, owner: key };
-  sessionCache.set(key, session);
-  writeStoredSession(session);
-}
-
-/** Sign action:status once; pollers reuse until near expiry (fallback before session). */
-export async function getStatusAuth(
-  owner: string,
-  signMessage: KeeperSignFn,
-): Promise<{ wallet: string; message: string; signature: string; owner: string }> {
-  const key = owner.trim();
-  const now = Math.floor(Date.now() / 1000);
-  const cached = statusAuthCache.get(key);
-  if (cached && cached.expiresAt - 30 > now) {
-    return {
-      wallet: cached.wallet,
-      message: cached.message,
-      signature: cached.signature,
-      owner: cached.owner,
-    };
-  }
-  const pending = statusAuthInflight.get(key);
-  if (pending) return pending;
-  const generation = authGeneration(key);
-  const promise = (async () => {
-    const auth = await signKeeperAuth(signMessage, "status", key);
-    if (authGeneration(key) !== generation) return auth;
-    const expiresAt = parseExpiresFromMessage(auth.message);
-    statusAuthCache.set(key, { ...auth, expiresAt });
-    return auth;
-  })().finally(() => {
-    if (statusAuthInflight.get(key) === promise) statusAuthInflight.delete(key);
-  });
-  statusAuthInflight.set(key, promise);
-  return promise;
-}
+purgeStoredKeeperSessions();
 
 /**
- * Drop status signature, Bearer session, sessionStorage, and in-flight sign/mint
- * for one owner. Omit owner to drop every wallet. Wallet change and disconnect
- * call this. A silent 401 drops only the bearer token.
+ * Wallet change and disconnect still call this. There is no status signature
+ * cache left; the call only deletes leftover session tokens.
  */
-export function clearStatusAuthCache(owner?: string): void {
-  purgeLegacyLocalSessions();
-  if (owner) {
-    const key = owner.trim();
-    if (!key) return;
-    statusAuthEpochByOwner.set(key, (statusAuthEpochByOwner.get(key) ?? 0) + 1);
-    statusAuthCache.delete(key);
-    sessionCache.delete(key);
-    statusAuthInflight.delete(key);
-    sessionInflight.delete(key);
-    removeStoredSession(key);
-    return;
-  }
-  statusAuthEpoch += 1;
-  statusAuthEpochByOwner.clear();
-  statusAuthCache.clear();
-  sessionCache.clear();
-  statusAuthInflight.clear();
-  sessionInflight.clear();
-  removeStoredSession();
+export function clearStatusAuthCache(_owner?: string): void {
+  purgeStoredKeeperSessions();
 }
 
 /** Abort from our timeout, not a daemon answer. */
@@ -551,7 +384,7 @@ export async function keeperEnable(
     },
     120000,
   );
-  return enableResultFromTransport(r);
+  return withPublicRefresh(owner, enableResultFromTransport(r));
 }
 
 export async function keeperDisable(
@@ -583,7 +416,7 @@ export async function keeperDisable(
       error: r.status === 0 ? "keeper_unreachable" : `http_${r.status}`,
     };
   }
-  if (!r.ok || r.status === 401 || r.status === 403) {
+  if (!r.ok || r.status === 401 || r.status === 403 || r.data.ok === false) {
     return {
       ok: false,
       error:
@@ -594,11 +427,11 @@ export async function keeperDisable(
           : `http_${r.status}`),
     };
   }
-  return r.data;
+  return withPublicRefresh(owner, { ...r.data, ok: true });
 }
 
 /**
- * Live keeper `/status` (public, redacted). Pass owner for per-wallet status.
+ * Timestamps on a keeper status payload.
  */
 function timestampMs(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value) && value > 0) {
@@ -651,261 +484,193 @@ export function keeperNextBuyAtMs(
   return lastBuy + (interval ?? 7 * 24 * 60 * 60 * 1000);
 }
 
-type StatusWithSession = KeeperRunResult & {
-  sessionToken?: string;
-  sessionExpiresAt?: number;
-  detail?: string;
-};
+const TRANSITIONAL_PUBLIC_PHASES = new Set([
+  "enabling",
+  "buying",
+  "checking",
+  "ranking",
+  "confirming",
+  "pending",
+]);
 
-type StatusMintResult = {
-  session: SessionCached | null;
-  result: KeeperRunResult | null;
-};
-
-function ingestSessionFromPayload(
-  owner: string,
-  data: StatusWithSession | null,
-  generation?: number,
-): void {
-  if (!data) return;
-  const raw = data as StatusWithSession & {
-    session_token?: string;
-    session_expires_at?: number | string;
-  };
-  const token =
-    (typeof raw.sessionToken === "string" && raw.sessionToken) ||
-    (typeof raw.session_token === "string" && raw.session_token) ||
-    "";
-  const expRaw = raw.sessionExpiresAt ?? raw.session_expires_at;
-  const exp =
-    typeof expRaw === "number"
-      ? expRaw
-      : typeof expRaw === "string" && expRaw.trim()
-        ? Number(expRaw)
-        : NaN;
-  if (token && Number.isFinite(exp) && exp > 0) {
-    // Accept ms timestamps defensively.
-    const expSec = exp > 1e12 ? Math.floor(exp / 1000) : Math.floor(exp);
-    setCachedSession(owner, token, expSec, generation);
-  }
-}
-
-/** Drop the bearer token only. A silent 401 must not open a signature prompt. */
-function clearSessionOnly(owner: string): void {
-  const key = owner.trim();
-  sessionCache.delete(key);
-  removeStoredSession(key);
-}
-
-function statusErrorFrom(
-  data: StatusWithSession,
-  status: number,
-): KeeperRunResult {
-  return {
-    ...data,
-    ok: false,
-    error:
-      data.error ||
-      data.detail ||
-      (status === 401 || status === 403 ? "signature_rejected" : `http_${status}`),
-    source: data.source ?? "daemon",
-  };
-}
-
-export type KeeperStatusOptions = {
-  /**
-   * `false` (default): never open a wallet prompt. Missing or rejected
-   * session returns `session_required`.
-   * `true`: one action:status signature mints the session. A 401 on the
-   * bearer GET signs at most once more; the next error is returned as-is.
-   */
-  interactive?: boolean;
-};
-
-function sessionRequired(): KeeperRunResult {
-  return { ok: false, error: "session_required" };
-}
-
-function bearerRejected(status: number): boolean {
-  return status === 401 || status === 403;
+/** enabled:false with no settled phase must not be treated as Off. */
+function publicReadIsTransitional(st: {
+  enabled?: boolean;
+  phase?: string | null;
+}): boolean {
+  if (typeof st.enabled !== "boolean") return true;
+  if (st.enabled === true) return false;
+  const phase = typeof st.phase === "string" ? st.phase.trim() : "";
+  if (!phase) return true;
+  return TRANSITIONAL_PUBLIC_PHASES.has(phase);
 }
 
 /**
- * Per-owner keeper status. Polls reuse the tab session (sessionStorage).
- * The default is silent: no token or a rejected token does not sign.
- * `interactive: true` signs action:status once (twice only when a stored
- * token is rejected, and then stops).
- * Without owner returns wallet_required (use keeperHealth for alive).
+ * After a successful enable, disable, or prefs push, re-read public status.
+ * A failed read keeps the action body. A transitional enabled:false does not
+ * replace the action's on/off bit. Purchase fields stay on the action result.
  */
-export async function keeperStatus(
-  owner?: string,
-  signMessage?: KeeperSignFn,
-  options?: KeeperStatusOptions,
+async function withPublicRefresh(
+  owner: string,
+  action: KeeperRunResult,
 ): Promise<KeeperRunResult> {
-  purgeLegacyLocalSessions();
-  const interactive = options?.interactive === true;
-  if (!owner?.trim()) {
-    return { ok: false, error: "wallet_required" };
-  }
-  if (interactive && !signMessage) {
-    return { ok: false, error: "wallet_required" };
-  }
-  const key = owner.trim();
-  const sign = signMessage;
-
-  const fetchWithBearer = async (token: string) =>
-    keeperFetch(
-      `/status?owner=${encodeURIComponent(key)}`,
-      {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "X-Keeper-Session": token,
-        },
-      },
-      8000,
-    );
-
-  const takeInflight = async (): Promise<KeeperRunResult | null> => {
-    const pending = sessionInflight.get(key);
-    if (!pending) return null;
-    const shared = await pending;
-    return shared.result;
+  if (!action.ok || action.pending) return action;
+  const fresh = await keeperPublicStatus(owner);
+  if (!fresh.ok) return action;
+  const transitional = publicReadIsTransitional(fresh);
+  return {
+    ...action,
+    owner: fresh.owner ?? action.owner,
+    mode: fresh.mode ?? action.mode,
+    nextAt: fresh.nextAt ?? action.nextAt,
+    next_buy_at: fresh.next_buy_at ?? action.next_buy_at,
+    lastRunTs: fresh.lastRunTs ?? action.lastRunTs,
+    last_run_ts: fresh.last_run_ts ?? action.last_run_ts,
+    prefs: fresh.prefs ?? action.prefs,
+    hasJevKey:
+      typeof fresh.hasJevKey === "boolean" ? fresh.hasJevKey : action.hasJevKey,
+    phase: transitional ? (action.phase ?? fresh.phase) : (fresh.phase ?? action.phase),
+    enabled: transitional
+      ? action.enabled
+      : typeof fresh.enabled === "boolean"
+        ? fresh.enabled
+        : action.enabled,
+    signature: action.signature || fresh.signature,
   };
-
-  // One POST /status. Called only from the interactive path, and only once
-  // per keeperStatus() call. A rejected POST is the second error: return it.
-  const signAndMint = async (): Promise<StatusMintResult> => {
-    const generation = authGeneration(key);
-    const dropped = (): StatusMintResult => ({
-      session: null,
-      result: { ok: false, error: "keeper_unreachable" },
-    });
-    const raced = getCachedSession(key);
-    if (raced) {
-      const br = await fetchWithBearer(raced.token);
-      if (authGeneration(key) !== generation) return dropped();
-      if (br.data && br.status !== 0 && br.ok && !bearerRejected(br.status)) {
-        ingestSessionFromPayload(key, br.data as StatusWithSession, generation);
-        return {
-          session: getCachedSession(key),
-          result: { ...br.data, source: br.data.source ?? "daemon" },
-        };
-      }
-      if (bearerRejected(br.status)) {
-        clearSessionOnly(key);
-        statusAuthCache.delete(key);
-      } else if (br.data && br.status !== 0) {
-        return { session: null, result: statusErrorFrom(br.data as StatusWithSession, br.status) };
-      } else {
-        return { session: null, result: { ok: false, error: "keeper_unreachable" } };
-      }
-    }
-    if (!sign) {
-      return { session: null, result: sessionRequired() };
-    }
-    let auth;
-    try {
-      auth = await getStatusAuth(key, sign);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      return {
-        session: null,
-        result: { ok: false, error: `sign_rejected: ${msg}` },
-      };
-    }
-    if (authGeneration(key) !== generation) return dropped();
-    const r = await keeperFetch(
-      "/status",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(auth),
-      },
-      8000,
-    );
-    if (authGeneration(key) !== generation) return dropped();
-    const data = r.data as StatusWithSession | null;
-    if (data && r.status !== 0 && r.ok && !bearerRejected(r.status)) {
-      ingestSessionFromPayload(key, data, generation);
-      return {
-        session: getCachedSession(key),
-        result: { ...data, source: data.source ?? "daemon" },
-      };
-    }
-    // The remint failed. Do not sign again inside this call.
-    if (bearerRejected(r.status)) statusAuthCache.delete(key);
-    if (data && r.status !== 0) {
-      return { session: null, result: statusErrorFrom(data, r.status) };
-    }
-    return { session: null, result: { ok: false, error: "keeper_unreachable" } };
-  };
-
-  const mintOnce = async (): Promise<KeeperRunResult> => {
-    const joined = await takeInflight();
-    if (joined) return joined;
-    const mintPromise = signAndMint().finally(() => {
-      if (sessionInflight.get(key) === mintPromise) sessionInflight.delete(key);
-    });
-    sessionInflight.set(key, mintPromise);
-    const minted = await mintPromise;
-    if (minted.result) return minted.result;
-    return { ok: false, error: "keeper_unreachable" };
-  };
-
-  const inflight = await takeInflight();
-  if (inflight) return inflight;
-
-  const existing = getCachedSession(key);
-  if (existing) {
-    const generation = authGeneration(key);
-    const r = await fetchWithBearer(existing.token);
-    if (authGeneration(key) !== generation) {
-      return { ok: false, error: "keeper_unreachable" };
-    }
-    if (r.data && r.status !== 0 && r.ok && !bearerRejected(r.status)) {
-      ingestSessionFromPayload(key, r.data as StatusWithSession, generation);
-      return { ...r.data, source: r.data.source ?? "daemon" };
-    }
-    if (bearerRejected(r.status)) {
-      clearSessionOnly(key);
-      if (!interactive) {
-        const joined = await takeInflight();
-        if (joined) return joined;
-        return sessionRequired();
-      }
-      // Force one new wallet prompt. The POST below is the only retry.
-      statusAuthCache.delete(key);
-      return mintOnce();
-    }
-    if (r.data && r.status !== 0) {
-      return statusErrorFrom(r.data as StatusWithSession, r.status);
-    }
-    return { ok: false, error: "keeper_unreachable" };
-  }
-
-  if (!interactive) {
-    const joined = await takeInflight();
-    if (joined) return joined;
-    return sessionRequired();
-  }
-  return mintOnce();
 }
 
-export type KeeperPrefsPayload = {
-  exclusions?: string[];
-  deadlines_unimportant?: boolean;
-  premiums_matter?: boolean;
-  premiums_especially_near_ipo?: boolean;
-  buy_despite_ipo?: boolean;
-};
+const PUBLIC_TEXT_FIELDS = [
+  "signature",
+  "nextAt",
+  "next_buy_at",
+  "lastRunTs",
+  "last_run_ts",
+  "lastBuy",
+  "last_buy",
+  "interval",
+  "intervalSec",
+  "interval_sec",
+  "owner",
+  "phase",
+  "mode",
+  "reason",
+] as const;
 
-/** Push Settings prefs — requires wallet signature. */
+/** Drop URLs and key/token query fragments. Keeper errors can echo an RPC URL. */
+function publicErrorText(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const stripped = value
+    .replace(/https?:\/\/\S+/gi, " ")
+    .replace(/(?:api-key|token|key)=[^\s&#]*/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 200);
+  return stripped.length > 0 ? stripped : undefined;
+}
+
+function pickPublicPrefs(raw: unknown): KeeperPrefsPayload | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const src = raw as Record<string, unknown>;
+  const prefs: KeeperPrefsPayload = {};
+  if (Array.isArray(src.exclusions)) {
+    prefs.exclusions = src.exclusions.filter(
+      (item): item is string => typeof item === "string",
+    );
+  }
+  for (const key of [
+    "deadlines_unimportant",
+    "premiums_matter",
+    "premiums_especially_near_ipo",
+    "buy_despite_ipo",
+  ] as const) {
+    if (typeof src[key] === "boolean") prefs[key] = src[key];
+  }
+  return prefs;
+}
+
+/**
+ * Copy only the public status fields. A Jev key, RPC URL, port, session
+ * token, or other extra field from a careless payload never lands in state.
+ */
+function pickPublicStatus(data: KeeperRunResult): KeeperRunResult {
+  const src = data as KeeperRunResult & Record<string, unknown>;
+  const out: KeeperRunResult = {
+    ok: data.ok !== false,
+    source:
+      typeof data.source === "string" && data.source.trim() ? data.source : "daemon",
+  };
+  for (const key of ["skipped", "enabled", "daemon", "pending"] as const) {
+    if (typeof src[key] === "boolean") out[key] = src[key];
+  }
+  if (typeof src.hasJevKey === "boolean") out.hasJevKey = src.hasJevKey;
+  if (typeof src.amountUsd === "number" && Number.isFinite(src.amountUsd)) {
+    out.amountUsd = src.amountUsd;
+  }
+  if (Array.isArray(src.names)) {
+    out.names = src.names.filter((item): item is string => typeof item === "string");
+  }
+  for (const key of PUBLIC_TEXT_FIELDS) {
+    const value = src[key];
+    if (typeof value === "string" || typeof value === "number") {
+      (out as Record<string, unknown>)[key] = value;
+    }
+  }
+  const error = publicErrorText(src.error);
+  if (error) out.error = error;
+  const detail = publicErrorText(src.detail);
+  if (detail) out.detail = detail;
+  const prefs = pickPublicPrefs(src.prefs);
+  if (prefs) out.prefs = prefs;
+  return out;
+}
+
+/**
+ * Public keeper status for one wallet. No session, no signature, no auth headers.
+ * Network errors and HTTP 5xx are keeper_unreachable (not Off).
+ * HTTP 404 is public_status_unavailable (not Off).
+ */
+export async function keeperPublicStatus(owner: string): Promise<KeeperRunResult> {
+  const key = owner.trim();
+  if (!key) return { ok: false, error: "wallet_required" };
+  const r = await keeperFetch(
+    `/public/status?owner=${encodeURIComponent(key)}`,
+    { method: "GET" },
+    8000,
+  );
+  if (r.status === 404) {
+    return { ok: false, error: "public_status_unavailable" };
+  }
+  if (r.timedOut || r.status === 0 || r.status >= 500 || !r.data) {
+    return { ok: false, error: "keeper_unreachable" };
+  }
+  if (!r.ok) {
+    return {
+      ok: false,
+      error:
+        publicErrorText(r.data.error) ||
+        publicErrorText(r.data.detail) ||
+        `http_${r.status}`,
+    };
+  }
+  return pickPublicStatus(r.data);
+}
+
+/**
+ * Silent per-owner status. Same read as keeperPublicStatus.
+ * Does not sign and does not mint a session.
+ */
+export async function keeperStatus(owner?: string): Promise<KeeperRunResult> {
+  purgeStoredKeeperSessions();
+  if (!owner?.trim()) return { ok: false, error: "wallet_required" };
+  return keeperPublicStatus(owner.trim());
+}
+
+/** Push Settings prefs — one wallet signature (action:prefs). */
 export async function keeperPushPrefs(
   prefs: KeeperPrefsPayload,
   owner?: string,
   signMessage?: KeeperSignFn,
-): Promise<{ ok: boolean; prefs?: KeeperPrefsPayload; error?: string }> {
+): Promise<{ ok: boolean; prefs?: KeeperPrefsPayload; hasJevKey?: boolean; error?: string }> {
   if (!owner || !signMessage) {
     return { ok: false, error: "wallet_signature_required" };
   }
@@ -938,28 +703,31 @@ export async function keeperPushPrefs(
           : `http_${r.status || 0}`),
     };
   }
-  const data = r.data as KeeperRunResult & { prefs?: KeeperPrefsPayload };
-  return { ok: true, prefs: data.prefs };
+  const refreshed = await withPublicRefresh(owner, { ...r.data, ok: true });
+  return {
+    ok: true,
+    prefs: refreshed.prefs ?? r.data.prefs,
+    hasJevKey: refreshed.hasJevKey,
+  };
 }
 
-/** Prefs via signed status (GET /prefs is 401). Reuses status auth cache. */
+/** Prefs from the public status read. No signature. */
 export async function keeperGetPrefs(
   owner?: string,
-  signMessage?: KeeperSignFn,
 ): Promise<{
   ok: boolean;
   prefs?: KeeperPrefsPayload;
+  hasJevKey?: boolean;
   error?: string;
 }> {
-  if (!owner?.trim() || !signMessage) {
+  if (!owner?.trim()) {
     return { ok: false, error: "wallet_required" };
   }
-  const st = await keeperStatus(owner, signMessage);
+  const st = await keeperPublicStatus(owner);
   if (!st.ok) {
     return { ok: false, error: st.error };
   }
-  const data = st as KeeperRunResult & { prefs?: KeeperPrefsPayload };
-  return { ok: true, prefs: data.prefs };
+  return { ok: true, prefs: st.prefs, hasJevKey: st.hasJevKey };
 }
 
 export function getKeeperBaseUrl(): string {

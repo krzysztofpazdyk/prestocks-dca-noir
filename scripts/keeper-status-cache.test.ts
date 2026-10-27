@@ -1,12 +1,19 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, test } from "node:test";
+import { nextAutoBuyEnabled } from "../lib/keeper-enabled";
 import {
   KEEPER_SESSION_PREFIX,
   clearStatusAuthCache,
-  getStatusAuth,
+  keeperGetPrefs,
+  keeperPublicStatus,
   keeperStatus,
 } from "../lib/keeper-client";
+import { resetRuntimeConfigForTests } from "../lib/runtime-config";
+
+const OWNER = "ownerA";
+const OTHER = "ownerB";
+const SECRET = "ZZSECRETVALUEZZ";
 
 const localStore = new Map<string, string>();
 const sessionStore = new Map<string, string>();
@@ -63,256 +70,243 @@ function writeSession(owner: string, token: string): void {
   );
 }
 
-function jsonResponse(status: number, body: Record<string, unknown>) {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    json: async () => body,
-  };
-}
+type Captured = { url: string; method: string; headers: string };
 
-function prefixKeys(storage: Storage): string[] {
-  const keys: string[] = [];
-  for (let i = 0; i < storage.length; i++) {
-    const key = storage.key(i);
-    if (key && key.startsWith(KEEPER_SESSION_PREFIX)) keys.push(key);
+function headerText(headers: HeadersInit | undefined): string {
+  if (!headers) return "";
+  if (headers instanceof Headers) {
+    return [...headers.entries()].map(([name, value]) => `${name}:${value}`).join("\n");
   }
-  return keys;
+  if (Array.isArray(headers)) {
+    return headers.map(([name, value]) => `${name}:${value}`).join("\n");
+  }
+  return Object.entries(headers)
+    .map(([name, value]) => `${name}:${String(value)}`)
+    .join("\n");
 }
 
-describe("keeper session cache", { concurrency: false }, () => {
+function jsonResponse(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+async function withFetch(
+  respond: (url: string, init: RequestInit | undefined) => Response | Promise<Response>,
+  run: (calls: Captured[]) => Promise<void>,
+): Promise<void> {
+  const previousFetch = globalThis.fetch;
+  const previousKeeper = process.env.NEXT_PUBLIC_KEEPER_URL;
+  const previousApi = process.env.NEXT_PUBLIC_DCA_API_URL;
+  delete process.env.NEXT_PUBLIC_KEEPER_URL;
+  delete process.env.NEXT_PUBLIC_DCA_API_URL;
+  const calls: Captured[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    calls.push({
+      url,
+      method: (init?.method ?? "GET").toUpperCase(),
+      headers: headerText(init?.headers),
+    });
+    if (url.includes("config.json")) {
+      return jsonResponse(200, { dcaApiUrl: "", keeperUrl: "" });
+    }
+    return respond(url, init);
+  }) as typeof fetch;
+  resetRuntimeConfigForTests();
+  try {
+    await run(calls);
+  } finally {
+    resetRuntimeConfigForTests();
+    globalThis.fetch = previousFetch;
+    if (previousKeeper === undefined) delete process.env.NEXT_PUBLIC_KEEPER_URL;
+    else process.env.NEXT_PUBLIC_KEEPER_URL = previousKeeper;
+    if (previousApi === undefined) delete process.env.NEXT_PUBLIC_DCA_API_URL;
+    else process.env.NEXT_PUBLIC_DCA_API_URL = previousApi;
+  }
+}
+
+function publicGets(calls: Captured[]): Captured[] {
+  return calls.filter(
+    (call) => call.method === "GET" && call.url.includes("/public/status?"),
+  );
+}
+
+function authHeaders(call: Captured): boolean {
+  const text = call.headers.toLowerCase();
+  return text.includes("authorization") || text.includes("bearer") || text.includes(SECRET.toLowerCase());
+}
+
+describe("public keeper status", { concurrency: false }, () => {
   beforeEach(() => {
     localStore.clear();
     sessionStore.clear();
     installStorage();
-    clearStatusAuthCache();
   });
 
   afterEach(() => {
     clearStatusAuthCache();
   });
 
-  test("clearStatusAuthCache(owner) drops that signature and session only", async () => {
-    let signsA = 0;
-    let signsB = 0;
-    const signA = async () => Uint8Array.of(++signsA);
-    const signB = async () => Uint8Array.of(++signsB);
-    await getStatusAuth("ownerA", signA);
-    await getStatusAuth("ownerB", signB);
-    writeSession("ownerA", "bearer-a");
-    writeSession("ownerB", "bearer-b");
-
-    await getStatusAuth("ownerA", signA);
-    assert.equal(signsA, 1);
-
-    clearStatusAuthCache("ownerA");
-    assert.equal(sessionStorage.getItem(sessionKey("ownerA")), null);
-    assert.equal(sessionStorage.getItem(sessionKey("ownerB")) !== null, true);
-
-    await getStatusAuth("ownerA", signA);
-    await getStatusAuth("ownerB", signB);
-    assert.equal(signsA, 2);
-    assert.equal(signsB, 1);
-  });
-
-  test("clearStatusAuthCache() drops every owner", async () => {
-    let signsA = 0;
-    let signsB = 0;
-    await getStatusAuth("ownerA", async () => Uint8Array.of(++signsA));
-    await getStatusAuth("ownerB", async () => Uint8Array.of(++signsB));
-    writeSession("ownerA", "bearer-a");
-    writeSession("ownerB", "bearer-b");
-
-    clearStatusAuthCache();
-    assert.equal(sessionStorage.getItem(sessionKey("ownerA")), null);
-    assert.equal(sessionStorage.getItem(sessionKey("ownerB")), null);
-
-    await getStatusAuth("ownerA", async () => Uint8Array.of(++signsA));
-    await getStatusAuth("ownerB", async () => Uint8Array.of(++signsB));
-    assert.equal(signsA, 2);
-    assert.equal(signsB, 2);
-  });
-
-  test("an in-flight status sign cannot refill the cache after clear", async () => {
-    let release: (bytes: Uint8Array) => void = () => {};
-    let signs = 0;
-    const first = getStatusAuth("ownerA", () => {
-      signs += 1;
-      return new Promise((resolve) => {
-        release = resolve;
-      });
-    });
-    clearStatusAuthCache("ownerA");
-    const second = getStatusAuth("ownerA", async () => {
-      signs += 1;
-      return Uint8Array.of(7);
-    });
-    release(Uint8Array.of(1));
-    const stale = await first;
-    const fresh = await second;
-    assert.equal(signs, 2);
-    assert.notEqual(stale.signature, fresh.signature);
-    const before = signs;
-    const reused = await getStatusAuth("ownerA", async () => {
-      signs += 1;
-      return Uint8Array.of(9);
-    });
-    assert.equal(signs, before);
-    assert.equal(reused.signature, fresh.signature);
-  });
-
-  test("silent mode without a token does not sign", async () => {
-    let signs = 0;
-    let statusCalls = 0;
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.includes("/status")) statusCalls += 1;
-      return jsonResponse(200, { ok: true });
-    }) as unknown as typeof fetch;
-    try {
-      const status = await keeperStatus("ownerA", async () => {
-        signs += 1;
-        return Uint8Array.of(1);
-      });
-      assert.equal(status.ok, false);
-      assert.equal(status.error, "session_required");
-      assert.equal(signs, 0);
-      assert.equal(statusCalls, 0);
-      assert.deepEqual(prefixKeys(localStorage), []);
-      assert.deepEqual(prefixKeys(sessionStorage), []);
-    } finally {
-      globalThis.fetch = originalFetch;
+  test("a connected wallet reads public status once and does not sign", async () => {
+    for (const enabled of [true, false]) {
+      await withFetch(
+        (url) => {
+          assert.match(url, /\/public\/status\?owner=ownerA$/);
+          return jsonResponse(200, {
+            ok: true,
+            enabled,
+            owner: OWNER,
+            phase: enabled ? "idle" : "off",
+            hasJevKey: true,
+            prefs: {
+              exclusions: ["OpenAI"],
+              deadlines_unimportant: false,
+              premiums_matter: true,
+              buy_despite_ipo: false,
+            },
+          });
+        },
+        async (calls) => {
+          const status = await keeperPublicStatus(OWNER);
+          assert.equal(publicGets(calls).length, 1);
+          assert.equal(calls.some((call) => call.method === "POST"), false);
+          assert.equal(authHeaders(publicGets(calls)[0]), false);
+          assert.equal(status.ok, true);
+          assert.equal(status.enabled, enabled);
+          assert.equal(status.hasJevKey, true);
+          assert.deepEqual(status.prefs?.exclusions, ["OpenAI"]);
+          assert.equal(nextAutoBuyEnabled(null, status, OWNER), enabled);
+          const prefs = await keeperGetPrefs(OWNER);
+          assert.equal(prefs.ok, true);
+          assert.deepEqual(prefs.prefs?.exclusions, ["OpenAI"]);
+          assert.equal(prefs.hasJevKey, true);
+          assert.equal(publicGets(calls).length, 2);
+        },
+      );
     }
   });
 
-  test("silent 401 clears the session and does not sign", async () => {
-    let signs = 0;
-    const sign = async () => Uint8Array.of(++signs);
-    await getStatusAuth("ownerA", sign);
-    writeSession("ownerA", "bearer-old");
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
-      if (!String(input).includes("/status")) return jsonResponse(200, {});
-      return jsonResponse(401, { ok: false, error: "unauthorized" });
-    }) as unknown as typeof fetch;
-    try {
-      const status = await keeperStatus("ownerA", sign);
-      assert.equal(status.ok, false);
-      assert.equal(status.error, "session_required");
-      assert.equal(signs, 1);
-      assert.equal(sessionStorage.getItem(sessionKey("ownerA")), null);
-      assert.deepEqual(prefixKeys(localStorage), []);
-      await getStatusAuth("ownerA", sign);
-      assert.equal(signs, 1);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  test("interactive 401 signs exactly once", async () => {
-    writeSession("ownerA", "bearer-old");
-    let signs = 0;
-    let posts = 0;
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (!url.includes("/status")) return jsonResponse(200, {});
-      const method = (init?.method ?? "GET").toUpperCase();
-      if (method === "POST") {
-        posts += 1;
-        return jsonResponse(401, { ok: false, error: "unauthorized" });
-      }
-      return jsonResponse(401, { ok: false, error: "unauthorized" });
-    }) as unknown as typeof fetch;
-    try {
-      const status = await keeperStatus("ownerA", async () => Uint8Array.of(++signs), {
-        interactive: true,
-      });
-      assert.equal(signs, 1);
-      assert.equal(posts, 1);
-      assert.equal(status.ok, false);
-      assert.equal(sessionStorage.getItem(sessionKey("ownerA")), null);
-      assert.deepEqual(prefixKeys(localStorage), []);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  test("interactive mint stores the token in sessionStorage only", async () => {
-    let signs = 0;
-    const expiresAt = Math.floor(Date.now() / 1000) + 3600;
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (!url.includes("/status")) return jsonResponse(200, {});
-      const method = (init?.method ?? "GET").toUpperCase();
-      if (method === "POST") {
-        return jsonResponse(200, {
+  test("a public payload drops secrets and keeps hasJevKey", async () => {
+    await withFetch(
+      () =>
+        jsonResponse(200, {
           ok: true,
           enabled: true,
-          owner: "ownerA",
-          sessionToken: "minted",
-          sessionExpiresAt: expiresAt,
-        });
-      }
-      return jsonResponse(401, { ok: false, error: "unauthorized" });
-    }) as unknown as typeof fetch;
-    try {
-      const status = await keeperStatus(
-        "ownerA",
-        async () => Uint8Array.of(++signs),
-        { interactive: true },
-      );
-      assert.equal(status.ok, true);
-      assert.equal(signs, 1);
-      const raw = sessionStorage.getItem(sessionKey("ownerA"));
-      assert.equal(typeof raw, "string");
-      const parsed = JSON.parse(raw ?? "{}") as { owner?: string; token?: string };
-      assert.equal(parsed.owner, "ownerA");
-      assert.equal(typeof parsed.token, "string");
-      assert.equal((parsed.token ?? "").length > 0, true);
-      assert.deepEqual(prefixKeys(localStorage), []);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+          owner: OWNER,
+          phase: "idle",
+          hasJevKey: true,
+          prefs: {
+            exclusions: ["OpenAI"],
+            premiums_matter: true,
+            typesafe_key: SECRET,
+          },
+          jev_key: SECRET,
+          typesafe_key: SECRET,
+          rpc: `https://rpc.example/?api-key=${SECRET}`,
+          port: 8792,
+          keeper: SECRET,
+          program: SECRET,
+          sessionToken: SECRET,
+          error: `rpc failed https://rpc.example/?api-key=${SECRET}`,
+          spendLimits: { path: SECRET, start_usd: 1 },
+        }),
+      async () => {
+        const status = await keeperPublicStatus(OWNER);
+        const blob = JSON.stringify(status);
+        assert.equal(blob.includes(SECRET), false);
+        assert.equal(blob.includes("https://"), false);
+        assert.equal(blob.includes("api-key"), false);
+        assert.equal(status.hasJevKey, true);
+        assert.equal(status.enabled, true);
+        assert.deepEqual(status.prefs?.exclusions, ["OpenAI"]);
+        assert.equal(
+          (status.prefs as { typesafe_key?: string } | undefined)?.typesafe_key,
+          undefined,
+        );
+        assert.equal(status.error?.includes(SECRET), false);
+        assert.equal("port" in status, false);
+        assert.equal("rpc" in status, false);
+        assert.equal("sessionToken" in status, false);
+      },
+    );
   });
 
-  test("a token for another address is not used", async () => {
-    writeSession("ownerB", "bearer-b");
-    const expiresAt = Math.floor(Date.now() / 1000) + 3600;
-    sessionStorage.setItem(
-      sessionKey("ownerA"),
-      JSON.stringify({ token: "bearer-b", expiresAt, owner: "ownerB" }),
+  test("404 and a dead keeper are unknown, not off, and do not sign", async () => {
+    await withFetch(
+      () => jsonResponse(404, { ok: false, enabled: false, jev_key: SECRET }),
+      async (calls) => {
+        const status = await keeperPublicStatus(OWNER);
+        assert.equal(status.ok, false);
+        assert.equal(status.error, "public_status_unavailable");
+        assert.equal(typeof status.enabled, "undefined");
+        assert.equal(JSON.stringify(status).includes(SECRET), false);
+        assert.equal(nextAutoBuyEnabled(null, status, OWNER), null);
+        assert.equal(calls.some((call) => call.method === "POST"), false);
+      },
     );
-    let signs = 0;
-    let statusCalls = 0;
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
-      if (String(input).includes("/status")) statusCalls += 1;
-      return jsonResponse(200, { ok: true, enabled: true, owner: "ownerA" });
-    }) as unknown as typeof fetch;
-    try {
-      const status = await keeperStatus("ownerA", async () => {
-        signs += 1;
-        return Uint8Array.of(1);
-      });
-      assert.equal(status.error, "session_required");
-      assert.equal(signs, 0);
-      assert.equal(statusCalls, 0);
-      assert.equal(sessionStorage.getItem(sessionKey("ownerB")) !== null, true);
-      assert.equal(sessionStorage.getItem(sessionKey("ownerA")), null);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    await withFetch(
+      () => jsonResponse(502, { ok: false, enabled: false, error: SECRET, rpc: SECRET }),
+      async () => {
+        const status = await keeperPublicStatus(OWNER);
+        assert.equal(status.error, "keeper_unreachable");
+        assert.equal(typeof status.enabled, "undefined");
+        assert.equal(JSON.stringify(status).includes(SECRET), false);
+        assert.equal(nextAutoBuyEnabled(null, status, OWNER), null);
+      },
+    );
+    await withFetch(
+      () => {
+        throw new Error("offline");
+      },
+      async () => {
+        const status = await keeperPublicStatus(OWNER);
+        assert.equal(status.ok, false);
+        assert.equal(status.error, "keeper_unreachable");
+        assert.equal(typeof status.enabled, "undefined");
+      },
+    );
   });
 
-  test("legacy localStorage session keys are deleted and not read", async () => {
-    const expiresAt = Math.floor(Date.now() / 1000) + 3600;
-    localStorage.setItem(
-      sessionKey("ownerA"),
-      JSON.stringify({ token: "legacy", expiresAt, owner: "ownerA" }),
+  test("an error URL in a 4xx body does not keep the key", async () => {
+    await withFetch(
+      () =>
+        jsonResponse(400, {
+          ok: false,
+          enabled: false,
+          error: `https://rpc.example/path?api-key=${SECRET}&token=${SECRET}`,
+        }),
+      async () => {
+        const status = await keeperPublicStatus(OWNER);
+        assert.equal(status.ok, false);
+        assert.equal(typeof status.enabled, "undefined");
+        const blob = JSON.stringify(status);
+        assert.equal(blob.includes(SECRET), false);
+        assert.equal(blob.includes("https://"), false);
+      },
     );
+  });
+
+  test("missing or blank owner does not fetch", async () => {
+    await withFetch(
+      () => jsonResponse(200, { ok: true, enabled: true }),
+      async (calls) => {
+        const missing = await keeperPublicStatus("  ");
+        assert.equal(missing.error, "wallet_required");
+        assert.equal(typeof missing.enabled, "undefined");
+        assert.equal(publicGets(calls).length, 0);
+        const silent = await keeperStatus(undefined);
+        assert.equal(silent.error, "wallet_required");
+        assert.equal(publicGets(calls).length, 0);
+      },
+    );
+  });
+
+  test("leftover session tokens are deleted and never sent", async () => {
+    writeSession(OWNER, SECRET);
+    writeSession(OTHER, SECRET);
+    localStorage.setItem(sessionKey(OWNER), SECRET);
     localStorage.setItem("unrelated", "keep");
     const read = localStorage.getItem.bind(localStorage);
     localStorage.getItem = (key: string) => {
@@ -321,31 +315,36 @@ describe("keeper session cache", { concurrency: false }, () => {
       }
       return read(key);
     };
-    let signs = 0;
-    let statusCalls = 0;
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
-      if (String(input).includes("/status")) statusCalls += 1;
-      return jsonResponse(200, { ok: true });
-    }) as unknown as typeof fetch;
-    try {
-      const status = await keeperStatus("ownerA", async () => {
-        signs += 1;
-        return Uint8Array.of(1);
-      });
-      assert.equal(status.error, "session_required");
-      assert.equal(signs, 0);
-      assert.equal(statusCalls, 0);
-      assert.equal(localStore.has(sessionKey("ownerA")), false);
-      assert.equal(localStore.get("unrelated"), "keep");
-      assert.equal(sessionStore.has(sessionKey("ownerA")), false);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    await withFetch(
+      () => jsonResponse(200, { ok: true, enabled: true, owner: OWNER, phase: "idle" }),
+      async (calls) => {
+        const before = await keeperPublicStatus(OWNER);
+        assert.equal(before.ok, true);
+        assert.equal(sessionStorage.getItem(sessionKey(OWNER)) !== null, true);
+        const status = await keeperStatus(OWNER);
+        assert.equal(status.ok, true);
+        assert.equal(status.enabled, true);
+        assert.equal(sessionStorage.getItem(sessionKey(OWNER)), null);
+        assert.equal(sessionStorage.getItem(sessionKey(OTHER)), null);
+        assert.equal(localStore.has(sessionKey(OWNER)), false);
+        assert.equal(localStore.get("unrelated"), "keep");
+        assert.equal(
+          calls.some((call) => call.headers.toLowerCase().includes("authorization")),
+          false,
+        );
+        assert.equal(calls.some((call) => call.url.includes(SECRET)), false);
+        clearStatusAuthCache(OWNER);
+        writeSession(OWNER, SECRET);
+        writeSession(OTHER, SECRET);
+        clearStatusAuthCache();
+        assert.equal(sessionStorage.getItem(sessionKey(OWNER)), null);
+        assert.equal(sessionStorage.getItem(sessionKey(OTHER)), null);
+      },
+    );
   });
 });
 
-test("automatic keeper status reads stay silent", () => {
+test("automatic status reads are public and do not post a session", () => {
   const auto = readFileSync(
     new URL("../lib/hooks/useAutoWeeklyBuy.tsx", import.meta.url),
     "utf8",
@@ -354,31 +353,18 @@ test("automatic keeper status reads stay silent", () => {
     new URL("../components/SettingsView.tsx", import.meta.url),
     "utf8",
   );
-  const autoCalls = auto.match(/keeperStatus\([^;\n]*\)/g) ?? [];
-  const settingsCalls = settings.match(/keeperStatus\([^;\n]*\)/g) ?? [];
-  assert.ok(autoCalls.length >= 5);
-  for (const call of autoCalls) {
-    assert.match(call, /interactive:\s*(true|false)/);
-  }
-  const silent = autoCalls.filter((call) => /interactive:\s*false/.test(call));
-  const prompted = autoCalls.filter((call) => /interactive:\s*true/.test(call));
-  assert.ok(silent.length >= 4);
-  assert.ok(prompted.length >= 1);
-  assert.ok(settingsCalls.length >= 1);
-  for (const call of settingsCalls) {
-    assert.match(call, /interactive:\s*false/);
-  }
+  const layout = readFileSync(new URL("../app/layout.tsx", import.meta.url), "utf8");
+  assert.equal(auto.includes("keeperPublicStatus(ownerKey)"), true);
+  assert.equal(auto.includes("keeperPublicStatus(wallet)"), true);
+  assert.equal(settings.includes("keeperPublicStatus(wallet)"), true);
+  assert.equal(auto.includes("interactive: true"), false);
   assert.equal(settings.includes("interactive: true"), false);
-  assert.equal(
-    auto.includes("keeperStatus(ownerKey, sign ?? undefined, { interactive: false })"),
-    true,
-  );
-  assert.equal(
-    auto.includes("keeperStatus(wallet ?? undefined, sign ?? undefined, { interactive: false })"),
-    true,
-  );
-  assert.equal(
-    settings.includes("keeperStatus(wallet ?? undefined, sign, { interactive: false })"),
-    true,
-  );
+  assert.equal(layout.includes("KeeperSessionSignPrompt"), false);
+  assert.equal(auto.includes("POST /status"), false);
+  assert.equal(auto.includes("POST /session"), false);
+  assert.equal(settings.includes("POST /status"), false);
+  assert.equal(settings.includes("POST /session"), false);
+  const hydrateEnd = settings.indexOf("setHydratedOwner(ownerKeyAtStart)");
+  const hydrate = settings.slice(settings.indexOf("keeperPublicStatus(wallet)"), hydrateEnd);
+  assert.match(hydrate, /if \(!status\.ok\) return/);
 });

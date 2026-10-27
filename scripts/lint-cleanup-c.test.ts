@@ -128,9 +128,7 @@ test("wallet refs are no longer assigned in the component body", () => {
 
 test("wallet switch still clears the banner and invalidates in-flight work", () => {
   const effectAt = auto.indexOf("const prev = prevOwnerRef.current;");
-  const statusAt = auto.indexOf(
-    "keeperStatus(ownerKey, sign ?? undefined, { interactive: false })",
-  );
+  const statusAt = auto.indexOf("keeperPublicStatus(ownerKey)");
   assert.ok(effectAt > 0 && statusAt > effectAt);
   const effect = auto.slice(effectAt, auto.indexOf("useEffect(() => {", effectAt));
   assert.match(effect, /const ownerChanged = prev !== ownerKey/);
