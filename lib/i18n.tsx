@@ -368,6 +368,8 @@ const pl: Dict = {
   "history.loading": "Ładowanie historii on-chain…",
   "history.runMeta": "Run #{index} · budżet ~{budget} · slot {slot}",
   "history.runMetaUnknown": "Run #{index} · budżet {unknown} · slot {slot}",
+  "history.origin.auto": "auto",
+  "history.origin.manual": "ręczny",
   "history.buyPrice": "po {price} · {units} szt.",
   "history.legPnl": "teraz {value} · {pnl}",
   "history.runPnl": "PnL: {pnl}",
@@ -385,6 +387,7 @@ const pl: Dict = {
     "Wcześniejsze zakupy mintowały tokeny 1:1 do USDC — wyceniamy je po koszcie.",
   "positions.mismatch": "Saldo tokenów różni się od historii zakupów.",
   "positions.outsideApp": "spoza aplikacji",
+  "positions.outsideAppCount": "w tym {units} spoza aplikacji",
   "runPrice.loading": "dane o cenie zakupu się ładują",
   "runPrice.unknown": "—",
   "balances.warning":
@@ -834,6 +837,8 @@ const en: Dict = {
   "history.loading": "Loading on-chain history…",
   "history.runMeta": "Run #{index} · budget ~{budget} · slot {slot}",
   "history.runMetaUnknown": "Run #{index} · budget {unknown} · slot {slot}",
+  "history.origin.auto": "auto",
+  "history.origin.manual": "manual",
   "history.buyPrice": "at {price} · {units} units",
   "history.legPnl": "now {value} · {pnl}",
   "history.runPnl": "P/L: {pnl}",
@@ -851,6 +856,7 @@ const en: Dict = {
     "Earlier buys minted tokens 1:1 to USDC — they are valued at cost.",
   "positions.mismatch": "Token balance differs from purchase history.",
   "positions.outsideApp": "spoza aplikacji",
+  "positions.outsideAppCount": "incl. {units} outside the app",
   "runPrice.loading": "purchase price is loading",
   "runPrice.unknown": "—",
   "balances.warning":

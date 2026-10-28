@@ -13,6 +13,7 @@ import { runPnl } from "@/lib/position-value";
 import { historyBudgetUsd, historyLegUsd } from "@/lib/history-view";
 import type { JupQuote } from "@/lib/jup-prices";
 import type { RunFillView } from "@/lib/run-fills";
+import { historyRunMetaText, type RunOrigin } from "@/lib/run-origin";
 import { useI18n } from "@/lib/i18n";
 
 function runBudgetUsd(
@@ -34,10 +35,13 @@ export function HistoryRunEntry({
   run,
   fills,
   quotes,
+  origin,
 }: {
   run: RunRecordData;
   fills: RunFillView[];
   quotes: Record<string, JupQuote>;
+  /** null while unknown or after an RPC miss. The line then has no suffix. */
+  origin: RunOrigin | null;
 }) {
   const { t, locale } = useI18n();
   const fill = fills.find((row) => row.runIndex === run.runIndex.toString());
@@ -80,17 +84,13 @@ export function HistoryRunEntry({
             {formatTs(run.ts)}
           </p>
           <p className="order-last min-w-0 max-w-full basis-full break-words text-center text-xs text-[#8b95a8] md:order-none md:col-start-2 md:basis-auto">
-            {priceState === "unknown"
-              ? t("history.runMetaUnknown", {
-                  index: run.runIndex.toString(),
-                  unknown: t("runPrice.unknown"),
-                  slot: run.slot.toString(),
-                })
-              : t("history.runMeta", {
-                  index: run.runIndex.toString(),
-                  budget: formatUsd(budget ?? 0),
-                  slot: run.slot.toString(),
-                })}
+            {historyRunMetaText({
+              locale,
+              index: run.runIndex.toString(),
+              slot: run.slot.toString(),
+              budgetText: priceState === "unknown" ? null : formatUsd(budget ?? 0),
+              origin,
+            })}
           </p>
           {runPnlText ? (
             <p
