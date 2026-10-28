@@ -1,12 +1,65 @@
 "use client";
 
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useEffect, useSyncExternalStore } from "react";
+import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import type { PublicKey } from "@solana/web3.js";
 import { usePredca } from "@/lib/hooks/usePredca";
 import { TxNotice } from "@/components/TxNotice";
 import { HistoryRunEntry } from "@/components/HistoryRunEntry";
 import { historyEntriesLine, historyView } from "@/lib/history-view";
 import { runsNewestFirst } from "@/lib/run-order";
+import {
+  loadRunOrigin,
+  originsFromSnapshot,
+  readRunOriginSnapshot,
+  runOriginStorage,
+  subscribeRunOriginCache,
+  writeRunOriginCache,
+  type RunOrigin,
+} from "@/lib/run-origin";
 import { useI18n } from "@/lib/i18n";
+
+const originFlights = new Set<string>();
+
+function useRunOrigins(
+  owner: PublicKey | null,
+  runIndexKey: string,
+): Record<string, RunOrigin> {
+  const { connection } = useConnection();
+  const ownerBase58 = owner?.toBase58() ?? null;
+  const snapshot = useSyncExternalStore(
+    subscribeRunOriginCache,
+    () => readRunOriginSnapshot(ownerBase58, runIndexKey),
+    () => "",
+  );
+
+  useEffect(() => {
+    if (!owner || !ownerBase58) return;
+    const known = new Set(Object.keys(originsFromSnapshot(snapshot)));
+    const missing = runIndexKey
+      .split(",")
+      .filter((index) => index.length > 0 && !known.has(index));
+    if (missing.length === 0) return;
+
+    void Promise.all(
+      missing.map(async (index) => {
+        const flight = `${ownerBase58}.${index}`;
+        if (originFlights.has(flight)) return;
+        originFlights.add(flight);
+        try {
+          const result = await loadRunOrigin(connection, owner, index);
+          if (!result.ok || !result.origin) return;
+          const store = runOriginStorage();
+          if (store) writeRunOriginCache(store, ownerBase58, index, result.origin);
+        } finally {
+          originFlights.delete(flight);
+        }
+      }),
+    );
+  }, [connection, owner, ownerBase58, runIndexKey, snapshot]);
+
+  return originsFromSnapshot(snapshot);
+}
 
 export function HistoryView() {
   const { connected, connecting } = useWallet();
@@ -14,6 +67,8 @@ export function HistoryView() {
   const { locale, t } = useI18n();
   const mode = historyView(predca.status, predca.runs.length, connected);
   const showRuns = mode === "list" || mode === "list_stale";
+  const runIndexKey = predca.runs.map((run) => run.runIndex.toString()).join(",");
+  const origins = useRunOrigins(predca.owner, runIndexKey);
   const disconnectedCopy = connecting ? t("connect.busy") : t("connect.title");
 
   let intro: string;
@@ -84,6 +139,7 @@ export function HistoryView() {
                 run={run}
                 fills={predca.runFills}
                 quotes={predca.jupPrices.quotes}
+                origin={origins[run.runIndex.toString()] ?? null}
               />
             </li>
           ))}

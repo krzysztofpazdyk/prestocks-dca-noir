@@ -88,6 +88,7 @@ import {
 } from "@/lib/ranking";
 import { useI18n } from "@/lib/i18n";
 import { APP_VERSION } from "@/lib/app-version";
+import { outsideAppBadgeText } from "@/lib/outside-app-badge";
 import type { RankResult } from "@/lib/universe";
 
 /** Page-load clock. Avoids Date.now() during render (react-hooks/purity). */
@@ -1742,7 +1743,9 @@ function PositionsCard({
               if (pnlPos) pnlClass = "text-[#34d399]";
               else if (pnlNeg) pnlClass = "text-[#f87171]";
               const lowLiq = Boolean(quote && isLowLiquidity(quote));
-              const outside = outsideOf(row) > DUST;
+              const outsideUnits = outsideOf(row);
+              const outside = outsideUnits > DUST;
+              const outsideBadge = outsideAppBadgeText(outsideUnits, locale);
               const outsideUnpriced = outside && row.outsideValueUsd == null;
               const purchaseUnknown = row.valueKnown === false && !outsideUnpriced;
               const valueHidden = row.valueKnown === false;
@@ -1762,7 +1765,9 @@ function PositionsCard({
                         {row.basis === "cost" && !valueHidden && !outside && (
                           <Badge>{t("positions.atCost")}</Badge>
                         )}
-                        {outside && <Badge>{t("positions.outsideApp")}</Badge>}
+                        {outsideBadge && (
+                          <Badge title={outsideBadge}>{outsideBadge}</Badge>
+                        )}
                         {purchaseUnknown && <Badge>{t("runPrice.loading")}</Badge>}
                         {suspect && <Badge>{t("prices.suspect")}</Badge>}
                         {lowLiq && <Badge>{t("prices.lowLiquidity")}</Badge>}
@@ -1823,9 +1828,12 @@ function PositionsCard({
   );
 }
 
-function Badge({ children }: { children: string }) {
+function Badge({ children, title }: { children: string; title?: string }) {
   return (
-    <span className="rounded border border-[#fbbf2444] px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-[#fbbf24]">
+    <span
+      className="rounded border border-[#fbbf2444] px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-[#fbbf24]"
+      title={title}
+    >
       {children}
     </span>
   );
