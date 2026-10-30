@@ -91,6 +91,6 @@ test("prefs confirmation stays outside the dirty block, and controls wait for hy
   ]);
   assert.equal(values("settings.intro").length, 0);
   assert.match(values("settings.weeklyAtEnable")[0], /bez portfela — do pierwszego połączenia/);
-  assert.match(values("settings.exclusions")[0], /OpenAI, Kalshi/);
+  assert.deepEqual(values("settings.exclusions"), ["Wykluczenia", "Exclusions"]);
   assert.doesNotMatch(values("settings.exclusions")[0], /xAI/);
 });

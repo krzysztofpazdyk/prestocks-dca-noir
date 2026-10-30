@@ -20,8 +20,8 @@ const historySrc = readFileSync(
 const HEADER_H1 =
   '<h1 className="text-xs uppercase tracking-[0.2em] text-[#a78bfa]">';
 
-test("v5.0.20 stays on the profit/loss section", () => {
-  assert.equal(APP_VERSION, "5.0.20");
+test("v5.0.21 stays on the profit/loss section", () => {
+  assert.equal(APP_VERSION, "5.0.21");
   const pnlFn = overviewSrc.slice(
     overviewSrc.indexOf("function PnlSection"),
     overviewSrc.indexOf("function PositionsCard"),
@@ -55,33 +55,27 @@ test("Overview has no Trading desk kicker and no leading empty row", () => {
   assert.match(overviewSrc, /t\("overview\.noMintHint"\)/);
 });
 
-test("settings intro under Konfiguracja DCA is gone", () => {
+test("settings intro and DCA configuration heading are gone", () => {
   assert.equal(translate("pl", "settings.intro"), "settings.intro");
   assert.equal(translate("en", "settings.intro"), "settings.intro");
-  assert.equal(translate("pl", "settings.kicker"), "Konfiguracja DCA");
-  assert.equal(translate("en", "settings.kicker"), "DCA configuration");
-  assert.match(settingsSrc, /\{t\("settings\.kicker"\)\}/);
+  assert.equal(translate("pl", "settings.kicker"), "settings.kicker");
+  assert.equal(translate("en", "settings.kicker"), "settings.kicker");
+  assert.doesNotMatch(settingsSrc, /settings\.kicker/);
   assert.doesNotMatch(settingsSrc, /settings\.intro/);
   assert.doesNotMatch(settingsSrc, /BYOK zostaje w localStorage/);
   assert.doesNotMatch(settingsSrc, /BYOK stays in localStorage/);
 });
 
-test("history count uses the old kicker style and the kicker text is gone", () => {
+test("history count header is gone and other states stay plain", () => {
   assert.equal(translate("pl", "history.kicker"), "history.kicker");
   assert.equal(translate("en", "history.kicker"), "history.kicker");
   assert.doesNotMatch(historySrc, /history\.kicker/);
   assert.doesNotMatch(historySrc, /Purchases \(auto & manual\)/);
-  assert.equal(translate("pl", "history.entries.few", { count: 4 }), "4 wpisy");
-  assert.equal(translate("en", "history.entries.many", { count: 4 }), "4 entries");
-  assert.match(historySrc, /intro = historyEntriesLine\(predca\.runs\.length, locale\)/);
-  assert.match(
-    historySrc,
-    /showRuns \? \([\s\S]*?<h1 className="text-xs uppercase tracking-\[0\.2em\] text-\[#a78bfa\]">\s*\{intro\}\s*<\/h1>[\s\S]*?<p className="text-xs text-\[#8b95a8\]">\{intro\}<\/p>/,
-  );
-  assert.doesNotMatch(
-    historySrc,
-    /<p className="text-xs text-\[#8b95a8\]">\{historyEntriesLine/,
-  );
+  assert.equal(translate("pl", "history.entries.few", { count: 4 }), "history.entries.few");
+  assert.equal(translate("en", "history.entries.many", { count: 4 }), "history.entries.many");
+  assert.doesNotMatch(historySrc, /historyEntriesLine/);
+  assert.doesNotMatch(historySrc, /<h1/);
+  assert.match(historySrc, /<p className="text-xs text-\[#8b95a8\]">\{intro\}<\/p>/);
 });
 
 test("Top-3 sizes to its content for an empty list and for three rows", () => {

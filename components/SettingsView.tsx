@@ -512,12 +512,6 @@ export function SettingsView() {
 
   return (
     <div className="mx-auto max-w-xl space-y-5">
-      <div>
-        <h1 className="text-xs uppercase tracking-[0.2em] text-[#a78bfa]">
-          {t("settings.kicker")}
-        </h1>
-      </div>
-
       {predca.sessionCheckMsg ? (
         <TxNotice message={predca.sessionCheckMsg} tone="pending" />
       ) : null}
@@ -540,7 +534,7 @@ export function SettingsView() {
       ) : null}
 
       <label className="block space-y-2 rounded-lg border border-[#1e2633] bg-[#141820] p-5">
-        <span className="text-[11px] uppercase tracking-[0.15em] text-[#8b95a8]">
+        <span className="text-[11px] uppercase tracking-[0.15em] text-[#2dd4bf]">
           {t("settings.exclusions")}
         </span>
         <p className="text-xs text-[#8b95a8]">{t("settings.fixedExclusion")}</p>
@@ -596,7 +590,7 @@ export function SettingsView() {
             <p className="text-xs leading-relaxed text-[#fbbf24]">
               {t("settings.prefsDirtyHint")}
             </p>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="space-y-2">
               <button
                 type="button"
                 disabled={prefsSaving || !canSign}
@@ -604,7 +598,7 @@ export function SettingsView() {
                 title={
                   !canSign ? t("settings.prefsConnectWallet") : undefined
                 }
-                className="rounded border border-[#fbbf2466] bg-[#0c0e12] px-3 py-1.5 text-[10px] uppercase tracking-wider text-[#fbbf24] hover:bg-[#fbbf2411] disabled:cursor-not-allowed disabled:opacity-50"
+                className="w-full rounded border border-[#fbbf2466] bg-[#0c0e12] px-3 py-1.5 text-[10px] uppercase tracking-wider text-[#fbbf24] hover:bg-[#fbbf2411] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {prefsSaving
                   ? t("settings.prefsSignSaving")
@@ -677,7 +671,7 @@ export function SettingsView() {
             type="button"
             disabled={chainBusy || predca.status === "error" || !weeklyParsed.ok}
             onClick={() => void saveWeeklyBudgetOnChain()}
-            className="w-full rounded border border-[#2dd4bf44] bg-[#0c0e12] py-2 text-[10px] uppercase tracking-wider text-[#2dd4bf] hover:bg-[#2dd4bf11] disabled:opacity-40"
+            className="w-full rounded border border-[#fbbf2466] bg-[#0c0e12] py-2 text-[10px] uppercase tracking-wider text-[#fbbf24] hover:bg-[#fbbf2411] disabled:opacity-40"
           >
             {budgetBtnLabel}
           </button>
@@ -721,22 +715,29 @@ export function SettingsView() {
           <p className="mt-2 text-xs leading-relaxed text-[#8b95a8] text-justify">
             {t("settings.autoWeeklyHint")}
           </p>
-          {autoBuy.keeperMode ? (
-            <p
-              className={`mt-2 text-[10px] font-medium ${
-                autoBuy.keeperMode === "live"
-                  ? "text-[#2dd4bf]"
-                  : "text-[#fbbf24]"
-              }`}
-            >
-              {autoBuy.keeperMode === "live"
-                ? t("settings.keeperModeLive")
-                : t("settings.keeperModeDryRun")}
-            </p>
-          ) : null}
-          {autoBuy.nextLabel && autoBuy.enabled ? (
-            <p className="mt-2 text-[10px] text-[#2dd4bf]">
-              {t("auto.status.next", { when: autoBuy.nextLabel })}
+          {autoBuy.keeperMode || (autoBuy.nextLabel && autoBuy.enabled) ? (
+            <p className="mt-2 text-[10px]">
+              {autoBuy.keeperMode ? (
+                <span
+                  className={`font-medium ${
+                    autoBuy.keeperMode === "live"
+                      ? "text-[#2dd4bf]"
+                      : "text-[#fbbf24]"
+                  }`}
+                >
+                  {autoBuy.keeperMode === "live"
+                    ? t("settings.keeperModeLive")
+                    : t("settings.keeperModeDryRun")}
+                </span>
+              ) : null}
+              {autoBuy.keeperMode && autoBuy.nextLabel && autoBuy.enabled ? (
+                <span className="text-[#8b95a8]"> · </span>
+              ) : null}
+              {autoBuy.nextLabel && autoBuy.enabled ? (
+                <span className="text-[#2dd4bf]">
+                  {t("auto.status.next", { when: autoBuy.nextLabel })}
+                </span>
+              ) : null}
             </p>
           ) : null}
           {autoBuy.message && autoBuy.phase !== "idle" ? (

@@ -1,5 +1,3 @@
-import { translate, type Locale } from "@/lib/i18n";
-
 export type HistoryMode =
   | "disconnected"
   | "loading"
@@ -24,30 +22,6 @@ export function historyView(
   if (status === "error") return "error";
   if (status === "no_config" || status === "no_mint") return "not_ready";
   return "not_ready";
-}
-
-export type HistoryEntryForm = "one" | "few" | "many";
-
-/**
- * Polish: 1 wpis, 2–4 wpisy (except 12–14), otherwise wpisów.
- * English: 1 entry, otherwise entries.
- */
-export function historyEntryForm(count: number, locale: Locale): HistoryEntryForm {
-  const n = Math.abs(Math.trunc(Number.isFinite(count) ? count : 0));
-  if (locale !== "pl") return n === 1 ? "one" : "many";
-  if (n === 1) return "one";
-  const mod10 = n % 10;
-  const mod100 = n % 100;
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "few";
-  return "many";
-}
-
-/** Subtitle under History: the record count only. */
-export function historyEntriesLine(count: number, locale: Locale): string {
-  const n = Math.max(0, Math.trunc(Number.isFinite(count) ? count : 0));
-  return translate(locale, `history.entries.${historyEntryForm(n, locale)}`, {
-    count: n,
-  });
 }
 
 export type HistoryPriceState = "priced" | "legacy" | "unknown";
