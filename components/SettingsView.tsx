@@ -513,10 +513,9 @@ export function SettingsView() {
   return (
     <div className="mx-auto max-w-xl space-y-5">
       <div>
-        <p className="text-[10px] uppercase tracking-[0.2em] text-[#a78bfa]">
+        <h1 className="text-xs uppercase tracking-[0.2em] text-[#a78bfa]">
           {t("settings.kicker")}
-        </p>
-        <h1 className="mt-1 text-xl font-semibold text-[#e8eef5]">{t("settings.title")}</h1>
+        </h1>
         <p className="mt-1 text-xs text-[#8b95a8]">{t("settings.intro")}</p>
       </div>
 

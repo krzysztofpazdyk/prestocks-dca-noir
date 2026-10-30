@@ -892,11 +892,8 @@ export function OverviewView() {
     <div className="space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="text-[10px] uppercase tracking-[0.2em] text-[#a78bfa]">
+          <h1 className="text-xs uppercase tracking-[0.2em] text-[#a78bfa]">
             {t("overview.kicker")}
-          </p>
-          <h1 className="mt-1 text-xl font-semibold text-[#e8eef5]">
-            {t("overview.title")}
           </h1>
         </div>
         {!connected && (
@@ -1296,7 +1293,7 @@ export function OverviewView() {
         </section>
 
         <div className="flex min-h-0 flex-col gap-4 lg:h-full">
-          <section className="rounded-lg border border-[#1e2633] bg-[#141820] p-5">
+          <section className="flex min-h-0 flex-1 flex-col rounded-lg border border-[#1e2633] bg-[#141820] p-5">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h2 className="text-[11px] uppercase tracking-[0.15em] text-[#a78bfa]">
@@ -1639,7 +1636,7 @@ function PnlSection({
   const purchaseUnknown = purchasePriceUnknown(rows);
   const valueBlocked = rows.some((row) => row.valueKnown === false);
   return (
-    <section className="rounded-lg border border-[#1e2633] bg-[#141820] p-5">
+    <section className="flex min-h-0 flex-1 flex-col rounded-lg border border-[#1e2633] bg-[#141820] p-5">
       <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
         <h2 className="text-[11px] uppercase tracking-[0.15em] text-[#a78bfa]">
           {t("pnl.title")}
