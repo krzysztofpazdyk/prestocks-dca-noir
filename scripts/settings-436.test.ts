@@ -72,7 +72,7 @@ test("prefs confirmation stays outside the dirty block, and controls wait for hy
   assert.match(settings, /setTimeout\(\(\) => \{[\s\S]{0,80}setPrefsOk\(false\);\s*\}, 4000\)/);
   assert.match(settings, /clearTimeout\(prefsOkTimer\.current\)/);
   assert.match(settings, /disabled=\{!prefsReady\}/);
-  assert.match(settings, /t\("settings\.fixedExclusion"\)/);
+  assert.doesNotMatch(settings, /settings\.fixedExclusion/);
   assert.match(settings, /placeholder="OpenAI, Kalshi"/);
   assert.match(settings, /adoptWeeklyDraft\(/);
   assert.match(settings, /writeWeeklyDraft\(/);
@@ -85,10 +85,7 @@ test("prefs confirmation stays outside the dirty block, and controls wait for hy
     "Wczytywanie ustawień keepera…",
     "Loading keeper settings…",
   ]);
-  assert.deepEqual(values("settings.fixedExclusion"), [
-    "xAI — zawsze wykluczony (niedostępny w PreStocks DCA)",
-    "xAI — always excluded (not available in PreStocks DCA)",
-  ]);
+  assert.equal(values("settings.fixedExclusion").length, 0);
   assert.equal(values("settings.intro").length, 0);
   assert.match(values("settings.weeklyAtEnable")[0], /bez portfela — do pierwszego połączenia/);
   assert.deepEqual(values("settings.exclusions"), ["Wykluczenia", "Exclusions"]);

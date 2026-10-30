@@ -511,7 +511,7 @@ export function SettingsView() {
       : null;
 
   return (
-    <div className="mx-auto max-w-xl space-y-5">
+    <div className="mx-auto max-w-6xl space-y-5">
       {predca.sessionCheckMsg ? (
         <TxNotice message={predca.sessionCheckMsg} tone="pending" />
       ) : null}
@@ -533,369 +533,376 @@ export function SettingsView() {
         <p className="text-[10px] text-[#fbbf24]">+{predca.visibleUnresolvedTxs.length - 2}</p>
       ) : null}
 
-      <label className="block space-y-2 rounded-lg border border-[#1e2633] bg-[#141820] p-5">
-        <span className="text-[11px] uppercase tracking-[0.15em] text-[#2dd4bf]">
-          {t("settings.exclusions")}
-        </span>
-        <p className="text-xs text-[#8b95a8]">{t("settings.fixedExclusion")}</p>
-        <input
-          type="text"
-          value={exclusions}
-          disabled={!prefsReady}
-          title={!prefsReady ? t("settings.prefsLoading") : undefined}
-          onChange={(e) => setExclusions(e.target.value)}
-          onBlur={() => {
-            const shown = userExclusions(exclusions).join(", ");
-            setExclusions(shown);
-            writeExclusionsRaw(shown);
-          }}
-          placeholder="OpenAI, Kalshi"
-          className="w-full rounded border border-[#1e2633] bg-[#0c0e12] px-3 py-2 text-sm outline-none focus:border-[#a78bfa66] disabled:opacity-40"
-        />
-      </label>
-
-      <div className="space-y-3 rounded-lg border border-[#1e2633] bg-[#141820] p-5">
-        <CompanyToggle
-          label={t("settings.buyDespiteIpo")}
-          checked={buyDespiteIpo}
-          onChange={setBuyDespiteIpo}
-          disabled={!availability.buyDespiteIpo.enabled}
-          prefsReady={prefsReady}
-          bucket={availability.buyDespiteIpo}
-          kind="ipo"
-          byName={companySnap.byName}
-        />
-        <CompanyToggle
-          label={t("settings.deadlineInvalid")}
-          checked={deadlineInvalid}
-          onChange={setDeadlineInvalid}
-          disabled={!availability.deadlinesUnimportant.enabled}
-          prefsReady={prefsReady}
-          bucket={availability.deadlinesUnimportant}
-          kind="deadline"
-          byName={companySnap.byName}
-        />
-        <Toggle
-          label={t("settings.ipoPremium")}
-          checked={ipoPremium}
-          onChange={setIpoPremium}
-          disabled={!prefsReady}
-          title={!prefsReady ? t("settings.prefsLoading") : undefined}
-        />
-        {prefsOk ? (
-          <p className="text-[10px] text-[#2dd4bf]">{t("settings.prefsSignOk")}</p>
-        ) : null}
-        {prefsDirty ? (
-          <div className="space-y-2 border-t border-[#fbbf2433] pt-3">
-            <p className="text-xs leading-relaxed text-[#fbbf24]">
-              {t("settings.prefsDirtyHint")}
-            </p>
-            <div className="space-y-2">
-              <button
-                type="button"
-                disabled={prefsSaving || !canSign}
-                onClick={() => void signAndSavePrefs()}
-                title={
-                  !canSign ? t("settings.prefsConnectWallet") : undefined
-                }
-                className="w-full rounded border border-[#fbbf2466] bg-[#0c0e12] px-3 py-1.5 text-[10px] uppercase tracking-wider text-[#fbbf24] hover:bg-[#fbbf2411] disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {prefsSaving
-                  ? t("settings.prefsSignSaving")
-                  : t("settings.prefsSignSave")}
-              </button>
-              {!canSign ? (
-                <span className="text-[10px] text-[#8b95a8]">
-                  {t("settings.prefsConnectWallet")}
-                </span>
-              ) : null}
-            </div>
-            {prefsSaveMsg ? (
-              <p className="text-[10px] text-[#fca5a5]">{prefsSaveMsg}</p>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
-
-      <div className="space-y-2 rounded-lg border border-[#1e2633] bg-[#141820] p-5">
-        <label className="block space-y-2">
-          <span className="text-[11px] uppercase tracking-[0.15em] text-[#8b95a8]">
-            {t("settings.weeklyAmount")}
-          </span>
-          <input
-            type="text"
-            inputMode="decimal"
-            value={weeklyDraft}
-            onChange={(e) => {
-              const next = e.target.value;
-              setWeeklyDraft(next);
-              const parsed = parseWeeklyDraft(next);
-              if (parsed.ok) setWeekly(parsed.value);
-              predca.clearToasts();
-            }}
-            onBlur={() => {
-              const parsed = parseWeeklyDraft(weeklyDraft);
-              if (!parsed.ok) return;
-              if (ownerBase58) writeWeeklyBudgetUsd(parsed.value, ownerBase58);
-              else writeWeeklyDraft(parsed.value);
-            }}
-            className="mono-num w-full rounded border border-[#1e2633] bg-[#0c0e12] px-3 py-2.5 text-base text-[#2dd4bf] outline-none focus:border-[#2dd4bf66]"
-          />
-          {weeklyParsed.ok ? null : (
-            <p className="text-xs text-[#fbbf24]">{t("settings.weeklyInvalid")}</p>
-          )}
-          <p className="text-xs text-[#8b95a8]">
-            {t("settings.weeklySplit", {
-              amount: formatGrouped(weekly / 3, { min: 2, max: 2 }),
-            })}
-            {" "}
-            {t("settings.weeklyAtEnable")}
-            {onChainWeekly != null && (
-              <>
+      <div className="grid gap-4 lg:grid-cols-2 lg:items-stretch">
+        <div className="space-y-5">
+          <div className="space-y-2 rounded-lg border border-[#1e2633] bg-[#141820] p-5">
+            <label className="block space-y-2">
+              <span className="text-[11px] uppercase tracking-[0.15em] text-[#8b95a8]">
+                {t("settings.weeklyAmount")}
+              </span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={weeklyDraft}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setWeeklyDraft(next);
+                  const parsed = parseWeeklyDraft(next);
+                  if (parsed.ok) setWeekly(parsed.value);
+                  predca.clearToasts();
+                }}
+                onBlur={() => {
+                  const parsed = parseWeeklyDraft(weeklyDraft);
+                  if (!parsed.ok) return;
+                  if (ownerBase58) writeWeeklyBudgetUsd(parsed.value, ownerBase58);
+                  else writeWeeklyDraft(parsed.value);
+                }}
+                className="mono-num w-full rounded border border-[#1e2633] bg-[#0c0e12] px-3 py-2.5 text-base text-[#2dd4bf] outline-none focus:border-[#2dd4bf66]"
+              />
+              {weeklyParsed.ok ? null : (
+                <p className="text-xs text-[#fbbf24]">{t("settings.weeklyInvalid")}</p>
+              )}
+              <p className="text-xs text-[#8b95a8]">
+                {t("settings.weeklySplit", {
+                  amount: formatGrouped(weekly / 3, { min: 2, max: 2 }),
+                })}
                 {" "}
-                {t("settings.onChainBudget")}{" "}
-                <span className="mono-num text-[#2dd4bf]">
-                  {formatUsd(onChainWeekly)}
-                </span>
-              </>
-            )}
-          </p>
-        </label>
-        {connected && predca.status === "no_config" ? (
-          <p className="text-xs leading-relaxed text-[#8b95a8]">
-            {t("settings.budgetNeedsDeposit")}
-          </p>
-        ) : null}
-        {budgetDirtyOnChain && connected && predca.mint ? (
-          <button
-            type="button"
-            disabled={chainBusy || predca.status === "error" || !weeklyParsed.ok}
-            onClick={() => void saveWeeklyBudgetOnChain()}
-            className="w-full rounded border border-[#fbbf2466] bg-[#0c0e12] py-2 text-[10px] uppercase tracking-wider text-[#fbbf24] hover:bg-[#fbbf2411] disabled:opacity-40"
-          >
-            {budgetBtnLabel}
-          </button>
-        ) : null}
-        {!connected ? (
-          <p className="text-[10px] text-[#8b95a8]">
-            {t("settings.connectForBudget")}
-          </p>
-        ) : null}
-        <PrivySignWaitNotice />
-        {budgetTxNotice(predca.pendingMsg, "pending")}
-        {budgetTxNotice(predca.error, "error")}
-        {budgetTxNotice(predca.okMsg, "ok")}
-        <div className="border-t border-[#1e2633] pt-4">
-          {connected && !autoBuy.statusChecked ? (
-            <p className="text-xs text-[#8b95a8]">{t("settings.prefsLoading")}</p>
-          ) : connected && !autoBuy.statusResolved ? (
-            <p className="text-sm text-[#e8eef5]">{t("settings.autoBuyKeeperUnreachable")}</p>
-          ) : (
-          <Toggle
-            label={t("settings.autoWeekly")}
-            checked={autoBuy.enabled}
-            disabled={chainBusy && !autoBuy.enabled}
-            onChange={(v) => {
-              if (
-                autoToggleBlocked(
-                  v,
-                  chainBusy || predca.pendingSignatureNow() != null,
-                )
-              ) {
-                return;
-              }
-              if (v) {
-                setAutoConfirmOpen(true);
-                return;
-              }
-              autoBuy.setEnabled(false);
-            }}
-          />
-          )}
-          <p className="mt-2 text-xs leading-relaxed text-[#8b95a8] text-justify">
-            {t("settings.autoWeeklyHint")}
-          </p>
-          {autoBuy.keeperMode || (autoBuy.nextLabel && autoBuy.enabled) ? (
-            <p className="mt-2 text-[10px]">
-              {autoBuy.keeperMode ? (
-                <span
-                  className={`font-medium ${
-                    autoBuy.keeperMode === "live"
-                      ? "text-[#2dd4bf]"
-                      : "text-[#fbbf24]"
-                  }`}
-                >
-                  {autoBuy.keeperMode === "live"
-                    ? t("settings.keeperModeLive")
-                    : t("settings.keeperModeDryRun")}
-                </span>
-              ) : null}
-              {autoBuy.keeperMode && autoBuy.nextLabel && autoBuy.enabled ? (
-                <span className="text-[#8b95a8]"> · </span>
-              ) : null}
-              {autoBuy.nextLabel && autoBuy.enabled ? (
-                <span className="text-[#2dd4bf]">
-                  {t("auto.status.next", { when: autoBuy.nextLabel })}
-                </span>
-              ) : null}
-            </p>
-          ) : null}
-          {autoBuy.message && autoBuy.phase !== "idle" ? (
-            <p
-              title={autoBuyError?.title}
-              className={`mt-2 text-[10px] ${
-                autoBuy.phase === "error"
-                  ? "text-[#fca5a5]"
-                  : autoBuy.phase === "pending"
-                    ? "text-[#fbbf24]"
-                    : "text-[#8b95a8]"
-              }`}
-            >
-              {autoBuyError?.text ?? autoBuy.message}
-            </p>
-          ) : null}
-        </div>
-      </div>
-
-      {autoConfirmOpen ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[#0c0e12cc] px-4"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="auto-weekly-confirm-title"
-          onClick={() => setAutoConfirmOpen(false)}
-        >
-          <div
-            className="w-full max-w-md rounded-lg border border-[#2dd4bf44] bg-[#141820] p-5 shadow-[0_0_40px_#2dd4bf22]"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2
-              id="auto-weekly-confirm-title"
-              className="text-sm font-semibold text-[#e8eef5]"
-            >
-              {t("settings.autoWeeklyConfirmTitle")}
-            </h2>
-            <p className="mt-3 text-sm leading-relaxed text-[#c5cedb] text-justify">
-              {t("settings.autoWeeklyConfirmBody", {
-                amount: formatGrouped(weekly, { min: 2, max: 2 }),
-                each: formatGrouped(weekly / 3, { min: 2, max: 2 }),
-              })}
-            </p>
-            <div className="mt-5 flex flex-wrap justify-end gap-2">
+                {t("settings.weeklyAtEnable")}
+                {onChainWeekly != null && (
+                  <>
+                    {" "}
+                    {t("settings.onChainBudget")}{" "}
+                    <span className="mono-num text-[#2dd4bf]">
+                      {formatUsd(onChainWeekly)}
+                    </span>
+                  </>
+                )}
+              </p>
+            </label>
+            {connected && predca.status === "no_config" ? (
+              <p className="text-xs leading-relaxed text-[#8b95a8]">
+                {t("settings.budgetNeedsDeposit")}
+              </p>
+            ) : null}
+            {budgetDirtyOnChain && connected && predca.mint ? (
               <button
                 type="button"
-                onClick={() => setAutoConfirmOpen(false)}
-                className="rounded border border-[#1e2633] px-4 py-2 text-[10px] uppercase tracking-wider text-[#8b95a8] hover:text-[#e8eef5]"
+                disabled={chainBusy || predca.status === "error" || !weeklyParsed.ok}
+                onClick={() => void saveWeeklyBudgetOnChain()}
+                className="w-full rounded border border-[#fbbf2466] bg-[#0c0e12] py-2 text-[10px] uppercase tracking-wider text-[#fbbf24] hover:bg-[#fbbf2411] disabled:opacity-40"
               >
-                {t("settings.autoWeeklyConfirmCancel")}
+                {budgetBtnLabel}
               </button>
-              <button
-                type="button"
-                disabled={chainBusy}
-                onClick={() => {
+            ) : null}
+            {!connected ? (
+              <p className="text-[10px] text-[#8b95a8]">
+                {t("settings.connectForBudget")}
+              </p>
+            ) : null}
+            <PrivySignWaitNotice />
+            {budgetTxNotice(predca.pendingMsg, "pending")}
+            {budgetTxNotice(predca.error, "error")}
+            {budgetTxNotice(predca.okMsg, "ok")}
+            <div className="border-t border-[#1e2633] pt-4">
+              {connected && !autoBuy.statusChecked ? (
+                <p className="text-xs text-[#8b95a8]">{t("settings.prefsLoading")}</p>
+              ) : connected && !autoBuy.statusResolved ? (
+                <p className="text-sm text-[#e8eef5]">{t("settings.autoBuyKeeperUnreachable")}</p>
+              ) : (
+              <Toggle
+                label={t("settings.autoWeekly")}
+                checked={autoBuy.enabled}
+                disabled={chainBusy && !autoBuy.enabled}
+                onChange={(v) => {
                   if (
-                    predca.txPending ||
-                    predca.pendingSignature != null ||
-                    predca.pendingSignatureNow()
+                    autoToggleBlocked(
+                      v,
+                      chainBusy || predca.pendingSignatureNow() != null,
+                    )
                   ) {
                     return;
                   }
-                  setAutoConfirmOpen(false);
-                  void autoBuy.startCycle(weekly);
+                  if (v) {
+                    setAutoConfirmOpen(true);
+                    return;
+                  }
+                  autoBuy.setEnabled(false);
                 }}
-                className="rounded border border-[#2dd4bf66] bg-[#0c0e12] px-4 py-2 text-[10px] uppercase tracking-wider text-[#2dd4bf] hover:bg-[#2dd4bf11] disabled:opacity-40"
-              >
-                {t("settings.autoWeeklyConfirmOk")}
-              </button>
+              />
+              )}
+              <p className="mt-2 text-xs leading-relaxed text-[#8b95a8] text-justify">
+                {t("settings.autoWeeklyHint")}
+              </p>
+              {autoBuy.keeperMode || (autoBuy.nextLabel && autoBuy.enabled) ? (
+                <p className="mt-2 text-[10px]">
+                  {autoBuy.keeperMode ? (
+                    <span
+                      className={`font-medium ${
+                        autoBuy.keeperMode === "live"
+                          ? "text-[#2dd4bf]"
+                          : "text-[#fbbf24]"
+                      }`}
+                    >
+                      {autoBuy.keeperMode === "live"
+                        ? t("settings.keeperModeLive")
+                        : t("settings.keeperModeDryRun")}
+                    </span>
+                  ) : null}
+                  {autoBuy.keeperMode && autoBuy.nextLabel && autoBuy.enabled ? (
+                    <span className="text-[#8b95a8]"> · </span>
+                  ) : null}
+                  {autoBuy.nextLabel && autoBuy.enabled ? (
+                    <span className="text-[#2dd4bf]">
+                      {t("auto.status.next", { when: autoBuy.nextLabel })}
+                    </span>
+                  ) : null}
+                </p>
+              ) : null}
+              {autoBuy.message && autoBuy.phase !== "idle" ? (
+                <p
+                  title={autoBuyError?.title}
+                  className={`mt-2 text-[10px] ${
+                    autoBuy.phase === "error"
+                      ? "text-[#fca5a5]"
+                      : autoBuy.phase === "pending"
+                        ? "text-[#fbbf24]"
+                        : "text-[#8b95a8]"
+                  }`}
+                >
+                  {autoBuyError?.text ?? autoBuy.message}
+                </p>
+              ) : null}
             </div>
           </div>
-        </div>
-      ) : null}
 
-      <section className="space-y-3 rounded-lg border border-[#2dd4bf33] bg-[#141820] p-5">
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="text-[11px] uppercase tracking-[0.15em] text-[#2dd4bf]">
-            {t("settings.byokTitle")}
-          </h2>
-          <span className="mono-num text-[10px] text-[#8b95a8]">
-            localStorage
-          </span>
-        </div>
-        <p className="text-xs text-[#8b95a8]">
-          {t(typesafeFilled ? "settings.byokIntro" : "settings.byokIntroEmpty")}
-        </p>
-
-        <label className="block space-y-1.5">
-          <span className="text-[11px] text-[#c5cedb]">
-            <span className="mono-num text-[#2dd4bf]">TYPESAFE_API_KEY</span>{" "}
-            {t(
-              typesafeFilled
-                ? "settings.typesafeLabel"
-                : "settings.typesafeLabelEmpty",
-            )}
-          </span>
-          <div className="flex gap-2">
-            <input
-              type={showTypesafe ? "text" : "password"}
-              value={typesafeKey}
-              onChange={(e) => {
-                setTypesafeKey(e.target.value);
-                setByokSaved(false);
-              }}
-              placeholder="pk_…"
-              autoComplete="off"
-              spellCheck={false}
-              className="mono-num flex-1 rounded border border-[#1e2633] bg-[#0c0e12] px-3 py-2 text-sm text-[#e8eef5] outline-none focus:border-[#2dd4bf66]"
-            />
-            <button
-              type="button"
-              onClick={() => setShowTypesafe((v) => !v)}
-              className="rounded border border-[#1e2633] px-3 text-[10px] uppercase tracking-wider text-[#8b95a8] hover:text-[#e8eef5]"
+          {autoConfirmOpen ? (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-[#0c0e12cc] px-4"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="auto-weekly-confirm-title"
+              onClick={() => setAutoConfirmOpen(false)}
             >
-              {showTypesafe ? t("settings.hide") : t("settings.show")}
-            </button>
-          </div>
-          {keeperHasJevKey ? (
-            <p className="text-[10px] text-[#2dd4bf]">{t("settings.jevKeySaved")}</p>
+              <div
+                className="w-full max-w-md rounded-lg border border-[#2dd4bf44] bg-[#141820] p-5 shadow-[0_0_40px_#2dd4bf22]"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h2
+                  id="auto-weekly-confirm-title"
+                  className="text-sm font-semibold text-[#e8eef5]"
+                >
+                  {t("settings.autoWeeklyConfirmTitle")}
+                </h2>
+                <p className="mt-3 text-sm leading-relaxed text-[#c5cedb] text-justify">
+                  {t("settings.autoWeeklyConfirmBody", {
+                    amount: formatGrouped(weekly, { min: 2, max: 2 }),
+                    each: formatGrouped(weekly / 3, { min: 2, max: 2 }),
+                  })}
+                </p>
+                <div className="mt-5 flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAutoConfirmOpen(false)}
+                    className="rounded border border-[#1e2633] px-4 py-2 text-[10px] uppercase tracking-wider text-[#8b95a8] hover:text-[#e8eef5]"
+                  >
+                    {t("settings.autoWeeklyConfirmCancel")}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={chainBusy}
+                    onClick={() => {
+                      if (
+                        predca.txPending ||
+                        predca.pendingSignature != null ||
+                        predca.pendingSignatureNow()
+                      ) {
+                        return;
+                      }
+                      setAutoConfirmOpen(false);
+                      void autoBuy.startCycle(weekly);
+                    }}
+                    className="rounded border border-[#2dd4bf66] bg-[#0c0e12] px-4 py-2 text-[10px] uppercase tracking-wider text-[#2dd4bf] hover:bg-[#2dd4bf11] disabled:opacity-40"
+                  >
+                    {t("settings.autoWeeklyConfirmOk")}
+                  </button>
+                </div>
+              </div>
+            </div>
           ) : null}
-        </label>
-
-        <label className="block space-y-1.5">
-          <span className="text-[11px] text-[#c5cedb]">
-            <span className="mono-num text-[#a78bfa]">XAI_API_KEY</span>{" "}
-            {t("settings.xaiLabel")}
-          </span>
-          <div className="flex gap-2">
+        </div>
+        <div className="space-y-5">
+          <label className="block space-y-2 rounded-lg border border-[#1e2633] bg-[#141820] p-5">
+            <span className="text-[11px] uppercase tracking-[0.15em] text-[#2dd4bf]">
+              {t("settings.exclusions")}
+            </span>
             <input
-              type={showXai ? "text" : "password"}
-              value={xaiKey}
-              onChange={(e) => {
-                setXaiKey(e.target.value);
-                setByokSaved(false);
+              type="text"
+              value={exclusions}
+              disabled={!prefsReady}
+              title={!prefsReady ? t("settings.prefsLoading") : undefined}
+              onChange={(e) => setExclusions(e.target.value)}
+              onBlur={() => {
+                const shown = userExclusions(exclusions).join(", ");
+                setExclusions(shown);
+                writeExclusionsRaw(shown);
               }}
-              placeholder="xai-…"
-              autoComplete="off"
-              spellCheck={false}
-              className="mono-num flex-1 rounded border border-[#1e2633] bg-[#0c0e12] px-3 py-2 text-sm text-[#e8eef5] outline-none focus:border-[#a78bfa66]"
+              placeholder="OpenAI, Kalshi"
+              className="w-full rounded border border-[#1e2633] bg-[#0c0e12] px-3 py-2 text-sm outline-none focus:border-[#a78bfa66] disabled:opacity-40"
             />
+          </label>
+
+          <div className="space-y-3 rounded-lg border border-[#1e2633] bg-[#141820] p-5">
+            <span className="text-[11px] uppercase tracking-[0.15em] text-[#2dd4bf]">
+              {t("settings.purchaseFilters")}
+            </span>
+            <CompanyToggle
+              label={t("settings.buyDespiteIpo")}
+              checked={buyDespiteIpo}
+              onChange={setBuyDespiteIpo}
+              disabled={!availability.buyDespiteIpo.enabled}
+              prefsReady={prefsReady}
+              bucket={availability.buyDespiteIpo}
+              kind="ipo"
+              byName={companySnap.byName}
+            />
+            <CompanyToggle
+              label={t("settings.deadlineInvalid")}
+              checked={deadlineInvalid}
+              onChange={setDeadlineInvalid}
+              disabled={!availability.deadlinesUnimportant.enabled}
+              prefsReady={prefsReady}
+              bucket={availability.deadlinesUnimportant}
+              kind="deadline"
+              byName={companySnap.byName}
+            />
+            <Toggle
+              label={t("settings.ipoPremium")}
+              checked={ipoPremium}
+              onChange={setIpoPremium}
+              disabled={!prefsReady}
+              title={!prefsReady ? t("settings.prefsLoading") : undefined}
+            />
+            {prefsOk ? (
+              <p className="text-[10px] text-[#2dd4bf]">{t("settings.prefsSignOk")}</p>
+            ) : null}
+            {prefsDirty ? (
+              <div className="space-y-2 border-t border-[#fbbf2433] pt-3">
+                <p className="text-xs leading-relaxed text-[#fbbf24]">
+                  {t("settings.prefsDirtyHint")}
+                </p>
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    disabled={prefsSaving || !canSign}
+                    onClick={() => void signAndSavePrefs()}
+                    title={
+                      !canSign ? t("settings.prefsConnectWallet") : undefined
+                    }
+                    className="w-full rounded border border-[#fbbf2466] bg-[#0c0e12] px-3 py-1.5 text-[10px] uppercase tracking-wider text-[#fbbf24] hover:bg-[#fbbf2411] disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {prefsSaving
+                      ? t("settings.prefsSignSaving")
+                      : t("settings.prefsSignSave")}
+                  </button>
+                  {!canSign ? (
+                    <span className="text-[10px] text-[#8b95a8]">
+                      {t("settings.prefsConnectWallet")}
+                    </span>
+                  ) : null}
+                </div>
+                {prefsSaveMsg ? (
+                  <p className="text-[10px] text-[#fca5a5]">{prefsSaveMsg}</p>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+
+          <section className="space-y-3 rounded-lg border border-[#2dd4bf33] bg-[#141820] p-5">
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-[11px] uppercase tracking-[0.15em] text-[#2dd4bf]">
+                {t("settings.byokTitle")}
+              </h2>
+              <span className="mono-num text-[10px] text-[#8b95a8]">
+                localStorage
+              </span>
+            </div>
+            <p className="text-xs text-[#8b95a8]">
+              {t(typesafeFilled ? "settings.byokIntro" : "settings.byokIntroEmpty")}
+            </p>
+
+            <label className="block space-y-1.5">
+              <span className="text-[11px] text-[#c5cedb]">
+                <span className="mono-num text-[#2dd4bf]">TYPESAFE_API_KEY</span>{" "}
+                {t(
+                  typesafeFilled
+                    ? "settings.typesafeLabel"
+                    : "settings.typesafeLabelEmpty",
+                )}
+              </span>
+              <div className="flex gap-2">
+                <input
+                  type={showTypesafe ? "text" : "password"}
+                  value={typesafeKey}
+                  onChange={(e) => {
+                    setTypesafeKey(e.target.value);
+                    setByokSaved(false);
+                  }}
+                  placeholder="pk_…"
+                  autoComplete="off"
+                  spellCheck={false}
+                  className="mono-num flex-1 rounded border border-[#1e2633] bg-[#0c0e12] px-3 py-2 text-sm text-[#e8eef5] outline-none focus:border-[#2dd4bf66]"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowTypesafe((v) => !v)}
+                  className="rounded border border-[#1e2633] px-3 text-[10px] uppercase tracking-wider text-[#8b95a8] hover:text-[#e8eef5]"
+                >
+                  {showTypesafe ? t("settings.hide") : t("settings.show")}
+                </button>
+              </div>
+              {keeperHasJevKey ? (
+                <p className="text-[10px] text-[#2dd4bf]">{t("settings.jevKeySaved")}</p>
+              ) : null}
+            </label>
+
+            <label className="block space-y-1.5">
+              <span className="text-[11px] text-[#c5cedb]">
+                <span className="mono-num text-[#a78bfa]">XAI_API_KEY</span>{" "}
+                {t("settings.xaiLabel")}
+              </span>
+              <div className="flex gap-2">
+                <input
+                  type={showXai ? "text" : "password"}
+                  value={xaiKey}
+                  onChange={(e) => {
+                    setXaiKey(e.target.value);
+                    setByokSaved(false);
+                  }}
+                  placeholder="xai-…"
+                  autoComplete="off"
+                  spellCheck={false}
+                  className="mono-num flex-1 rounded border border-[#1e2633] bg-[#0c0e12] px-3 py-2 text-sm text-[#e8eef5] outline-none focus:border-[#a78bfa66]"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowXai((v) => !v)}
+                  className="rounded border border-[#1e2633] px-3 text-[10px] uppercase tracking-wider text-[#8b95a8] hover:text-[#e8eef5]"
+                >
+                  {showXai ? t("settings.hide") : t("settings.show")}
+                </button>
+              </div>
+            </label>
+
             <button
               type="button"
-              onClick={() => setShowXai((v) => !v)}
-              className="rounded border border-[#1e2633] px-3 text-[10px] uppercase tracking-wider text-[#8b95a8] hover:text-[#e8eef5]"
+              onClick={saveByok}
+              className="w-full rounded border border-[#2dd4bf44] bg-[#0c0e12] py-2 text-[10px] uppercase tracking-wider text-[#2dd4bf] hover:bg-[#2dd4bf11]"
             >
-              {showXai ? t("settings.hide") : t("settings.show")}
+              {byokSaved ? t("settings.keysSaved") : t("settings.saveKeys")}
             </button>
-          </div>
-        </label>
-
-        <button
-          type="button"
-          onClick={saveByok}
-          className="w-full rounded border border-[#2dd4bf44] bg-[#0c0e12] py-2 text-[10px] uppercase tracking-wider text-[#2dd4bf] hover:bg-[#2dd4bf11]"
-        >
-          {byokSaved ? t("settings.keysSaved") : t("settings.saveKeys")}
-        </button>
-      </section>
+          </section>
+        </div>
+      </div>
     </div>
   );
 }
