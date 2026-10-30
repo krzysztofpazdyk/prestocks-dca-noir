@@ -276,7 +276,6 @@ const pl: Dict = {
   "auto.banner.confirming":
     "Cotygodniowy zakup z vaulta: czekam na potwierdzenie transakcji.",
 
-  "settings.kicker": "Konfiguracja DCA",
   "settings.title": "Ustawienia",
   "settings.weeklyAmount": "Tygodniowa kwota (USDC)",
   "settings.weeklyInvalid": "Podaj kwotę ≥ 1 USDC, max 2 miejsca po przecinku.",
@@ -312,7 +311,7 @@ const pl: Dict = {
     "Podłącz portfel. Budżet lokalny zapisuje się od razu; on-chain dopiero po wpłacie na Overview.",
   "settings.saved": "· zapisano ✓",
   "settings.cleared": "· wyczyszczono ✓",
-  "settings.exclusions": "Wykluczenia (np. OpenAI, Kalshi) — stosowane w rankingu",
+  "settings.exclusions": "Wykluczenia",
   "settings.fixedExclusion": "xAI — zawsze wykluczony (niedostępny w PreStocks DCA)",
   "settings.buyDespiteIpo": "Kup PreStock mimo odbytego IPO",
   "settings.deadlineInvalid": "Dopuszczaj tokeny po terminie ważności lub z nieważnym terminem (po dacie końcowej są bezwartościowe).",
@@ -350,9 +349,6 @@ const pl: Dict = {
   "settings.keysSaved": "Zapisano w localStorage ✓",
 
   "history.title": "Historia",
-  "history.entries.one": "{count} wpis",
-  "history.entries.few": "{count} wpisy",
-  "history.entries.many": "{count} wpisów",
   "history.connectHint":
     "Podłącz portfel, aby zobaczyć historię zakupów (RunRecord) z Predca.",
   "history.noRuns":
@@ -741,7 +737,6 @@ const en: Dict = {
   "auto.banner.confirming":
     "Weekly vault purchase: waiting for the transaction to confirm.",
 
-  "settings.kicker": "DCA configuration",
   "settings.title": "Settings",
   "settings.weeklyAmount": "Weekly amount (USDC)",
   "settings.weeklyInvalid": "Enter an amount ≥ 1 USDC, at most 2 decimals.",
@@ -777,7 +772,7 @@ const en: Dict = {
     "Connect a wallet. The local budget saves immediately; the on-chain amount follows a deposit on Overview.",
   "settings.saved": "· saved ✓",
   "settings.cleared": "· cleared ✓",
-  "settings.exclusions": "Exclusions (e.g. OpenAI, Kalshi) — applied to ranking",
+  "settings.exclusions": "Exclusions",
   "settings.fixedExclusion": "xAI — always excluded (not available in PreStocks DCA)",
   "settings.buyDespiteIpo": "Buy PreStock even after IPO",
   "settings.deadlineInvalid": "Allow tokens past their expiry or with an invalid deadline (they are worthless after the end date).",
@@ -815,9 +810,6 @@ const en: Dict = {
   "settings.keysSaved": "Saved to localStorage ✓",
 
   "history.title": "History",
-  "history.entries.one": "{count} entry",
-  "history.entries.few": "{count} entries",
-  "history.entries.many": "{count} entries",
   "history.connectHint":
     "Connect your wallet to see purchase history (RunRecord) from Predca.",
   "history.noRuns":

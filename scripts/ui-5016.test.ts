@@ -5,7 +5,6 @@ import { allocationShareText, allocationTooltipText } from "../lib/allocation-la
 import { shouldAttemptPrivyRestore } from "../lib/connect-wallet";
 import { withFaucetButtonCap } from "../lib/dca-api";
 import { fmtSignedPnl } from "../lib/format-usd";
-import { historyEntriesLine, historyEntryForm } from "../lib/history-view";
 import { translate } from "../lib/i18n";
 import { formatDollars, setNumberLocaleForTests } from "../lib/number-format";
 import {
@@ -52,49 +51,18 @@ function row(partial: Partial<PositionRow> & Pick<PositionRow, "name">): Positio
   };
 }
 
-test("history header stays History and the subtitle is the record count", () => {
+test("history keeps its title keys and does not show a record count", () => {
   assert.equal(translate("en", "history.kicker"), "history.kicker");
   assert.equal(translate("pl", "history.kicker"), "history.kicker");
   assert.equal(translate("en", "history.title"), "History");
   assert.equal(translate("pl", "history.title"), "Historia");
   assert.equal(translate("pl", "history.onChainIntro"), "history.onChainIntro");
   assert.equal(translate("en", "history.onChainIntro"), "history.onChainIntro");
+  assert.equal(translate("pl", "history.entries.one", { count: 1 }), "history.entries.one");
+  assert.equal(translate("en", "history.entries.many", { count: 4 }), "history.entries.many");
 
-  assert.equal(historyEntryForm(1, "pl"), "one");
-  assert.equal(historyEntryForm(2, "pl"), "few");
-  assert.equal(historyEntryForm(4, "pl"), "few");
-  assert.equal(historyEntryForm(5, "pl"), "many");
-  assert.equal(historyEntryForm(12, "pl"), "many");
-  assert.equal(historyEntryForm(14, "pl"), "many");
-  assert.equal(historyEntryForm(21, "pl"), "many");
-  assert.equal(historyEntryForm(22, "pl"), "few");
-  assert.equal(historyEntryForm(24, "pl"), "few");
-  assert.equal(historyEntryForm(0, "pl"), "many");
-  assert.equal(historyEntryForm(1, "en"), "one");
-  assert.equal(historyEntryForm(5, "en"), "many");
-  assert.equal(historyEntryForm(22, "en"), "many");
-
-  assert.equal(historyEntriesLine(1, "pl"), "1 wpis");
-  assert.equal(historyEntriesLine(2, "pl"), "2 wpisy");
-  assert.equal(historyEntriesLine(4, "pl"), "4 wpisy");
-  assert.equal(historyEntriesLine(5, "pl"), "5 wpisów");
-  assert.equal(historyEntriesLine(12, "pl"), "12 wpisów");
-  assert.equal(historyEntriesLine(14, "pl"), "14 wpisów");
-  assert.equal(historyEntriesLine(21, "pl"), "21 wpisów");
-  assert.equal(historyEntriesLine(22, "pl"), "22 wpisy");
-  assert.equal(historyEntriesLine(0, "en"), "0 entries");
-  assert.equal(historyEntriesLine(1, "en"), "1 entry");
-  assert.equal(historyEntriesLine(12, "en"), "12 entries");
-  for (const line of [historyEntriesLine(12, "pl"), historyEntriesLine(12, "en")]) {
-    assert.equal(line.includes("RunRecord"), false);
-    assert.equal(line.includes("on-chain"), false);
-  }
-
-  assert.match(historySrc, /historyEntriesLine\(predca\.runs\.length, locale\)/);
-  assert.match(
-    historySrc,
-    /showRuns \? \([\s\S]*?<h1 className="text-xs uppercase tracking-\[0\.2em\] text-\[#a78bfa\]">\s*\{intro\}\s*<\/h1>/,
-  );
+  assert.doesNotMatch(historySrc, /historyEntriesLine/);
+  assert.doesNotMatch(historySrc, /<h1/);
   assert.match(historySrc, /<p className="text-xs text-\[#8b95a8\]">\{intro\}<\/p>/);
   assert.doesNotMatch(historySrc, /history\.kicker/);
   assert.doesNotMatch(historySrc, /t\("history\.title"\)/);

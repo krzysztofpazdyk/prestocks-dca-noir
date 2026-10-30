@@ -21,16 +21,16 @@ const historySrc = readFileSync(
 const KICKER_H1 =
   '<h1 className="text-xs uppercase tracking-[0.2em] text-[#a78bfa]">';
 
-test("section kickers match tab label size and in-page tab titles are gone", () => {
+test("tab labels stay small and in-page kickers are gone", () => {
   assert.match(navSrc, /text-xs tracking-wide uppercase/);
 
   assert.equal(overviewSrc.includes(KICKER_H1), false);
-  assert.equal(settingsSrc.includes(KICKER_H1), true);
-  assert.equal(historySrc.includes(KICKER_H1), true);
+  assert.equal(settingsSrc.includes(KICKER_H1), false);
+  assert.equal(historySrc.includes(KICKER_H1), false);
   assert.doesNotMatch(overviewSrc, /overview\.kicker/);
-  assert.match(settingsSrc, /\{t\("settings\.kicker"\)\}/);
+  assert.doesNotMatch(settingsSrc, /settings\.kicker/);
   assert.doesNotMatch(historySrc, /history\.kicker/);
-  assert.match(historySrc, /historyEntriesLine\(predca\.runs\.length, locale\)/);
+  assert.doesNotMatch(historySrc, /historyEntriesLine/);
 
   assert.doesNotMatch(overviewSrc, /t\("overview\.title"\)/);
   assert.doesNotMatch(settingsSrc, /t\("settings\.title"\)/);
@@ -41,8 +41,8 @@ test("section kickers match tab label size and in-page tab titles are gone", () 
 
   assert.equal(translate("pl", "overview.kicker"), "overview.kicker");
   assert.equal(translate("en", "overview.kicker"), "overview.kicker");
-  assert.equal(translate("pl", "settings.kicker"), "Konfiguracja DCA");
-  assert.equal(translate("en", "settings.kicker"), "DCA configuration");
+  assert.equal(translate("pl", "settings.kicker"), "settings.kicker");
+  assert.equal(translate("en", "settings.kicker"), "settings.kicker");
   assert.equal(translate("pl", "history.kicker"), "history.kicker");
   assert.equal(translate("en", "history.kicker"), "history.kicker");
   assert.equal(translate("pl", "nav.overview"), "Overview");
@@ -71,5 +71,5 @@ test("allocation / top3 / pnl column stretch fills the hole under Profit", () =>
   );
   assert.doesNotMatch(pnlFn, /min-h-0/);
   assert.match(pnlFn, /v\{APP_VERSION\}/);
-  assert.equal(APP_VERSION, "5.0.20");
+  assert.equal(APP_VERSION, "5.0.21");
 });

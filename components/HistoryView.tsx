@@ -6,7 +6,7 @@ import type { PublicKey } from "@solana/web3.js";
 import { usePredca } from "@/lib/hooks/usePredca";
 import { TxNotice } from "@/components/TxNotice";
 import { HistoryRunEntry } from "@/components/HistoryRunEntry";
-import { historyEntriesLine, historyView } from "@/lib/history-view";
+import { historyView } from "@/lib/history-view";
 import { runsNewestFirst } from "@/lib/run-order";
 import {
   loadRunOrigin,
@@ -64,39 +64,31 @@ function useRunOrigins(
 export function HistoryView() {
   const { connected, connecting } = useWallet();
   const predca = usePredca();
-  const { locale, t } = useI18n();
+  const { t } = useI18n();
   const mode = historyView(predca.status, predca.runs.length, connected);
   const showRuns = mode === "list" || mode === "list_stale";
   const runIndexKey = predca.runs.map((run) => run.runIndex.toString()).join(",");
   const origins = useRunOrigins(predca.owner, runIndexKey);
   const disconnectedCopy = connecting ? t("connect.busy") : t("connect.title");
 
-  let intro: string;
+  let intro: string | null = null;
   if (mode === "disconnected") {
     intro = disconnectedCopy;
   } else if (mode === "loading") {
     intro = t("history.loading");
-  } else if (showRuns) {
-    intro = historyEntriesLine(predca.runs.length, locale);
   } else if (mode === "empty") {
     intro = t("history.noRuns");
   } else if (mode === "not_ready") {
     intro = t("history.notReady");
-  } else {
+  } else if (!showRuns) {
     intro = t("history.fetchError");
   }
 
   return (
     <div className="space-y-5">
-      <div>
-        {showRuns ? (
-          <h1 className="text-xs uppercase tracking-[0.2em] text-[#a78bfa]">
-            {intro}
-          </h1>
-        ) : (
-          <p className="text-xs text-[#8b95a8]">{intro}</p>
-        )}
-      </div>
+      {intro != null ? (
+        <p className="text-xs text-[#8b95a8]">{intro}</p>
+      ) : null}
 
       {predca.status === "error" && predca.rpcError ? (
         <TxNotice message={predca.rpcError} tone="error" />
