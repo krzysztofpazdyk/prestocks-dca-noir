@@ -89,10 +89,13 @@ export function HistoryView() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-xs uppercase tracking-[0.2em] text-[#a78bfa]">
-          {t("history.kicker")}
-        </h1>
-        <p className="mt-1 text-xs text-[#8b95a8]">{intro}</p>
+        {showRuns ? (
+          <h1 className="text-xs uppercase tracking-[0.2em] text-[#a78bfa]">
+            {intro}
+          </h1>
+        ) : (
+          <p className="text-xs text-[#8b95a8]">{intro}</p>
+        )}
       </div>
 
       {predca.status === "error" && predca.rpcError ? (

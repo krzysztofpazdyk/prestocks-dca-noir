@@ -888,25 +888,21 @@ export function OverviewView() {
     purchaseMsgTone(purchaseTone, purchaseText ?? ""),
   );
 
+  const overviewNotice = !connected
+    ? { text: t("overview.disconnectedHint"), className: "text-[#8b95a8]" }
+    : predca.status === "no_mint"
+      ? { text: t("overview.noMintHint"), className: "text-[#fbbf24]" }
+      : null;
+
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-xs uppercase tracking-[0.2em] text-[#a78bfa]">
-            {t("overview.kicker")}
-          </h1>
+      {overviewNotice ? (
+        <div className="flex flex-wrap items-end justify-end gap-3">
+          <p className={`text-xs ${overviewNotice.className}`}>
+            {overviewNotice.text}
+          </p>
         </div>
-        {!connected && (
-          <p className="text-xs text-[#8b95a8]">
-            {t("overview.disconnectedHint")}
-          </p>
-        )}
-        {connected && predca.status === "no_mint" && (
-          <p className="text-xs text-[#fbbf24]">
-            {t("overview.noMintHint")}
-          </p>
-        )}
-      </div>
+      ) : null}
 
       {/* On-chain Predca strip */}
       <section className="rounded-lg border border-[#2dd4bf33] bg-[#141820] p-5">
@@ -1292,8 +1288,10 @@ export function OverviewView() {
           )}
         </section>
 
-        <div className="flex min-h-0 flex-col gap-4 lg:h-full">
-          <section className="flex min-h-0 flex-1 flex-col rounded-lg border border-[#1e2633] bg-[#141820] p-5">
+        {/* Top-3 stays content-sized. Profit (flex-1) fills the rest of this
+            column. No min-h-0, so a taller column stretches Allocation. */}
+        <div className="flex flex-col gap-4 lg:h-full">
+          <section className="shrink-0 rounded-lg border border-[#1e2633] bg-[#141820] p-5">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h2 className="text-[11px] uppercase tracking-[0.15em] text-[#a78bfa]">
@@ -1636,7 +1634,7 @@ function PnlSection({
   const purchaseUnknown = purchasePriceUnknown(rows);
   const valueBlocked = rows.some((row) => row.valueKnown === false);
   return (
-    <section className="flex min-h-0 flex-1 flex-col rounded-lg border border-[#1e2633] bg-[#141820] p-5">
+    <section className="flex flex-1 flex-col rounded-lg border border-[#1e2633] bg-[#141820] p-5">
       <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
         <h2 className="text-[11px] uppercase tracking-[0.15em] text-[#a78bfa]">
           {t("pnl.title")}

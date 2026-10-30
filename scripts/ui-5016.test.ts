@@ -53,8 +53,8 @@ function row(partial: Partial<PositionRow> & Pick<PositionRow, "name">): Positio
 }
 
 test("history header stays History and the subtitle is the record count", () => {
-  assert.equal(translate("en", "history.kicker"), "Purchases (auto & manual)");
-  assert.equal(translate("pl", "history.kicker"), "Purchases (auto & manual)");
+  assert.equal(translate("en", "history.kicker"), "history.kicker");
+  assert.equal(translate("pl", "history.kicker"), "history.kicker");
   assert.equal(translate("en", "history.title"), "History");
   assert.equal(translate("pl", "history.title"), "Historia");
   assert.equal(translate("pl", "history.onChainIntro"), "history.onChainIntro");
@@ -93,8 +93,10 @@ test("history header stays History and the subtitle is the record count", () => 
   assert.match(historySrc, /historyEntriesLine\(predca\.runs\.length, locale\)/);
   assert.match(
     historySrc,
-    /<h1 className="text-xs uppercase tracking-\[0\.2em\] text-\[#a78bfa\]">\s*\{t\("history\.kicker"\)\}\s*<\/h1>/,
+    /showRuns \? \([\s\S]*?<h1 className="text-xs uppercase tracking-\[0\.2em\] text-\[#a78bfa\]">\s*\{intro\}\s*<\/h1>/,
   );
+  assert.match(historySrc, /<p className="text-xs text-\[#8b95a8\]">\{intro\}<\/p>/);
+  assert.doesNotMatch(historySrc, /history\.kicker/);
   assert.doesNotMatch(historySrc, /t\("history\.title"\)/);
   assert.doesNotMatch(historySrc, /history\.onChainIntro/);
   assert.doesNotMatch(historySrc, /RunRecord on-chain/);

@@ -61,7 +61,6 @@ const pl: Dict = {
   "privy.blockhashExpired":
     "Transakcja nie została wysłana. Środki nie zostały ruszone. Spróbuj ponownie i szybciej zamknij okno Privy.",
 
-  "overview.kicker": "Trading desk",
   "overview.title": "Overview",
   "overview.maxDepositHint": "Maks. wpłata: {amount} (saldo portfela)",
   "overview.maxWithdrawHint": "Maks. wypłata: {amount} (saldo vaulta)",
@@ -85,7 +84,7 @@ const pl: Dict = {
   "faucet.error": "Faucet: {error}",
   "faucet.needWallet": "Podłącz portfel, by wziąć demo USDC + SOL.",
 
-  "predca.title": "Predca on-chain",
+  "predca.title": "Twoje konto DCA",
   "predca.refresh": "Odśwież",
   "predca.loading": "Ładowanie…",
   "predca.budget": "Budżet tygodniowy",
@@ -279,8 +278,6 @@ const pl: Dict = {
 
   "settings.kicker": "Konfiguracja DCA",
   "settings.title": "Ustawienia",
-  "settings.intro":
-    "Tygodniowa kwota zapisuje się lokalnie od razu (bez portfela — do pierwszego połączenia). Konto on-chain powstaje przy pierwszej wpłacie na Overview. Potem budżet zmienia „Zapisz budżet on-chain”, Manual Buy albo włączenie auto-zakupu. BYOK zostaje w localStorage.",
   "settings.weeklyAmount": "Tygodniowa kwota (USDC)",
   "settings.weeklyInvalid": "Podaj kwotę ≥ 1 USDC, max 2 miejsca po przecinku.",
   "settings.weeklyAtEnable":
@@ -352,7 +349,6 @@ const pl: Dict = {
   "settings.saveKeys": "Zapisz klucze w localStorage",
   "settings.keysSaved": "Zapisano w localStorage ✓",
 
-  "history.kicker": "Purchases (auto & manual)",
   "history.title": "Historia",
   "history.entries.one": "{count} wpis",
   "history.entries.few": "{count} wpisy",
@@ -530,7 +526,6 @@ const en: Dict = {
   "privy.blockhashExpired":
     "The transaction was not sent. No funds moved. Try again and close the Privy window sooner.",
 
-  "overview.kicker": "Trading desk",
   "overview.title": "Overview",
   "overview.maxDepositHint": "Max deposit: {amount} (wallet balance)",
   "overview.maxWithdrawHint": "Max withdraw: {amount} (vault balance)",
@@ -554,7 +549,7 @@ const en: Dict = {
   "faucet.error": "Faucet: {error}",
   "faucet.needWallet": "Connect a wallet to claim demo USDC + SOL.",
 
-  "predca.title": "Predca on-chain",
+  "predca.title": "Your DCA account",
   "predca.refresh": "Refresh",
   "predca.loading": "Loading…",
   "predca.budget": "Weekly budget",
@@ -748,8 +743,6 @@ const en: Dict = {
 
   "settings.kicker": "DCA configuration",
   "settings.title": "Settings",
-  "settings.intro":
-    "The weekly amount saves locally right away (without a wallet — until the first connection). The on-chain account is created with the first deposit on Overview. After that, change the budget with “Save budget on-chain”, Manual Buy, or by enabling auto-buy. BYOK stays in localStorage.",
   "settings.weeklyAmount": "Weekly amount (USDC)",
   "settings.weeklyInvalid": "Enter an amount ≥ 1 USDC, at most 2 decimals.",
   "settings.weeklyAtEnable":
@@ -821,7 +814,6 @@ const en: Dict = {
   "settings.saveKeys": "Save keys to localStorage",
   "settings.keysSaved": "Saved to localStorage ✓",
 
-  "history.kicker": "Purchases (auto & manual)",
   "history.title": "History",
   "history.entries.one": "{count} entry",
   "history.entries.few": "{count} entries",

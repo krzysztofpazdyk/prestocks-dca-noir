@@ -89,8 +89,7 @@ test("prefs confirmation stays outside the dirty block, and controls wait for hy
     "xAI — zawsze wykluczony (niedostępny w PreStocks DCA)",
     "xAI — always excluded (not available in PreStocks DCA)",
   ]);
-  assert.match(values("settings.intro")[0], /bez portfela — do pierwszego połączenia/);
-  assert.match(values("settings.intro")[1], /without a wallet — until the first connection/);
+  assert.equal(values("settings.intro").length, 0);
   assert.match(values("settings.weeklyAtEnable")[0], /bez portfela — do pierwszego połączenia/);
   assert.match(values("settings.exclusions")[0], /OpenAI, Kalshi/);
   assert.doesNotMatch(values("settings.exclusions")[0], /xAI/);
