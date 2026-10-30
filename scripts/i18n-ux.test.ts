@@ -123,11 +123,11 @@ test("stale portfolio and RPC timeout copy exists in Polish and English", () => 
   );
 });
 
-test("Overview and Trading desk stay English in the Polish dictionary", () => {
+test("Overview stays English in the Polish dictionary", () => {
   const pl = src.slice(src.indexOf("const pl"), src.indexOf("const en"));
   assert.match(pl, /"nav\.overview": "Overview"/);
   assert.match(pl, /"overview\.title": "Overview"/);
-  assert.match(pl, /Trading desk/);
+  assert.doesNotMatch(pl, /Trading desk/);
   assert.doesNotMatch(pl, /"positions\.title": "[^"]*Hint/);
   assert.equal(values("overview.rpcStale")[0], "ostatni odczyt");
   assert.notEqual(values("prices.stale")[0], values("overview.rpcStale")[0]);
@@ -136,7 +136,7 @@ test("Overview and Trading desk stay English in the Polish dictionary", () => {
   assert.equal(values("history.buyPrice")[1], "at {price} · {units} units");
   assert.equal(values("prices.panelTitle")[0], "Ceny tokenów vs wycena spółek");
   assert.equal(values("prices.lastRead")[0], "ostatni odczyt · {time}");
-  assert.deepEqual(values("overview.kicker"), ["Trading desk", "Trading desk"]);
+  assert.equal(values("overview.kicker").length, 0);
   assert.deepEqual(values("pnl.title"), [
     "Profit/loss made by PreStocks DCA application",
     "Profit/loss made by PreStocks DCA application",

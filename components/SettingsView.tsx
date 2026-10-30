@@ -516,7 +516,6 @@ export function SettingsView() {
         <h1 className="text-xs uppercase tracking-[0.2em] text-[#a78bfa]">
           {t("settings.kicker")}
         </h1>
-        <p className="mt-1 text-xs text-[#8b95a8]">{t("settings.intro")}</p>
       </div>
 
       {predca.sessionCheckMsg ? (
