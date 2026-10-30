@@ -89,10 +89,9 @@ export function HistoryView() {
   return (
     <div className="space-y-5">
       <div>
-        <p className="text-[10px] uppercase tracking-[0.2em] text-[#a78bfa]">
+        <h1 className="text-xs uppercase tracking-[0.2em] text-[#a78bfa]">
           {t("history.kicker")}
-        </p>
-        <h1 className="mt-1 text-xl font-semibold">{t("history.title")}</h1>
+        </h1>
         <p className="mt-1 text-xs text-[#8b95a8]">{intro}</p>
       </div>
 
