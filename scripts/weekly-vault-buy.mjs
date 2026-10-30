@@ -736,6 +736,48 @@ function ensurePrefsDefaults() {
   return last;
 }
 
+function parseDeadlineMs(raw) {
+  if (raw == null || raw === "") return null;
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return raw < 1e12 ? raw * 1000 : raw;
+  }
+  if (typeof raw === "string") {
+    const t = Date.parse(raw);
+    if (Number.isFinite(t)) return t;
+  }
+  return null;
+}
+
+function rowDeadlineAt(row) {
+  if (!row || typeof row !== "object") return null;
+  return parseDeadlineMs(
+    row.deadline_at ?? row.deadline ?? row.expires_at ?? row.expiry ?? row.expiry_date,
+  );
+}
+
+function isPastDeadline(row, company, now) {
+  const at = rowDeadlineAt(row) ?? rowDeadlineAt(company);
+  if (at != null) return at < now;
+  if (row?.deadline_invalid === true || row?.expired === true) return true;
+  return false;
+}
+
+function dropPastDeadlineNames(names, products, companyData, now = Date.now()) {
+  const byName = new Map();
+  for (const product of Array.isArray(products) ? products : []) {
+    if (product && typeof product.name === "string") {
+      byName.set(product.name.toLowerCase(), product);
+    }
+  }
+  const company = companyData && typeof companyData === "object" ? companyData : {};
+  return names.filter((name) => {
+    const key = String(name).toLowerCase();
+    const row = byName.get(key) ?? {};
+    const rec = company[name] ?? company[key] ?? {};
+    return !isPastDeadline(row, rec, now);
+  });
+}
+
 async function rankTop3(owner) {
   const unavailable = "Jev niedostępny, zakup nie wysłany";
   const base = (process.env.NEXT_PUBLIC_DCA_API_URL || "").replace(/\/$/, "");
@@ -765,8 +807,29 @@ async function rankTop3(owner) {
     Array.isArray(top3) &&
     top3.length >= 3
   ) {
+    let products = r.data.products;
+    if (!Array.isArray(products) || products.length === 0) {
+      try {
+        const extra = await fetchJson(
+          `${base}/prestocks/products`,
+          { headers: { Accept: "application/json" } },
+          8000,
+        );
+        products = extra.data?.products;
+      } catch {
+        /* no product dates — do not invent a deadline */
+      }
+    }
+    const names = dropPastDeadlineNames(
+      top3.slice(0, 3).map((x) => x.name),
+      products,
+      r.data.company_data,
+    );
+    if (names.length < 3) {
+      throw new Error("Token po terminie ważności — zakup wstrzymany");
+    }
     return {
-      names: top3.slice(0, 3).map((x) => x.name),
+      names,
       source: "hosted_rank",
     };
   }

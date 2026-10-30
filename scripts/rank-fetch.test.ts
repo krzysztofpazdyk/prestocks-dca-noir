@@ -72,7 +72,7 @@ test("Grok in the label follows the pipeline, not a stored xAI key", () => {
   );
   assert.doesNotMatch(disabled, /rankFlat/);
   assert.doesNotMatch(disabled, /flatRanking/);
-  assert.match(disabled, /top3\.length === 0/);
+  assert.match(disabled, /top3\.length < 3/);
   const rpc = disabled.indexOf("purchase.disabled.rpcError");
   const none = disabled.indexOf("purchase.disabled.noRecs");
   assert.ok(rpc >= 0 && rpc < none);

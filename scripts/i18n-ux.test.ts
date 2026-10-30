@@ -145,6 +145,14 @@ test("Overview stays English in the Polish dictionary", () => {
   assert.equal(values("pnl.legacyNote")[1], "PnL available for purchases at market price (coming soon).");
   assert.deepEqual(values("pnl.details"), ["Dodatkowe informacje", "Additional Info"]);
   assert.deepEqual(values("pnl.hideDetails"), ["Ukryj dodatkowe informacje", "Hide additional info"]);
+  assert.deepEqual(values("settings.deadlineInvalid"), [
+    "Dopuszczaj tokeny z terminem ważności",
+    "Allow tokens with an expiry date",
+  ]);
+  assert.deepEqual(values("settings.deadlineInvalidHint"), [
+    "Po upływie terminu program ich już nie kupi.",
+    "Once the expiry date passes, the program will no longer buy them.",
+  ]);
   const history = readFileSync(
     new URL("../components/HistoryView.tsx", import.meta.url),
     "utf8",

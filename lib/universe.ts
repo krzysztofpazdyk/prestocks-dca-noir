@@ -72,10 +72,12 @@ export type PrestocksProduct = {
   /** True when the underlying company has already IPO'd (from metrics if present). */
   ipo_completed?: boolean;
   /**
-   * True when metrics flag an invalid/expired deadline (or past expires_at/expiry/deadline).
-   * Live /api/metrics often omits these — filter is a no-op until data exists.
+   * True when the known deadline has already passed (vs ranking/buy time).
+   * Live /api/metrics often omits dates — no date means no deadline (do not invent).
    */
   deadline_invalid?: boolean;
+  /** Known expiry as epoch ms. Null/omitted = no known deadline. */
+  deadline_at?: number | null;
 };
 
 export type RankRow = PrestocksProduct & {

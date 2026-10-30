@@ -335,7 +335,8 @@ function inNearIpoList(name: string): boolean {
 }
 
 /**
- * Fresh facts only. No fresh record returns the same product object.
+ * Fresh facts overlay IPO / deadline. Stale company records do not replace
+ * a metrics deadline — `deadline_invalid` is always recomputed vs `now`.
  * `rumored` / `none` do not change `near_ipo`.
  */
 export function applyCompanyData(
@@ -345,33 +346,40 @@ export function applyCompanyData(
 ): PrestocksProduct[] {
   return products.map((product) => {
     const data = lookup(byName, product.name);
-    if (!data || !isFresh(data, now)) return product;
+    const fresh = !!data && isFresh(data, now);
     let ipoCompleted = product.ipo_completed;
     let deadlineInvalid = product.deadline_invalid;
     let nearIpo = product.near_ipo;
-    if (
-      ipoKnown(data, now) &&
-      data.ipoStatus === "listed" &&
-      data.ipoDate != null &&
-      data.ipoDate <= now
-    ) {
-      ipoCompleted = true;
+    let deadlineAt = product.deadline_at ?? null;
+    if (fresh && data) {
+      if (
+        ipoKnown(data, now) &&
+        data.ipoStatus === "listed" &&
+        data.ipoDate != null &&
+        data.ipoDate <= now
+      ) {
+        ipoCompleted = true;
+      }
+      if (deadlineKnown(data, now) && data.deadline != null) {
+        deadlineAt = data.deadline;
+      }
+      if (data.ipoStatus === "announced" && data.ipoDate != null) {
+        const delta = data.ipoDate - now;
+        nearIpo = inNearIpoList(product.name) || (delta >= 0 && delta <= NEAR_IPO_WINDOW_MS);
+      } else if (inNearIpoList(product.name)) {
+        nearIpo = true;
+      } else if (data.ipoStatus === "listed") {
+        nearIpo = false;
+      }
     }
-    if (deadlineKnown(data, now) && data.deadline != null && data.deadline < now) {
-      deadlineInvalid = true;
-    }
-    if (data.ipoStatus === "announced" && data.ipoDate != null) {
-      const delta = data.ipoDate - now;
-      nearIpo = inNearIpoList(product.name) || (delta >= 0 && delta <= NEAR_IPO_WINDOW_MS);
-    } else if (inNearIpoList(product.name)) {
-      nearIpo = true;
-    } else if (data.ipoStatus === "listed") {
-      nearIpo = false;
+    if (deadlineAt != null && Number.isFinite(deadlineAt)) {
+      deadlineInvalid = deadlineAt < now;
     }
     if (
       ipoCompleted === product.ipo_completed &&
       deadlineInvalid === product.deadline_invalid &&
-      nearIpo === product.near_ipo
+      nearIpo === product.near_ipo &&
+      deadlineAt === (product.deadline_at ?? null)
     ) {
       return product;
     }
@@ -380,6 +388,7 @@ export function applyCompanyData(
       ipo_completed: ipoCompleted,
       deadline_invalid: deadlineInvalid,
       near_ipo: nearIpo,
+      deadline_at: deadlineAt,
     };
   });
 }

@@ -6,7 +6,7 @@
 
 import { shown } from "@/lib/i18n";
 import type { RankPrefs } from "@/lib/rank-prefs";
-import { readRankPrefs } from "@/lib/rank-prefs";
+import { hasKnownDeadline, isDeadlinePast, readRankPrefs } from "@/lib/rank-prefs";
 import type { PrestocksProduct, RankResult, RankRow } from "@/lib/universe";
 
 const XAI_CHAT_URL = "https://api.x.ai/v1/chat/completions";
@@ -39,8 +39,8 @@ function premiumPrompt(pct: number | null): number | string {
 function prefsLine(prefs: RankPrefs): string {
   const excl = prefs.exclusions.join(",") || "xAI";
   const deadlineBit = prefs.deadlinesUnimportant
-    ? "deadlines_unimportant=true (buying with expiry allowed)"
-    : "deadlines_unimportant=false (exclude expired / invalid-deadline names)";
+    ? "deadlines_unimportant=true (tokens with an expiry date allowed until that date; never pick names past expiry)"
+    : "deadlines_unimportant=false (exclude names with a known expiry date; never pick names past expiry)";
   const ipoBit = prefs.premiumsMatter
     ? prefs.premiumsEspeciallyNearIpo
       ? "premiums_matter=true especially near IPO"
@@ -57,8 +57,8 @@ function prefsLine(prefs: RankPrefs): string {
 
 function scoringHint(prefs: RankPrefs): string {
   const deadlineHint = prefs.deadlinesUnimportant
-    ? "Buying PreStocks that have an expiry date is allowed."
-    : "Do not pick PreStocks that are past expiry or have an invalid deadline.";
+    ? "Buying PreStocks that have an expiry date is allowed until that date. Never pick names past expiry."
+    : "Do not pick PreStocks that have any known expiry date. Never pick names past expiry.";
   const premHint = prefs.premiumsMatter
     ? prefs.premiumsEspeciallyNearIpo
       ? "Weight premiums heavily (discount vs mark is good; rich premium needs strong thesis). Near-IPO premium dynamics are especially important."
@@ -156,7 +156,12 @@ function buildState(
       chg30d_pct: p.change_30d_pct ?? null,
       near_ipo: p.near_ipo,
       ipo_completed: !!p.ipo_completed,
-      deadline_invalid: !!p.deadline_invalid,
+      has_deadline: hasKnownDeadline(p),
+      deadline_at:
+        p.deadline_at != null && Number.isFinite(p.deadline_at)
+          ? new Date(p.deadline_at).toISOString()
+          : "na",
+      deadline_invalid: isDeadlinePast(p, Date.now()),
       grok: grokRowForProduct(grok, p),
     })),
   };
@@ -177,8 +182,8 @@ function buildQuestions(
       (g ? `; grok_signal=${g.signal}` : "");
   }
   const deadlinePhrase = prefs.deadlinesUnimportant
-    ? "expired / deadline names allowed"
-    : "skip expired / invalid-deadline names";
+    ? "tokens with expiry allowed until the date; never pick names past expiry"
+    : "exclude names with a known expiry date; never pick names past expiry";
   const ipoPhrase = prefs.premiumsMatter
     ? prefs.premiumsEspeciallyNearIpo
       ? "premiums matter especially near IPO"
@@ -208,7 +213,7 @@ function buildQuestions(
     best_dca_pick: {
       type: "choice",
       instructions:
-        `Given USER_PREFS (${prefs.deadlinesUnimportant ? "buying with expiry allowed" : "exclude expired / invalid-deadline names"}; ${ipoPhrase}; ${postIpoPhrase}) ` +
+        `Given USER_PREFS (${prefs.deadlinesUnimportant ? "tokens with expiry allowed until the date; never pick names past expiry" : "exclude names with a known expiry date; never pick names past expiry"}; ${ipoPhrase}; ${postIpoPhrase}) ` +
         "and the product table in state" +
         (grokPresent
           ? " plus grok_briefing (Grok is the analyst; you decide)"
@@ -225,12 +230,13 @@ function buildQuestions(
         `Score how suitable \`${p.name}\` (mint ${p.mint}) is as a weekly PreStocks DCA allocation ` +
         `this week. Premium_pct=${premiumPrompt(p.premium_pct)} (negative=discount). near_ipo=` +
         `${p.near_ipo ? "yes" : "no"}. ipo_completed=` +
-        `${p.ipo_completed ? "yes" : "no"}. deadline_invalid=` +
-        `${p.deadline_invalid ? "yes" : "no"}. ` +
+        `${p.ipo_completed ? "yes" : "no"}. has_deadline=` +
+        `${hasKnownDeadline(p) ? "yes" : "no"}. deadline_invalid=` +
+        `${isDeadlinePast(p, Date.now()) ? "yes" : "no"}. ` +
         (prefs.premiumsMatter
           ? "Prefer attractive premiums; "
           : "Premium_pct is raw info only — do not use it as a ranking signal. ") +
-        `${prefs.deadlinesUnimportant ? "buying with expiry allowed" : "skip expired / invalid-deadline names"}. ` +
+        `${prefs.deadlinesUnimportant ? "tokens with expiry allowed until the date; never pick names past expiry" : "exclude names with a known expiry date; never pick names past expiry"}. ` +
         `${
           !prefs.premiumsMatter
             ? "Near-IPO premium bonus OFF. "
@@ -297,13 +303,14 @@ async function callGrok(
     mark_usd: p.mark_price_usd,
     near_ipo: !!p.near_ipo,
     ipo_completed: !!p.ipo_completed,
-    deadline_invalid: !!p.deadline_invalid,
+    has_deadline: hasKnownDeadline(p),
+    deadline_invalid: isDeadlinePast(p, Date.now()),
     chg30d_pct: p.change_30d_pct,
     holders: p.holders,
   }));
   const deadlineSys = rankPrefs.deadlinesUnimportant
-    ? "buying PreStocks with expiry allowed"
-    : "do not pick names past expiry / with invalid deadline";
+    ? "tokens with an expiry date allowed until that date; never pick names past expiry"
+    : "exclude names with a known expiry date; never pick names past expiry";
   const ipoSys = rankPrefs.premiumsMatter
     ? rankPrefs.premiumsEspeciallyNearIpo
       ? "premiums matter especially near IPO"

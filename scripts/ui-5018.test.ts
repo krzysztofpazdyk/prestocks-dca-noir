@@ -408,7 +408,7 @@ test("outside-app badge shows the unit count and is absent at zero", () => {
     overview.indexOf("function PositionsCard"),
   );
   assert.match(pnlFn, /v\{APP_VERSION\}/);
-  assert.equal(APP_VERSION, "5.0.22");
+  assert.equal(APP_VERSION, "5.0.23");
 
   const entry = readFileSync(
     new URL("../components/HistoryRunEntry.tsx", import.meta.url),

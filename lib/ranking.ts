@@ -34,7 +34,7 @@ import {
   fillNoticeVars,
   type ProductsFetchResult,
 } from "@/lib/prestocks";
-import type { RankResult } from "@/lib/universe";
+import type { PrestocksProduct, RankResult, RankRow } from "@/lib/universe";
 
 type RankStore = {
   getItem(key: string): string | null;
@@ -189,6 +189,41 @@ export async function loadInitialRanking(): Promise<{
   };
 }
 
+function mergeDeadlineFields<
+  T extends {
+    name: string;
+    deadline_at?: number | null;
+    deadline_invalid?: boolean;
+  },
+>(row: T, byName: Map<string, PrestocksProduct>): T {
+  const src = byName.get(row.name.toLowerCase());
+  if (!src) return row;
+  const deadline_at = src.deadline_at ?? row.deadline_at;
+  const deadline_invalid = src.deadline_invalid || row.deadline_invalid;
+  if (deadline_at === row.deadline_at && deadline_invalid === row.deadline_invalid) {
+    return row;
+  }
+  return { ...row, deadline_at, deadline_invalid };
+}
+
+/** Overlay client deadline fields, then drop past (and dated names when the toggle is off). */
+function enforceDeadlinePrefs(
+  result: RankResult,
+  source: PrestocksProduct[],
+  prefs: RankPrefs,
+  now = Date.now(),
+): RankResult {
+  const byName = new Map(source.map((p) => [p.name.toLowerCase(), p]));
+  const merge = <T extends RankRow | PrestocksProduct>(row: T): T =>
+    mergeDeadlineFields(row, byName);
+  return {
+    ...result,
+    top3: filterExpired(result.top3.map(merge), prefs.deadlinesUnimportant, now),
+    scores: filterExpired(result.scores.map(merge), prefs.deadlinesUnimportant, now),
+    products: filterExpired(result.products.map(merge), prefs.deadlinesUnimportant, now),
+  };
+}
+
 function acceptJevRank(result: RankResult): RankResult | null {
   if (!isJevRanking(result) || result.top3.length < 3) return null;
   if (
@@ -210,18 +245,24 @@ export async function runRankingNow(
   productsResult: ProductsFetchResult,
 ): Promise<RankResult> {
   const prefs = readRankPrefs();
+  const now = Date.now();
   const products = filterExpired(
     filterIpoCompleted(
       filterProducts(productsResult.products, prefs.exclusions),
       prefs.buyDespiteIpo,
     ),
     prefs.deadlinesUnimportant,
+    now,
   );
   if (products.length < 3) {
     throw new Error(shown("msg.tooFewProducts"));
   }
 
   const byok = hasByokTypesafe();
+  const acceptFiltered = (result: RankResult): RankResult | null =>
+    acceptJevRank(
+      enforceDeadlinePrefs(result, productsResult.products, prefs, now),
+    );
 
   // GitHub Pages has no Route Handler — skip same-origin /api/jev (POST → 405).
   if (byok && canUseSameOriginJevProxy()) {
@@ -235,7 +276,7 @@ export async function runRankingNow(
         exclusions: prefs.exclusions,
         prefs,
       });
-      const accepted = acceptJevRank(result);
+      const accepted = acceptFiltered(result);
       if (accepted) return accepted;
     } catch {
       /* try hosted Jev next */
@@ -253,14 +294,16 @@ export async function runRankingNow(
         !pipeline.includes("metrics_rank") &&
         proxy.top3.length >= 3
       ) {
-        const accepted = acceptJevRank(rankResultFromProxy(proxy, products));
+        const accepted = acceptFiltered(
+          rankResultFromProxy(proxy, productsResult.products),
+        );
         if (accepted) return accepted;
       }
     } catch {
       /* try /run/dry next */
     }
     try {
-      const accepted = acceptJevRank(
+      const accepted = acceptFiltered(
         await triggerDryRun(prefs.exclusions, prefs),
       );
       if (accepted) return accepted;
