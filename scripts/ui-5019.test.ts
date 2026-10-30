@@ -71,5 +71,5 @@ test("allocation / top3 / pnl column stretch fills the hole under Profit", () =>
   );
   assert.doesNotMatch(pnlFn, /min-h-0/);
   assert.match(pnlFn, /v\{APP_VERSION\}/);
-  assert.equal(APP_VERSION, "5.0.21");
+  assert.equal(APP_VERSION, "5.0.22");
 });

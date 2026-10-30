@@ -20,8 +20,8 @@ const historySrc = readFileSync(
 const HEADER_H1 =
   '<h1 className="text-xs uppercase tracking-[0.2em] text-[#a78bfa]">';
 
-test("v5.0.21 stays on the profit/loss section", () => {
-  assert.equal(APP_VERSION, "5.0.21");
+test("v5.0.22 stays on the profit/loss section", () => {
+  assert.equal(APP_VERSION, "5.0.22");
   const pnlFn = overviewSrc.slice(
     overviewSrc.indexOf("function PnlSection"),
     overviewSrc.indexOf("function PositionsCard"),

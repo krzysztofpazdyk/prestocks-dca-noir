@@ -46,7 +46,7 @@ test("settings drops the DCA configuration heading and the gap above the form", 
   assert.doesNotMatch(settingsSrc, /Konfiguracja DCA|DCA configuration/);
   assert.match(
     settingsSrc,
-    /mx-auto max-w-xl space-y-5">\s*\{predca\.sessionCheckMsg \? \(/,
+    /mx-auto max-w-6xl space-y-5">\s*\{predca\.sessionCheckMsg \? \(/,
   );
 });
 
@@ -64,10 +64,9 @@ test("exclusions label is only the word, in the DCA account color", () => {
     settingsSrc,
     new RegExp(`<span className="${label}">\\s*\\{t\\("settings\\.exclusions"\\)\\}`),
   );
-  assert.match(settingsSrc, /\{t\("settings\.fixedExclusion"\)\}/);
+  assert.doesNotMatch(settingsSrc, /fixedExclusion/);
+  assert.equal(values("settings.fixedExclusion").length, 0);
   assert.match(settingsSrc, /placeholder="OpenAI, Kalshi"/);
-  assert.match(values("settings.fixedExclusion")[0], /xAI/);
-  assert.match(values("settings.fixedExclusion")[1], /xAI/);
 });
 
 test("on-chain budget uses the sign-and-save colors and both buttons are full width", () => {
@@ -136,8 +135,9 @@ test("keeper mode and the next vault purchase share one line", () => {
     `${translate("en", "settings.keeperModeLive")} · ${translate("en", "auto.status.next", { when: whenEn })}`,
     `${translate("en", "settings.keeperModeDryRun")} · ${translate("en", "auto.status.next", { when: whenEn })}`,
   ];
-  // max-w-xl card, p-5, 1px border. 10px sans measured under ~5.2px per character.
-  const innerPx = 36 * 16 - 40 - 2;
+  // Wide column inside max-w-6xl (layout px-4, gap-4, card p-5, 1px border).
+  // 10px sans measured under ~5.2px per character.
+  const innerPx = (72 * 16 - 32 - 16) / 2 - 40 - 2;
   for (const line of lines) {
     assert.ok(line.length * 5.2 < innerPx, `${line.length} chars ${line}`);
   }
@@ -167,8 +167,8 @@ test("history no longer shows the entry count", () => {
   assert.match(values("history.noRuns")[1], /No on-chain RunRecord/);
 });
 
-test("v5.0.21 stays on the profit/loss section", () => {
-  assert.equal(APP_VERSION, "5.0.21");
+test("v5.0.22 stays on the profit/loss section", () => {
+  assert.equal(APP_VERSION, "5.0.22");
   const pnl = overviewSrc.slice(
     overviewSrc.indexOf("function PnlSection"),
     overviewSrc.indexOf("function PositionsCard"),
