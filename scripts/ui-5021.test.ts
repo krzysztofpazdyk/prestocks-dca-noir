@@ -167,8 +167,8 @@ test("history no longer shows the entry count", () => {
   assert.match(values("history.noRuns")[1], /No on-chain RunRecord/);
 });
 
-test("v5.0.22 stays on the profit/loss section", () => {
-  assert.equal(APP_VERSION, "5.0.22");
+test("v5.0.23 stays on the profit/loss section", () => {
+  assert.equal(APP_VERSION, "5.0.23");
   const pnl = overviewSrc.slice(
     overviewSrc.indexOf("function PnlSection"),
     overviewSrc.indexOf("function PositionsCard"),

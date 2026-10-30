@@ -77,6 +77,7 @@ import {
   fetchPrestocksProducts,
   fillNoticeVars,
 } from "@/lib/prestocks";
+import { filterPastDeadline } from "@/lib/rank-prefs";
 import {
   parseRankSession,
   rankPrefsKey,
@@ -123,6 +124,8 @@ type TopPick = {
   priceNow: number | null;
   premiumPct: number | null;
   premiumSource: string;
+  deadline_at?: number | null;
+  deadline_invalid?: boolean;
 };
 
 type RankView = {
@@ -139,6 +142,8 @@ function rankView(result: RankResult): RankView {
       priceNow: row.token_price_usd,
       premiumPct: Number.isFinite(row.premium_pct) ? row.premium_pct : null,
       premiumSource: row.premium_source,
+      deadline_at: row.deadline_at,
+      deadline_invalid: row.deadline_invalid,
     })),
     title: top3TitleFromRank(result),
     subtitle: result.sourceLabel || null,
@@ -584,13 +589,14 @@ export function OverviewView() {
     setBuyInFlight(true);
     try {
       setPurchaseTone("ok");
-      if (top3.length === 0) {
+      const buyable = filterPastDeadline(top3, Date.now());
+      if (buyable.length < 3) {
         setPurchaseTone("fail");
         showPurchase({ key: "msg.noRecs" });
         return;
       }
 
-      const tokenNames = top3.slice(0, 3).map((r) => r.name);
+      const tokenNames = buyable.slice(0, 3).map((r) => r.name);
       // LS is SoT for intended amount (sync on-chain before simulate_buy_v2 when dirty).
       const intendedAmount = resolvePurchaseAmount(predca.weeklyBudgetUsd, ownerBase58);
 
@@ -707,7 +713,7 @@ export function OverviewView() {
   const active = rankBlocked
     ? null
     : (generated ?? (restored ? rankView(restored.rank) : null));
-  const top3 = active?.top3 ?? [];
+  const top3 = filterPastDeadline(active?.top3 ?? [], priceNow);
   const top3Names = top3.map((row) => row.name).join("\u0001");
   // previewBuy is a useCallback (no `this`). Depend on it, not the whole predca object.
   const previewBuy = predca.previewBuy;
@@ -764,7 +770,7 @@ export function OverviewView() {
   const purchaseDisabled =
     sigUnresolved ||
     buyInFlight ||
-    top3.length === 0 ||
+    top3.length < 3 ||
     predca.txPending ||
     (onChainReady
       ? vaultTooLow
@@ -780,7 +786,7 @@ export function OverviewView() {
       buyInFlight,
       txPending: predca.txPending,
       statusError: predca.status === "error",
-      top3Empty: top3.length === 0,
+      top3Empty: top3.length < 3,
       connected,
       onChainReady,
       vaultTooLow,

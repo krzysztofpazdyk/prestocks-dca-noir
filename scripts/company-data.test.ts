@@ -170,6 +170,7 @@ test("Top-3 premium text uses the live helper and Settings disables both data to
   assert.doesNotMatch(settings, /t\("settings\.noData"\)/);
   assert.match(settings, /t\("settings\.buyDespiteIpo"\)/);
   assert.match(settings, /t\("settings\.deadlineInvalid"\)/);
+  assert.match(settings, /t\("settings\.deadlineInvalidHint"\)/);
 
   const ai = readFileSync(new URL("../lib/ai-rank.ts", import.meta.url), "utf8");
   for (const line of ai.split("\n")) {
@@ -230,11 +231,40 @@ test("mixed company data enables both toggles and filters only the known names",
   assert.equal(availability.deadlinesUnimportant.unknown.includes("SpaceX"), true);
   const applied = applyCompanyData(universe(), byName, NOW);
   assert.equal(applied.filter((row) => row.deadline_invalid).map((row) => row.name).join(), "Kalshi");
-  const kept = filterExpired(filterIpoCompleted(applied, false), false);
+  assert.equal(applied.find((row) => row.name === "Kalshi")?.deadline_at, Date.parse("2026-01-01T00:00:00Z"));
+  const kept = filterExpired(filterIpoCompleted(applied, false), false, NOW);
   assert.equal(kept.length, 6);
   for (const name of rest) {
     assert.equal(kept.some((row) => row.name === name), true, name);
   }
+});
+
+test("a future company deadline is stored and dropped only when the toggle is off", () => {
+  const future = wire({
+    deadline: "2027-03-12T23:59:00Z",
+    source: "https://example.com/kalshi",
+  });
+  const applied = applyCompanyData(universe(), { Kalshi: future }, NOW);
+  const kalshi = applied.find((row) => row.name === "Kalshi");
+  assert.equal(kalshi?.deadline_at, Date.parse("2027-03-12T23:59:00Z"));
+  assert.equal(kalshi?.deadline_invalid, false);
+  const on = filterExpired(applied, true, NOW);
+  assert.equal(on.some((row) => row.name === "Kalshi"), true);
+  const off = filterExpired(applied, false, NOW);
+  assert.equal(off.some((row) => row.name === "Kalshi"), false);
+});
+
+test("stale company data does not hide a metrics deadline that has passed", () => {
+  const stale = wire({
+    deadline: new Date(NOW + 30 * DAY).toISOString(),
+    checkedAt: new Date(NOW - 8 * DAY).toISOString(),
+    source: "https://example.com/kalshi",
+  });
+  const rows = [product("Kalshi", { deadline_at: NOW - DAY, deadline_invalid: false })];
+  const next = applyCompanyData(rows, { Kalshi: stale }, NOW);
+  assert.equal(next[0].deadline_at, NOW - DAY);
+  assert.equal(next[0].deadline_invalid, true);
+  assert.equal(filterExpired(next, true, NOW).length, 0);
 });
 
 test("an 8-day-old record is stale and does not enable the only toggle", () => {
@@ -396,12 +426,17 @@ test("company dates use Warsaw day-month order and the IPO copy stays put", () =
     "settings.deadlineOn",
     "settings.checkedOn",
     "settings.deadlineInvalid",
+    "settings.deadlineInvalidHint",
   ];
   for (const key of keys) assert.equal(values(key).length, 2, key);
   assert.deepEqual(values("settings.noData"), ["brak danych", "no data"]);
   assert.deepEqual(values("settings.deadlineInvalid"), [
-    "Dopuszczaj tokeny po terminie ważności lub z nieważnym terminem (po dacie końcowej są bezwartościowe).",
-    "Allow tokens past their expiry or with an invalid deadline (they are worthless after the end date).",
+    "Dopuszczaj tokeny z terminem ważności",
+    "Allow tokens with an expiry date",
+  ]);
+  assert.deepEqual(values("settings.deadlineInvalidHint"), [
+    "Po upływie terminu program ich już nie kupi.",
+    "Once the expiry date passes, the program will no longer buy them.",
   ]);
   assert.deepEqual(values("settings.buyDespiteIpo"), [
     "Kup PreStock mimo odbytego IPO",

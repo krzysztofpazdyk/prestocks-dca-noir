@@ -4,6 +4,8 @@ import { parseJupResponse, type JupQuote } from "../lib/jup-prices";
 import {
   applyJupPremiums,
   buildProducts,
+  deadlineAtFromMetrics,
+  deadlineInvalidFromMetrics,
   summarizePremiumSource,
 } from "../lib/prestocks";
 import { MINTS, REFERENCE_MINTS, XAI_MINT } from "../lib/universe";
@@ -43,6 +45,33 @@ test("buildProducts prefers jupiter stock premium and ignores OURA and xAI", () 
   assert.equal(summarizePremiumSource(products), "jupiter_stockdata");
   const spacex = products.find((p) => p.name === "SpaceX");
   assert.equal(spacex?.near_ipo, false);
+  assert.equal(spacex?.deadline_at ?? null, null);
+  assert.equal(spacex?.deadline_invalid, false);
+});
+
+test("metrics expiry dates become deadline_at and expire vs now", () => {
+  const future = Date.parse("2027-03-12T23:59:00Z");
+  const past = Date.parse("2026-01-01T00:00:00Z");
+  assert.equal(deadlineAtFromMetrics({ expires_at: "2027-03-12T23:59:00Z" }), future);
+  assert.equal(deadlineInvalidFromMetrics({ expires_at: "2027-03-12T23:59:00Z" }, NOW), false);
+  assert.equal(deadlineInvalidFromMetrics({ expiry: "2026-01-01T00:00:00Z" }, NOW), true);
+  assert.equal(deadlineInvalidFromMetrics({ expired: true }, NOW), true);
+  assert.equal(deadlineInvalidFromMetrics({}, NOW), false);
+
+  const products = buildProducts(
+    [
+      { splMint: MINTS.Kalshi, expires_at: "2027-03-12T23:59:00Z" },
+      { splMint: MINTS.OpenAI, deadline: "2026-01-01T00:00:00Z" },
+    ],
+    quotes(80, 100),
+    NOW,
+  );
+  const kalshi = products.find((p) => p.name === "Kalshi");
+  const openai = products.find((p) => p.name === "OpenAI");
+  assert.equal(kalshi?.deadline_at, future);
+  assert.equal(kalshi?.deadline_invalid, false);
+  assert.equal(openai?.deadline_at, past);
+  assert.equal(openai?.deadline_invalid, true);
 });
 
 test("token price falls back to usdPrice, and a dead premium is no data", () => {

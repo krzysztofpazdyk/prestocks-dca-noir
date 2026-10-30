@@ -90,16 +90,53 @@ export function filterIpoCompleted<T extends { ipo_completed?: boolean }>(
   return rows.filter((r) => !r.ipo_completed);
 }
 
+export type DeadlineRow = {
+  deadline_invalid?: boolean;
+  deadline_at?: number | null;
+};
+
+/** True when we know a date or a past-expiry flag. Do not invent a date. */
+export function hasKnownDeadline(row: DeadlineRow): boolean {
+  return (
+    (row.deadline_at != null && Number.isFinite(row.deadline_at)) ||
+    !!row.deadline_invalid
+  );
+}
+
 /**
- * Toggle OFF (deadlinesUnimportant=false): drop names flagged deadline_invalid
- * (past expiry / invalid deadline) before Jev. Toggle ON: keep them.
+ * Past expiry vs `now`. A known date is the source of truth; a boolean flag
+ * is used only when there is no date.
  */
-export function filterExpired<T extends { deadline_invalid?: boolean }>(
+export function isDeadlinePast(row: DeadlineRow, now: number): boolean {
+  if (row.deadline_at != null && Number.isFinite(row.deadline_at)) {
+    return row.deadline_at < now;
+  }
+  return !!row.deadline_invalid;
+}
+
+/** Always drop names whose deadline has already passed. */
+export function filterPastDeadline<T extends DeadlineRow>(
   rows: T[],
-  deadlinesUnimportant: boolean,
+  now: number = Date.now(),
 ): T[] {
-  if (deadlinesUnimportant) return rows;
-  return rows.filter((r) => !r.deadline_invalid);
+  return rows.filter((r) => !isDeadlinePast(r, now));
+}
+
+/**
+ * Always drop names past expiry. Toggle OFF (`allowWithDeadline=false`) also
+ * drops names that have any known deadline (still in the future). Toggle ON
+ * keeps those until the date passes. `deadlinesUnimportant=true` is ON.
+ */
+export function filterExpired<T extends DeadlineRow>(
+  rows: T[],
+  allowWithDeadline: boolean,
+  now: number = Date.now(),
+): T[] {
+  return rows.filter((r) => {
+    if (isDeadlinePast(r, now)) return false;
+    if (!allowWithDeadline && hasKnownDeadline(r)) return false;
+    return true;
+  });
 }
 
 /** Alias matching Settings copy / filterIpoCompleted naming. */

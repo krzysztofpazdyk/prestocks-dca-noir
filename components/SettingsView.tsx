@@ -767,6 +767,7 @@ export function SettingsView() {
             />
             <CompanyToggle
               label={t("settings.deadlineInvalid")}
+              hint={t("settings.deadlineInvalidHint")}
               checked={deadlineInvalid}
               onChange={setDeadlineInvalid}
               disabled={!availability.deadlinesUnimportant.enabled}
@@ -909,12 +910,14 @@ export function SettingsView() {
 
 function Toggle({
   label,
+  hint,
   checked,
   onChange,
   disabled = false,
   title,
 }: {
   label: string;
+  hint?: string;
   checked: boolean;
   onChange: (v: boolean) => void;
   disabled?: boolean;
@@ -934,6 +937,11 @@ function Toggle({
     >
       <span className="min-w-0 whitespace-normal break-words font-sans text-sm leading-snug tracking-normal">
         {label}
+        {hint ? (
+          <span className="mt-1 block text-[10px] font-normal leading-relaxed tracking-normal text-[#8b95a8]">
+            {hint}
+          </span>
+        ) : null}
       </span>
       <span
         className={`relative mt-0.5 h-6 w-11 shrink-0 justify-self-end rounded-full transition ${
@@ -1032,6 +1040,7 @@ function CompanyFacts({
 
 function CompanyToggle({
   label,
+  hint,
   checked,
   onChange,
   disabled,
@@ -1041,6 +1050,7 @@ function CompanyToggle({
   byName,
 }: {
   label: string;
+  hint?: string;
   checked: boolean;
   onChange: (v: boolean) => void;
   disabled: boolean;
@@ -1060,6 +1070,7 @@ function CompanyToggle({
     <div className="space-y-1">
       <Toggle
         label={label}
+        hint={hint}
         checked={checked}
         onChange={onChange}
         disabled={blocked}

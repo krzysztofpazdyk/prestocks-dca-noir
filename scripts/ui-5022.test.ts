@@ -90,6 +90,7 @@ test("purchase filters have the exclusions label style", () => {
   const block = settingsSrc.slice(filtersAt, byokAt);
   assert.match(block, /t\("settings\.buyDespiteIpo"\)/);
   assert.match(block, /t\("settings\.deadlineInvalid"\)/);
+  assert.match(block, /t\("settings\.deadlineInvalidHint"\)/);
   assert.match(block, /t\("settings\.ipoPremium"\)/);
   assert.match(block, /void signAndSavePrefs\(\)/);
 });
@@ -108,8 +109,8 @@ test("the xAI exclusion sentence is gone and xAI stays excluded", () => {
   assert.match(settingsSrc, /userExclusions\(/);
 });
 
-test("v5.0.22 stays on the profit/loss section", () => {
-  assert.equal(APP_VERSION, "5.0.22");
+test("v5.0.23 stays on the profit/loss section", () => {
+  assert.equal(APP_VERSION, "5.0.23");
   const pnl = overviewSrc.slice(
     overviewSrc.indexOf("function PnlSection"),
     overviewSrc.indexOf("function PositionsCard"),

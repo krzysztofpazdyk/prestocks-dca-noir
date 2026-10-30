@@ -62,18 +62,51 @@ export function fillNoticeVars(
   return out;
 }
 
-/** Map optional metrics expiry/deadline signals → deadline_invalid (do not invent). */
-export function deadlineInvalidFromMetrics(
+const DEADLINE_DATE_KEYS = [
+  "expires_at",
+  "expiry",
+  "expiry_date",
+  "deadline",
+  "deadline_at",
+] as const;
+
+const DEADLINE_BOOL_KEYS = [
+  "deadline_invalid",
+  "deadlineInvalid",
+  "expired",
+  "is_expired",
+  "isExpired",
+] as const;
+
+/** Parse a metrics/API date without inventing one. Unix seconds or ms, or ISO. */
+export function parseDeadlineMs(raw: unknown): number | null {
+  if (raw == null || raw === "") return null;
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return raw < 1e12 ? raw * 1000 : raw;
+  }
+  if (typeof raw === "string") {
+    const t = Date.parse(raw);
+    if (Number.isFinite(t)) return t;
+  }
+  return null;
+}
+
+/** First known expiry date from metrics. Missing keys = no deadline. */
+export function deadlineAtFromMetrics(
   m: Record<string, unknown>,
-): boolean {
-  const boolKeys = [
-    "deadline_invalid",
-    "deadlineInvalid",
-    "expired",
-    "is_expired",
-    "isExpired",
-  ] as const;
-  for (const key of boolKeys) {
+): number | null {
+  for (const key of DEADLINE_DATE_KEYS) {
+    if (!(key in m) || m[key] == null || m[key] === "") continue;
+    const ms = parseDeadlineMs(m[key]);
+    if (ms != null) return ms;
+  }
+  return null;
+}
+
+function deadlineFlagFromMetrics(
+  m: Record<string, unknown>,
+): boolean | null {
+  for (const key of DEADLINE_BOOL_KEYS) {
     if (!(key in m) || m[key] == null) continue;
     const v = m[key];
     if (typeof v === "boolean") return v;
@@ -88,27 +121,20 @@ export function deadlineInvalidFromMetrics(
       }
     }
   }
-  const dateKeys = [
-    "expires_at",
-    "expiry",
-    "expiry_date",
-    "deadline",
-    "deadline_at",
-  ] as const;
-  const now = Date.now();
-  for (const key of dateKeys) {
-    if (!(key in m) || m[key] == null || m[key] === "") continue;
-    const raw = m[key];
-    let ms: number | null = null;
-    if (typeof raw === "number" && Number.isFinite(raw)) {
-      ms = raw < 1e12 ? raw * 1000 : raw;
-    } else if (typeof raw === "string") {
-      const t = Date.parse(raw);
-      if (Number.isFinite(t)) ms = t;
-    }
-    if (ms != null && ms < now) return true;
-  }
-  return false;
+  return null;
+}
+
+/**
+ * Map optional metrics expiry/deadline signals → deadline_invalid (do not invent).
+ * A known date wins over a boolean flag: past date = expired, future date = not.
+ */
+export function deadlineInvalidFromMetrics(
+  m: Record<string, unknown>,
+  now = Date.now(),
+): boolean {
+  const at = deadlineAtFromMetrics(m);
+  if (at != null) return at < now;
+  return deadlineFlagFromMetrics(m) === true;
 }
 
 function round6(n: number): number {
@@ -182,7 +208,8 @@ export function buildProducts(
       ipo_completed: Boolean(
         m.ipo_completed ?? m.ipoCompleted ?? false,
       ),
-      deadline_invalid: deadlineInvalidFromMetrics(m),
+      deadline_at: deadlineAtFromMetrics(m),
+      deadline_invalid: deadlineInvalidFromMetrics(m, now),
     });
   }
   return out;
@@ -329,10 +356,23 @@ function listedNearIpo(name: string): boolean {
 function finishProducts(products: PrestocksProduct[]): PrestocksProduct[] {
   const now = Date.now();
   // Server flags are not a source. Only the client list, then fresh company data.
-  const grounded = products.map((product) => ({
-    ...product,
-    near_ipo: listedNearIpo(product.name),
-  }));
+  const grounded = products.map((product) => {
+    const extra = product as PrestocksProduct & Record<string, unknown>;
+    const deadlineAt =
+      typeof product.deadline_at === "number" && Number.isFinite(product.deadline_at)
+        ? product.deadline_at
+        : deadlineAtFromMetrics(extra);
+    const deadlineInvalid =
+      deadlineAt != null && deadlineAt < now
+        ? true
+        : product.deadline_invalid;
+    return {
+      ...product,
+      near_ipo: listedNearIpo(product.name),
+      deadline_at: deadlineAt ?? product.deadline_at,
+      deadline_invalid: deadlineInvalid,
+    };
+  });
   const incoming = companyDataFromProducts(grounded, now);
   const byName = rememberCompanyRecords(incoming, now);
   return applyCompanyData(grounded, byName, now);
