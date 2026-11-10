@@ -289,6 +289,7 @@ const pl: Dict = {
   "settings.autoWeekly": "Automatyczny cotygodniowy zakup z vaulta",
   "settings.autoWeeklyHint":
     "Domyślnie wyłączone. Włączenie bierze kwotę z pola powyżej i od razu kupuje 3 PreStock. Ta transakcja uruchamia cotygodniowy harmonogram. Późniejszych zakupów nie musisz już potwierdzać.",
+  "settings.serviceFee": "Opłata serwisowa: {fee} USD za zakup",
   "settings.autoWeeklyConfirmTitle": "Włączyć cotygodniowy zakup z vaulta?",
   "settings.autoWeeklyConfirmBody":
     "Kontynuacja podzieli ${amount} z vaulta po równo na 3 spółki PreStock. Dostaniesz różną liczbę akcji, zależnie od ceny każdej. Ta transakcja uruchamia cotygodniowy harmonogram. Późniejszych zakupów nie musisz już potwierdzać.",
@@ -754,10 +755,7 @@ const en: Dict = {
   "settings.autoWeekly": "Automatic weekly purchase from the vault",
   "settings.autoWeeklyHint":
     "Off by default. Enabling takes the amount above and immediately buys 3 PreStocks. That transaction starts the weekly schedule. You will not need to confirm later purchases.",
-  "settings.serviceFee":
-    "Opłata serwisowa: {fee} USD za zakup",
-  "settings.serviceFeeEn":
-    "Service fee: {fee} USD per purchase",
+  "settings.serviceFee": "Service fee: {fee} USD per purchase",
   "settings.autoWeeklyConfirmTitle": "Enable weekly vault purchases?",
   "settings.autoWeeklyConfirmBody":
     "Continuing will split ${amount} from the vault equally across 3 PreStock companies. You will receive a different number of shares depending on each price. This transaction starts the weekly schedule. You will not need to confirm later purchases.",

@@ -218,14 +218,19 @@ export function OverviewView() {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const sigUnresolved = predca.pendingSignature != null;
   const refreshRef = useRef(predca.refresh);
-  refreshRef.current = predca.refresh;
+  useEffect(() => {
+    refreshRef.current = predca.refresh;
+  }, [predca.refresh]);
 
   useEffect(() => {
     const storage = depositFlightStorage();
     if (!storage) return;
     const flight = takeInterruptedDeposit(storage, Date.now());
     if (!flight) return;
-    setDepositNote(t("deposit.interrupted"));
+    const note = t("deposit.interrupted");
+    queueMicrotask(() => {
+      setDepositNote(note);
+    });
     void refreshRef.current();
   }, [t]);
 
@@ -237,20 +242,25 @@ export function OverviewView() {
     if (!sawPendingSig.current || purchaseTone !== "pending") return;
     sawPendingSig.current = false;
     const verdict = predca.lastVerdict;
+    const error = predca.error;
+    let nextMsg: string | null;
+    let nextTone: "ok" | "fail" | "pending";
     if (verdict?.verdict === "failed_expired" || verdict?.verdict === "unresolved") {
       const text =
         verdict.verdict === "failed_expired" ? FAILED_EXPIRED_MSG : UNRESOLVED_MSG;
-      setPurchaseMsg(`${text} ${verdict.signature} ${explorerTxUrl(verdict.signature)}`);
-      setPurchaseTone(verdict.verdict === "failed_expired" ? "fail" : "pending");
-      return;
-    }
-    if (predca.error && isOnChainSignatureReject(predca.error)) {
-      setPurchaseMsg(`${t("msg.purchaseFail")}: ${predca.error}`);
-      setPurchaseTone("fail");
+      nextMsg = `${text} ${verdict.signature} ${explorerTxUrl(verdict.signature)}`;
+      nextTone = verdict.verdict === "failed_expired" ? "fail" : "pending";
+    } else if (error && isOnChainSignatureReject(error)) {
+      nextMsg = `${t("msg.purchaseFail")}: ${error}`;
+      nextTone = "fail";
     } else {
-      setPurchaseMsg(null);
-      setPurchaseTone("ok");
+      nextMsg = null;
+      nextTone = "ok";
     }
+    queueMicrotask(() => {
+      setPurchaseMsg(nextMsg);
+      setPurchaseTone(nextTone);
+    });
   }, [predca.pendingSignature, predca.error, predca.lastVerdict, purchaseTone, t]);
   const [faucetBusy, setFaucetBusy] = useState(false);
   const [faucetConfirming, setFaucetConfirming] = useState(false);

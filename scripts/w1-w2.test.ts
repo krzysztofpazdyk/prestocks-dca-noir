@@ -540,11 +540,13 @@ test("new copy exists in Polish and English", () => {
     "auto.status.queued",
     "auto.error.queued",
     "settings.serviceFee",
-    "settings.serviceFeeEn",
   ]) {
     assert.equal(plKeys.has(key), true, key);
     assert.equal(enKeys.has(key), true, key);
   }
+  assert.match(pl, /"settings\.serviceFee": "Opłata serwisowa: \{fee\} USD za zakup"/);
+  assert.match(en, /"settings\.serviceFee": "Service fee: \{fee\} USD per purchase"/);
+  assert.equal(src.includes("settings.serviceFeeEn"), false);
 });
 
 test("refresh publishes RunPrice with the snapshot and polls only while visible", () => {

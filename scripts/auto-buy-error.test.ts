@@ -52,6 +52,12 @@ const samples: Array<{ name: string; raw: string; pl: string; en: string }> = [
   {
     name: "insufficient lamports",
     raw: "Transfer: insufficient lamports 1400, need 5000000. custom program error: 0x1",
+    pl: "Zakup w kolejce – wykonamy go wkrótce.",
+    en: "Purchase queued – we'll complete it shortly.",
+  },
+  {
+    name: "insufficient vault usdc",
+    raw: "vault_low: za mało usdc",
     pl: "Za mało środków na auto-zakup.",
     en: "Not enough funds for the auto-buy.",
   },

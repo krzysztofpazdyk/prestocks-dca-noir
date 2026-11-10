@@ -719,7 +719,7 @@ test("a changed public prefs read does not sign or post", async () => {
   delete process.env.NEXT_PUBLIC_DCA_API_URL;
   Object.defineProperty(globalThis, "window", { configurable: true, value: globalThis });
   const calls: Captured[] = [];
-  let signs = 0;
+  const signs = 0;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     calls.push({
