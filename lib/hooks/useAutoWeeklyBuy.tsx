@@ -40,6 +40,7 @@ import {
   shouldPollInProgressEnable,
   shouldSendEnable,
   formatWarsawWhen,
+  readWeeklyBudgetUsd,
   writeAutoBuyMeta,
   writeAutoWeeklyBuy,
   writeWeeklyBudgetUsd,
@@ -48,7 +49,8 @@ import {
 } from "@/lib/auto-weekly-buy";
 import { presentAutoBuyError } from "@/lib/auto-buy-error";
 import { useI18n } from "@/lib/i18n";
-import { formatDollars, formatGrouped } from "@/lib/number-format";
+import { vaultLowCopy } from "@/lib/fee-display";
+import { formatGrouped } from "@/lib/number-format";
 import { isVaultLowReason } from "@/lib/vault-low-reason";
 import {
   commitLatestRef,
@@ -91,6 +93,10 @@ export type AutoWeeklyBuyApi = {
   statusResolved: boolean;
   /** A public status read for this owner has finished. */
   statusChecked: boolean;
+  /** Public status says the purchase fee is on. Unknown stays false. */
+  feeEnabled: boolean;
+  /** Recent runs from /public/status. Empty until a read succeeds. */
+  fees: { runIndex: number; feeUsd: number }[];
 };
 
 const AutoWeeklyBuyContext = createContext<AutoWeeklyBuyApi | null>(null);
@@ -131,6 +137,8 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
     setStatusResolvedState(value);
   }, []);
   const [statusChecked, setStatusChecked] = useState(false);
+  const [feeEnabled, setFeeEnabled] = useState(false);
+  const [fees, setFees] = useState<{ runIndex: number; feeUsd: number }[]>([]);
 
   const ownerKey = publicKey?.toBase58() ?? null;
   // These eight follow the latest render. The copy is a layout effect, so
@@ -217,6 +225,8 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
       resetBannerState();
       setPrefsReady(false);
       setKeeperMode(null);
+      setFeeEnabled(false);
+      setFees([]);
     }
     if (ownerChanged) {
       markStatusResolved(false);
@@ -239,6 +249,10 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
         st.mode === "live" || st.mode === "dry-run" ? st.mode : null;
       setKeeperMode(modeFromStatus ?? health.mode);
       setStatusChecked(true);
+      if (st.ok) {
+        setFeeEnabled(st.feeEnabled === true);
+        setFees(st.fees ?? []);
+      }
       // An enable/disable that started after this read owns the switch.
       if (enabledEpochRef.current !== seenAt) {
         setPrefsReady(true);
@@ -299,7 +313,7 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
           setMessage(
             err.includes("signature") || err.includes("sign_")
               ? tRef.current("auto.signRejected", { error: err })
-              : err || "Keeper disable failed",
+              : err || tRef.current("auto.error.fallback"),
           );
           return;
         }
@@ -511,7 +525,7 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
         );
       };
       // Daemon writes Off itself when enable fails. Do not ask for a second signature.
-      const forceOff = async (reason: string) => {
+      const forceOff = async (reason: string, status?: KeeperRunResult) => {
         enablePendingRef.current = false;
         enablePendingOwnerRef.current = null;
         const cleanupOwner = cleanupOwnerForFailedCycle(
@@ -530,10 +544,7 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
         const vaultish = isVaultLowReason(reason);
         setMessage(
           vaultish
-            ? tRef.current("auto.status.vaultLow", {
-                have: "?",
-                need: formatDollars(amount),
-              })
+            ? vaultLowCopy(status, amount, tRef.current)
             : tRef.current("auto.status.error", { reason }),
         );
       };
@@ -574,7 +585,7 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
             return;
           }
           if (verdict === "off") {
-            await forceOff(st.error || "enable_failed");
+            await forceOff(st.error || "enable_failed", st);
             return;
           }
           setPhase("pending");
@@ -661,8 +672,8 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
         }
         const err = ran.skipped
           ? String(ran.error || ran.reason || "purchase skipped")
-          : "Keeper returned success without a completed purchase.";
-        await forceOff(err);
+          : "The purchase service returned success without a completed purchase.";
+        await forceOff(err, ran);
         return;
       }
       commitPurchase(ran);
@@ -687,10 +698,7 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
       const vaultish = isVaultLowReason(reason);
       setMessage(
         vaultish
-          ? tRef.current("auto.status.vaultLow", {
-              have: "?",
-              need: "?",
-            })
+          ? vaultLowCopy(undefined, amount, tRef.current)
           : tRef.current("auto.status.error", { reason }),
       );
     } finally {
@@ -710,6 +718,10 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
     if (statusEpochRef.current !== epoch) return;
     if (enabledEpochRef.current !== seenAt) return;
     setStatusChecked(true);
+    if (st.ok) {
+      setFeeEnabled(st.feeEnabled === true);
+      setFees(st.fees ?? []);
+    }
     const runMarker = keeperRunMarker(st);
     if (runMarker && runMarker !== seenKeeperRunRef.current) {
       seenKeeperRunRef.current = runMarker;
@@ -824,6 +836,18 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
     // In-flight enable still publishes enabled:false. Keep the buying banner.
     if (next === true && autoBuyStatusIsTransitional(st)) return;
     const on = next === true;
+    if (st.phase === "vault_low") {
+      const onChain = predcaRef.current.weeklyBudgetUsd;
+      const budget =
+        typeof onChain === "number" && Number.isFinite(onChain) && onChain > 0
+          ? onChain
+          : readWeeklyBudgetUsd(DEFAULT_SETTINGS.weeklyAmountUsd, wallet);
+      setPhase("error");
+      setDue(false);
+      setBlockReason("vault_low");
+      setMessage(vaultLowCopy(st, budget, tRef.current));
+      return;
+    }
     if (!on) {
       setPhase("idle");
       setDue(false);
@@ -942,6 +966,8 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
       keeperMode,
       statusResolved,
       statusChecked,
+      feeEnabled,
+      fees,
     }),
     [
       enabled,
@@ -957,6 +983,8 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
       keeperMode,
       statusResolved,
       statusChecked,
+      feeEnabled,
+      fees,
     ],
   );
 }

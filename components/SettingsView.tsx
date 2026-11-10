@@ -25,6 +25,7 @@ import { formatGrouped } from "@/lib/number-format";
 import { UNRESOLVED_MSG } from "@/lib/pending-tx";
 import { presentAutoBuyError } from "@/lib/auto-buy-error";
 import { autoToggleBlocked } from "@/lib/auto-weekly-buy";
+import { purchaseFeeEnabled } from "@/lib/fee-display";
 import { useI18n } from "@/lib/i18n";
 import {
   readExclusionsRaw,
@@ -633,6 +634,11 @@ export function SettingsView() {
               <p className="mt-2 text-xs leading-relaxed text-[#8b95a8] text-justify">
                 {t("settings.autoWeeklyHint")}
               </p>
+              {purchaseFeeEnabled(autoBuy) ? (
+                <p className="mt-2 text-xs leading-relaxed text-[#8b95a8] text-justify">
+                  {t("settings.serviceFee")}
+                </p>
+              ) : null}
               {autoBuy.keeperMode || (autoBuy.nextLabel && autoBuy.enabled) ? (
                 <p className="mt-2 text-[10px]">
                   {autoBuy.keeperMode ? (

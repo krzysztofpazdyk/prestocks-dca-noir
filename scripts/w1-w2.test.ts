@@ -544,8 +544,14 @@ test("new copy exists in Polish and English", () => {
     assert.equal(plKeys.has(key), true, key);
     assert.equal(enKeys.has(key), true, key);
   }
-  assert.match(pl, /"settings\.serviceFee": "Opłata serwisowa: \{fee\} USD za zakup"/);
-  assert.match(en, /"settings\.serviceFee": "Service fee: \{fee\} USD per purchase"/);
+  assert.match(
+    pl,
+    /"settings\.serviceFee": "Opłata za zakup = rzeczywisty koszt sieci Solana, zwykle poniżej 0,01 USD, maks\. 0,10 USD\."/,
+  );
+  assert.match(
+    en,
+    /"settings\.serviceFee": "Purchase fee = the actual Solana network cost, usually under 0\.01 USD, max 0\.10 USD\."/,
+  );
   assert.equal(src.includes("settings.serviceFeeEn"), false);
 });
 

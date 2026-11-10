@@ -17,6 +17,8 @@ import {
   writeRunOriginCache,
   type RunOrigin,
 } from "@/lib/run-origin";
+import { feeUsdForRun } from "@/lib/fee-display";
+import { useAutoWeeklyBuy } from "@/lib/hooks/useAutoWeeklyBuy";
 import { useI18n } from "@/lib/i18n";
 
 const originFlights = new Set<string>();
@@ -64,6 +66,7 @@ function useRunOrigins(
 export function HistoryView() {
   const { connected, connecting } = useWallet();
   const predca = usePredca();
+  const autoBuy = useAutoWeeklyBuy();
   const { t } = useI18n();
   const mode = historyView(predca.status, predca.runs.length, connected);
   const showRuns = mode === "list" || mode === "list_stale";
@@ -134,6 +137,7 @@ export function HistoryView() {
                 fills={predca.runFills}
                 quotes={predca.jupPrices.quotes}
                 origin={origins[run.runIndex.toString()] ?? null}
+                feeUsd={feeUsdForRun(autoBuy.fees, run.runIndex.toString())}
               />
             </li>
           ))}

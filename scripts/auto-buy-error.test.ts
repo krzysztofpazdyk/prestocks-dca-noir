@@ -106,8 +106,8 @@ const samples: Array<{ name: string; raw: string; pl: string; en: string }> = [
   {
     name: "keeper spend limit",
     raw: "Spending limit exceeded; execute_buy_v2 blocked: weekly budget $150 > max_usd $100",
-    pl: "Budżet tygodniowy przekracza limit wydatków keepera.",
-    en: "The weekly budget is above the keeper spending limit.",
+    pl: "Budżet tygodniowy przekracza limit wydatków automatu zakupów.",
+    en: "The weekly budget is above the auto-buy service spending limit.",
   },
 ];
 

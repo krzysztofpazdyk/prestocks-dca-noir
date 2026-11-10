@@ -95,6 +95,8 @@ const pl: Dict = {
   "deposit.sending": "Wysyłam wpłatę…",
   "deposit.interrupted":
     "Odświeżenie przerwało oczekiwanie na wpłatę. Sprawdź saldo vaulta.",
+  "deposit.feeHint":
+    "Opłata za zakup = rzeczywisty koszt sieci Solana, zwykle poniżej 0,01 USD, maks. 0,10 USD.",
   "predca.withdraw": "Wypłać",
   "predca.rpcActionHint": "Nieaktywne — brak połączenia z RPC. Kliknij Odśwież.",
   "predca.hintNoAta":
@@ -214,19 +216,21 @@ const pl: Dict = {
   "auto.status.buying":
     "Auto-zakup: pierwszy zakup — podpisz transakcję w portfelu.",
   "auto.status.buyingKeeper":
-    "Auto-zakup: keeper kupuje z vaulta (bez podpisu portfela).",
+    "Auto-zakup: system zakupów kupuje z vaulta (bez podpisu portfela).",
   "auto.status.keeperDown":
-    "Keeper niedostępny (tunel lub usługa). UI nie kupuje sam — spróbuj później lub sprawdź połączenie.",
+    "Automat zakupów niedostępny (tunel lub usługa). UI nie kupuje sam — spróbuj później lub sprawdź połączenie.",
   "auto.status.ok":
     "Automatyczny zakup tygodniowy OK · ${amount} z vault → {tokens}",
   "auto.status.okWithNext":
     "Automatyczny zakup tygodniowy OK · ${amount} z vault → {tokens} · następny zakup: {nextBuy}",
   "auto.status.vaultLow":
-    "Za mało środków w vaulcie (potrzeba {need} USDC, w tym opłata 0,01 USD).",
+    "Za mało środków w vaulcie (potrzeba {need} USDC).",
+  "auto.status.vaultLowFee":
+    "Za mało środków w vaulcie (potrzeba {need} USDC, w tym opłata {fee} USD).",
   "auto.status.queued":
     "Zakup w kolejce – wykonamy go wkrótce.",
   "auto.status.needWallet":
-    "Podłącz portfel, żeby włączyć keepersa (wystarczy pubkey — zakup zrobi bot).",
+    "Podłącz portfel, żeby włączyć automat zakupów (wystarczy pubkey — zakup zrobi bot).",
   "auto.status.notReady":
     "Najpierw wpłać USDC na Overview — konto Predca powstaje razem z pierwszą wpłatą.",
   "auto.status.stillLoading":
@@ -248,7 +252,7 @@ const pl: Dict = {
   "auto.error.jevUnavailable":
     "Jev niedostępny, zakup nie został wysłany. Spróbuj później.",
   "auto.error.spendLimit":
-    "Budżet tygodniowy przekracza limit wydatków keepera.",
+    "Budżet tygodniowy przekracza limit wydatków automatu zakupów.",
   "auto.error.predca.6000": "Brak uprawnień (Unauthorized).",
   "auto.error.predca.6001": "Kwota musi być większa od zera.",
   "auto.error.predca.6002": "Niewystarczające saldo w vault.",
@@ -258,9 +262,9 @@ const pl: Dict = {
   "auto.error.predca.6006": "Mint nie zgadza się z kontem w instrukcji.",
   "auto.error.predca.6007": "Duplikaty mintów w top-3.",
   "auto.error.predca.6008": "Za wcześnie: odczekaj 7 dni od ostatniego zakupu (TooSoon).",
-  "auto.error.predca.6009": "Brak ceny dla tokena — keeper jeszcze jej nie ustawił.",
+  "auto.error.predca.6009": "Brak ceny dla tokena — automat zakupów jeszcze jej nie ustawił.",
   "auto.error.predca.6010":
-    "Cena tokena jest nieaktualna. Keeper odświeża ceny co kilka minut — spróbuj za chwilę.",
+    "Cena tokena jest nieaktualna. Automat zakupów odświeża ceny co kilka minut — spróbuj za chwilę.",
   "auto.error.predca.6011": "Nieprawidłowa cena tokena.",
   "auto.error.predca.6012": "Nieprawidłowe parametry ceny.",
   "auto.error.predca.6013": "Zmiana ceny jest zbyt duża.",
@@ -268,14 +272,14 @@ const pl: Dict = {
   "auto.error.predca.6015":
     "Kwota tokena zaokrągliła się do zera — cena jest zbyt wysoka względem budżetu.",
   "auto.status.enablePending":
-    "Keeper jeszcze kończy włączanie. Zaczekaj — nie wysyłaj drugiego włączenia.",
+    "Automat zakupów jeszcze kończy włączanie. Zaczekaj — nie wysyłaj drugiego włączenia.",
   "auto.status.enableUnknown":
-    "Nie wiadomo, czy keeper skończył włączanie. Sprawdź status auto-zakupu.",
+    "Nie wiadomo, czy automat zakupów skończył włączanie. Sprawdź status auto-zakupu.",
   "auto.status.backoff":
     "Auto-zakup: ponowna próba za chwilę (ostatnia nieudana).",
   "auto.banner.ranking": "Cotygodniowy zakup z vaulta: ranking…",
   "auto.banner.buying":
-    "Cotygodniowy zakup z vaulta: keeper (bez podpisu w karcie).",
+    "Cotygodniowy zakup z vaulta: automat zakupów (bez podpisu w karcie).",
   "auto.banner.confirming":
     "Cotygodniowy zakup z vaulta: czekam na potwierdzenie transakcji.",
 
@@ -289,20 +293,20 @@ const pl: Dict = {
   "settings.autoWeekly": "Automatyczny cotygodniowy zakup z vaulta",
   "settings.autoWeeklyHint":
     "Domyślnie wyłączone. Włączenie bierze kwotę z pola powyżej i od razu kupuje 3 PreStock. Ta transakcja uruchamia cotygodniowy harmonogram. Późniejszych zakupów nie musisz już potwierdzać.",
-  "settings.serviceFee": "Opłata serwisowa: {fee} USD za zakup",
+  "settings.serviceFee": "Opłata za zakup = rzeczywisty koszt sieci Solana, zwykle poniżej 0,01 USD, maks. 0,10 USD.",
   "settings.autoWeeklyConfirmTitle": "Włączyć cotygodniowy zakup z vaulta?",
   "settings.autoWeeklyConfirmBody":
     "Kontynuacja podzieli ${amount} z vaulta po równo na 3 spółki PreStock. Dostaniesz różną liczbę akcji, zależnie od ceny każdej. Ta transakcja uruchamia cotygodniowy harmonogram. Późniejszych zakupów nie musisz już potwierdzać.",
   "settings.autoWeeklyConfirmOk": "Kontynuuj",
   "settings.autoWeeklyConfirmCancel": "Anuluj",
   "settings.autoBuyKeeperUnreachable":
-    "Auto-zakup: keeper nieosiągalny, stan nieznany",
+    "Auto-zakup: system zakupów nieosiągalny, stan nieznany",
   "settings.prefsKeeperChanged":
-    "Ustawienia w keeperze zmieniły się – wczytano je, sprawdź i zapisz ponownie",
-  "settings.jevKeySaved": "Klucz zapisany w keeperze",
+    "Ustawienia w systemie zakupów zmieniły się – wczytano je, sprawdź i zapisz ponownie",
+  "settings.jevKeySaved": "Klucz zapisany w systemie zakupów",
   "settings.keeperModeLive": "Tryb: Live (prawdziwe zakupy)",
   "settings.keeperModeDryRun": "Tryb: Dry-run (bez transakcji)",
-  "settings.keeperModeUnknown": "Tryb keepersa: nieznany",
+  "settings.keeperModeUnknown": "Tryb automatu zakupów: nieznany",
   "settings.weeklySplit":
     "Po równo na 3 spółki z top-3 (~${amount} na każdą; liczba akcji zależy od ceny)",
   "settings.onChainBudget": "· on-chain:",
@@ -331,14 +335,14 @@ const pl: Dict = {
   "settings.deadlineOn": "termin {date}",
   "settings.checkedOn": "sprawdzono {date}",
   "settings.prefsDirtyHint":
-    "Zmieniono ustawienia. Aby zapisać je u keepersa, trzeba podpisać wiadomość w portfelu.",
+    "Zmieniono ustawienia. Aby zapisać je w systemie zakupów, trzeba podpisać wiadomość w portfelu.",
   "settings.prefsSignSave": "Podpisz i zapisz",
   "settings.prefsSignSaving": "Podpisywanie…",
   "settings.prefsConnectWallet": "Podłącz portfel, aby podpisać i zapisać",
   "settings.prefsSignNeedWallet": "Podłącz portfel z signMessage, aby zapisać",
-  "settings.prefsSignFailed": "Nie udało się zapisać (podpis lub keeper).",
-  "settings.prefsSignOk": "Zapisano u keepersa ✓",
-  "settings.prefsLoading": "Wczytywanie ustawień keepera…",
+  "settings.prefsSignFailed": "Nie udało się zapisać (podpis lub system zakupów).",
+  "settings.prefsSignOk": "Zapisano w systemie zakupów ✓",
+  "settings.prefsLoading": "Wczytywanie ustawień systemu zakupów…",
   "settings.byokTitle": "BYOK — własne klucze API (Bring Your Own)",
   "settings.byokIntro":
     "Klucz demo Jev jest wpisany. Wklej własny, żeby go zastąpić.",
@@ -370,6 +374,7 @@ const pl: Dict = {
   "history.buyPrice": "po {price} · {units} szt.",
   "history.legPnl": "teraz {value} · {pnl}",
   "history.runPnl": "PnL: {pnl}",
+  "history.fee": "opłata {fee} USD",
 
   "positions.title": "Pozycje",
   "positions.col.asset": "Aktywo",
@@ -561,6 +566,8 @@ const en: Dict = {
   "deposit.sending": "Sending deposit…",
   "deposit.interrupted":
     "Reload interrupted the deposit wait. Check the vault balance.",
+  "deposit.feeHint":
+    "Purchase fee = the actual Solana network cost, usually under 0.01 USD, max 0.10 USD.",
   "predca.withdraw": "Withdraw",
   "predca.rpcActionHint": "Inactive — no RPC connection. Click Refresh.",
   "predca.hintNoAta":
@@ -680,19 +687,21 @@ const en: Dict = {
   "auto.status.buying":
     "Auto-buy: first purchase — sign the transaction in your wallet.",
   "auto.status.buyingKeeper":
-    "Auto-buy: keeper is purchasing from the vault (no wallet signature).",
+    "Auto-buy: the purchase service is buying from the vault (no wallet signature).",
   "auto.status.keeperDown":
-    "Keeper unavailable (tunnel or service). This tab does not buy on its own — try again later or check the connection.",
+    "The purchase service is unavailable (tunnel or service). This tab does not buy on its own — try again later or check the connection.",
   "auto.status.ok":
     "Weekly auto-buy OK · ${amount} from vault → {tokens}",
   "auto.status.okWithNext":
     "Weekly auto-buy OK · ${amount} from vault → {tokens} · next buy: {nextBuy}",
   "auto.status.vaultLow":
-    "Not enough funds in the vault (need {need} USDC including the 0.01 USD service fee).",
+    "Not enough funds in the vault (need {need} USDC).",
+  "auto.status.vaultLowFee":
+    "Not enough funds in the vault (need {need} USDC, including a {fee} USD fee).",
   "auto.status.queued":
     "Purchase queued – we'll complete it shortly.",
   "auto.status.needWallet":
-    "Connect a wallet to start the keeper (pubkey only — the bot performs the buy).",
+    "Connect a wallet to start the auto-buy service (pubkey only — the bot performs the buy).",
   "auto.status.notReady":
     "Deposit USDC on Overview first — the Predca account is created with the first deposit.",
   "auto.status.stillLoading":
@@ -714,7 +723,7 @@ const en: Dict = {
   "auto.error.jevUnavailable":
     "Jev is unavailable, no purchase was sent. Try again later.",
   "auto.error.spendLimit":
-    "The weekly budget is above the keeper spending limit.",
+    "The weekly budget is above the auto-buy service spending limit.",
   "auto.error.predca.6000": "Missing permission.",
   "auto.error.predca.6001": "The amount must be greater than zero.",
   "auto.error.predca.6002": "Not enough balance in the vault.",
@@ -724,9 +733,9 @@ const en: Dict = {
   "auto.error.predca.6006": "The mint does not match the account.",
   "auto.error.predca.6007": "The top 3 contains duplicate mints.",
   "auto.error.predca.6008": "Too soon. Wait 7 days since the last purchase.",
-  "auto.error.predca.6009": "No price for this token yet — the keeper has not set it.",
+  "auto.error.predca.6009": "No price for this token yet — the purchase service has not set it.",
   "auto.error.predca.6010":
-    "The token price is stale. The keeper refreshes prices every few minutes — try again shortly.",
+    "The token price is stale. The purchase service refreshes prices every few minutes — try again shortly.",
   "auto.error.predca.6011": "The token price is invalid.",
   "auto.error.predca.6012": "The price parameters are invalid.",
   "auto.error.predca.6013": "The price jump is too large.",
@@ -734,14 +743,14 @@ const en: Dict = {
   "auto.error.predca.6015":
     "The token amount rounded to zero. The price is too high for this budget.",
   "auto.status.enablePending":
-    "The keeper is still finishing enable. Wait — don't send a second enable.",
+    "The purchase service is still finishing enable. Wait — don't send a second enable.",
   "auto.status.enableUnknown":
-    "It is unknown whether the keeper finished enabling. Check the auto-buy status.",
+    "It is unknown whether the purchase service finished enabling. Check the auto-buy status.",
   "auto.status.backoff":
     "Auto-buy: retrying shortly (last attempt failed).",
   "auto.banner.ranking": "Weekly vault purchase: ranking…",
   "auto.banner.buying":
-    "Weekly vault purchase: keeper (no in-tab signature).",
+    "Weekly vault purchase: the purchase service (no in-tab signature).",
   "auto.banner.confirming":
     "Weekly vault purchase: waiting for the transaction to confirm.",
 
@@ -755,20 +764,20 @@ const en: Dict = {
   "settings.autoWeekly": "Automatic weekly purchase from the vault",
   "settings.autoWeeklyHint":
     "Off by default. Enabling takes the amount above and immediately buys 3 PreStocks. That transaction starts the weekly schedule. You will not need to confirm later purchases.",
-  "settings.serviceFee": "Service fee: {fee} USD per purchase",
+  "settings.serviceFee": "Purchase fee = the actual Solana network cost, usually under 0.01 USD, max 0.10 USD.",
   "settings.autoWeeklyConfirmTitle": "Enable weekly vault purchases?",
   "settings.autoWeeklyConfirmBody":
     "Continuing will split ${amount} from the vault equally across 3 PreStock companies. You will receive a different number of shares depending on each price. This transaction starts the weekly schedule. You will not need to confirm later purchases.",
   "settings.autoWeeklyConfirmOk": "Continue",
   "settings.autoWeeklyConfirmCancel": "Cancel",
   "settings.autoBuyKeeperUnreachable":
-    "Auto-buy: keeper unreachable, status unknown",
+    "Auto-buy: the purchase service is unreachable, status unknown",
   "settings.prefsKeeperChanged":
-    "Keeper settings changed – reloaded, review and save again",
-  "settings.jevKeySaved": "Key saved in keeper",
+    "Purchase service settings changed – reloaded, review and save again",
+  "settings.jevKeySaved": "Key saved in the purchase service",
   "settings.keeperModeLive": "Mode: Live (real buys)",
   "settings.keeperModeDryRun": "Mode: Dry-run (no transactions)",
-  "settings.keeperModeUnknown": "Keeper mode: unknown",
+  "settings.keeperModeUnknown": "Auto-buy service mode: unknown",
   "settings.weeklySplit":
     "Split equally across 3 top-3 companies (~${amount} each; share count depends on price)",
   "settings.onChainBudget": "· on-chain:",
@@ -797,14 +806,14 @@ const en: Dict = {
   "settings.deadlineOn": "deadline {date}",
   "settings.checkedOn": "checked {date}",
   "settings.prefsDirtyHint":
-    "Settings changed. Sign a wallet message to save them to the keeper.",
+    "Settings changed. Sign a wallet message to save them to the purchase service.",
   "settings.prefsSignSave": "Sign & save",
   "settings.prefsSignSaving": "Signing…",
   "settings.prefsConnectWallet": "Connect wallet to sign and save",
   "settings.prefsSignNeedWallet": "Connect a wallet with signMessage to save",
-  "settings.prefsSignFailed": "Could not save (signature or keeper).",
-  "settings.prefsSignOk": "Saved to keeper ✓",
-  "settings.prefsLoading": "Loading keeper settings…",
+  "settings.prefsSignFailed": "Could not save (signature or the purchase service).",
+  "settings.prefsSignOk": "Saved to the purchase service ✓",
+  "settings.prefsLoading": "Loading purchase service settings…",
   "settings.byokTitle": "BYOK — Bring Your Own API Keys",
   "settings.byokIntro":
     "The Jev demo key is filled in. Paste your own to override.",
@@ -836,6 +845,7 @@ const en: Dict = {
   "history.buyPrice": "at {price} · {units} units",
   "history.legPnl": "now {value} · {pnl}",
   "history.runPnl": "P/L: {pnl}",
+  "history.fee": "fee {fee} USD",
 
   "positions.title": "Positions",
   "positions.col.asset": "Asset",

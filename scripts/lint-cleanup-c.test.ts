@@ -139,7 +139,7 @@ test("wallet switch still clears the banner and invalidates in-flight work", () 
   assert.match(effect, /ignoreOffUntilRef\.current = Date\.now\(\) \+ 2000/);
   assert.match(
     effect,
-    /if \(ownerChanged\) \{\s*resetBannerState\(\);\s*setPrefsReady\(false\);\s*setKeeperMode\(null\);\s*\}/,
+    /if \(ownerChanged\) \{\s*resetBannerState\(\);\s*setPrefsReady\(false\);\s*setKeeperMode\(null\);\s*setFeeEnabled\(false\);\s*setFees\(\[\]\);\s*\}/,
   );
 });
 

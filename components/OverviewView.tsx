@@ -87,6 +87,8 @@ import {
   runRankingNow,
   subscribeRankSession,
 } from "@/lib/ranking";
+import { purchaseFeeEnabled } from "@/lib/fee-display";
+import { useAutoWeeklyBuy } from "@/lib/hooks/useAutoWeeklyBuy";
 import { useI18n } from "@/lib/i18n";
 import { APP_VERSION } from "@/lib/app-version";
 import { outsideAppBadgeText } from "@/lib/outside-app-badge";
@@ -154,6 +156,7 @@ export function OverviewView() {
   const { connected, publicKey } = useWallet();
   const ownerBase58 = publicKey?.toBase58() ?? null;
   const predca = usePredca();
+  const autoBuy = useAutoWeeklyBuy();
   const { locale, t } = useI18n();
   const [depositAmt, setDepositAmt] = useState(500);
   const [depositSending, setDepositSending] = useState(false);
@@ -1038,6 +1041,11 @@ export function OverviewView() {
                   {depositSending ? t("deposit.sending") : t("predca.deposit")}
                 </button>
               </div>
+              {purchaseFeeEnabled(autoBuy) ? (
+                <p className="mt-2 text-[10px] leading-relaxed text-[#8b95a8]">
+                  {t("deposit.feeHint")}
+                </p>
+              ) : null}
               {depositPresentation === "disabled" ? (
                 <p className="mt-2 text-[10px] text-[#8b95a8]">
                   {t("predca.rpcActionHint")}
