@@ -222,7 +222,9 @@ const pl: Dict = {
   "auto.status.okWithNext":
     "Automatyczny zakup tygodniowy OK · ${amount} z vault → {tokens} · następny zakup: {nextBuy}",
   "auto.status.vaultLow":
-    "Auto-zakup wstrzymany — za mało USDC w vault ({have} < {need}).",
+    "Za mało środków w vaulcie (potrzeba {need} USDC, w tym opłata 0,01 USD).",
+  "auto.status.queued":
+    "Zakup w kolejce – wykonamy go wkrótce.",
   "auto.status.needWallet":
     "Podłącz portfel, żeby włączyć keepersa (wystarczy pubkey — zakup zrobi bot).",
   "auto.status.notReady":
@@ -234,6 +236,7 @@ const pl: Dict = {
   "auto.status.error": "Auto-zakup nieudany: {reason}",
   "auto.error.fallback": "Auto-zakup nieudany. Spróbuj ponownie później.",
   "auto.error.insufficient": "Za mało środków na auto-zakup.",
+  "auto.error.queued": "Zakup w kolejce – wykonamy go wkrótce.",
   "auto.error.rejected": "Odrzucono prośbę w portfelu.",
   "auto.error.slippage": "Cena się zmieniła. Spróbuj ponownie później.",
   "auto.error.network": "Problem z siecią. Spróbuj ponownie później.",
@@ -684,7 +687,9 @@ const en: Dict = {
   "auto.status.okWithNext":
     "Weekly auto-buy OK · ${amount} from vault → {tokens} · next buy: {nextBuy}",
   "auto.status.vaultLow":
-    "Auto-buy paused — not enough USDC in vault ({have} < {need}).",
+    "Not enough funds in the vault (need {need} USDC including the 0.01 USD service fee).",
+  "auto.status.queued":
+    "Purchase queued – we'll complete it shortly.",
   "auto.status.needWallet":
     "Connect a wallet to start the keeper (pubkey only — the bot performs the buy).",
   "auto.status.notReady":
@@ -696,6 +701,7 @@ const en: Dict = {
   "auto.status.error": "Auto-buy failed: {reason}",
   "auto.error.fallback": "Auto-buy failed. Try again later.",
   "auto.error.insufficient": "Not enough funds for the auto-buy.",
+  "auto.error.queued": "Purchase queued – we'll complete it shortly.",
   "auto.error.rejected": "The wallet rejected the request.",
   "auto.error.slippage": "The price moved. Try again later.",
   "auto.error.network": "Network problem. Try again later.",
@@ -748,6 +754,10 @@ const en: Dict = {
   "settings.autoWeekly": "Automatic weekly purchase from the vault",
   "settings.autoWeeklyHint":
     "Off by default. Enabling takes the amount above and immediately buys 3 PreStocks. That transaction starts the weekly schedule. You will not need to confirm later purchases.",
+  "settings.serviceFee":
+    "Opłata serwisowa: {fee} USD za zakup",
+  "settings.serviceFeeEn":
+    "Service fee: {fee} USD per purchase",
   "settings.autoWeeklyConfirmTitle": "Enable weekly vault purchases?",
   "settings.autoWeeklyConfirmBody":
     "Continuing will split ${amount} from the vault equally across 3 PreStock companies. You will receive a different number of shares depending on each price. This transaction starts the weekly schedule. You will not need to confirm later purchases.",

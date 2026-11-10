@@ -537,6 +537,10 @@ test("new copy exists in Polish and English", () => {
     "balances.warning",
     "premium.spacex.premium",
     "premium.spacex.premiumLabel",
+    "auto.status.queued",
+    "auto.error.queued",
+    "settings.serviceFee",
+    "settings.serviceFeeEn",
   ]) {
     assert.equal(plKeys.has(key), true, key);
     assert.equal(enKeys.has(key), true, key);

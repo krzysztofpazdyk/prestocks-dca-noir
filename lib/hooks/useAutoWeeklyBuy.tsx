@@ -70,7 +70,8 @@ export type AutoBuyPhase =
   | "pending"
   | "ok"
   | "error"
-  | "blocked";
+  | "blocked"
+  | "queued";
 
 export type AutoWeeklyBuyApi = {
   enabled: boolean;
@@ -879,6 +880,12 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
       }
       return;
     }
+    if (st.phase === "deferred" || (st.phase === "error" && /deferred|ops_pending|insufficient lamports|not enough sol|keeper ma za mało sol/i.test(st.error || ""))) {
+      setPhase("queued");
+      setMessage(tRef.current("auto.status.queued"));
+      setBlockReason("deferred");
+      return;
+    }
     if (st.phase === "error" && st.error) {
       setPhase("error");
       setMessage(tRef.current("auto.status.error", { reason: st.error }));
@@ -981,6 +988,7 @@ export function AutoWeeklyBuyBanner() {
     value.phase === "buying" ||
     value.phase === "pending" ||
     value.phase === "error" ||
+    value.phase === "queued" ||
     (value.phase === "ok" && value.message != null);
   if (!showBanner || !value.message) return null;
   const text =
@@ -988,7 +996,9 @@ export function AutoWeeklyBuyBanner() {
       ? t("auto.banner.ranking")
       : value.phase === "buying"
         ? value.message || t("auto.banner.buying")
-        : (errorView?.text ?? value.message);
+        : value.phase === "queued"
+          ? value.message
+          : (errorView?.text ?? value.message);
   return (
     <div
       role="status"
@@ -996,7 +1006,7 @@ export function AutoWeeklyBuyBanner() {
       className={`border-b px-4 py-2 text-center text-xs ${
         value.phase === "error"
           ? "border-[#f8717133] bg-[#f8717111] text-[#fca5a5]"
-          : value.phase === "pending"
+          : value.phase === "queued" || value.phase === "pending"
             ? "border-[#fbbf2433] bg-[#fbbf2411] text-[#fbbf24]"
             : "border-[#2dd4bf33] bg-[#2dd4bf11] text-[#2dd4bf]"
       }`}

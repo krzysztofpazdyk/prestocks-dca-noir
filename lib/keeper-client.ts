@@ -60,6 +60,8 @@ export type KeeperRunResult = {
   detail?: string;
   /** Client gave up waiting. The daemon may still finish /enable. */
   pending?: boolean;
+  /** Service fee in USD (from /public/status.feeUsd or FeeConfig). */
+  feeUsd?: number;
   /** Ranking prefs from the public status read. Never includes a Jev key. */
   prefs?: KeeperPrefsPayload;
   /** True when the keeper has a Jev key stored. The key itself is never returned. */
@@ -491,6 +493,7 @@ const TRANSITIONAL_PUBLIC_PHASES = new Set([
   "ranking",
   "confirming",
   "pending",
+  "deferred",
 ]);
 
 /** enabled:false with no settled phase must not be treated as Off. */
@@ -614,6 +617,9 @@ function pickPublicStatus(data: KeeperRunResult): KeeperRunResult {
     if (typeof value === "string" || typeof value === "number") {
       (out as Record<string, unknown>)[key] = value;
     }
+  }
+  if (typeof src.feeUsd === "number" && Number.isFinite(src.feeUsd)) {
+    out.feeUsd = src.feeUsd;
   }
   const error = publicErrorText(src.error);
   if (error) out.error = error;
