@@ -168,7 +168,7 @@ test("history no longer shows the entry count", () => {
 });
 
 test("v5.0.23 stays on the profit/loss section", () => {
-  assert.equal(APP_VERSION, "5.0.23");
+  assert.equal(APP_VERSION, "5.0.24");
   const pnl = overviewSrc.slice(
     overviewSrc.indexOf("function PnlSection"),
     overviewSrc.indexOf("function PositionsCard"),

@@ -165,11 +165,11 @@ test("Polish sentences stay word for word, including vault, prior session, and p
   );
   assert.equal(
     translate("pl", "auto.error.predca.6009"),
-    "Brak ceny dla tokena — keeper jeszcze jej nie ustawił.",
+    "Brak ceny dla tokena — automat zakupów jeszcze jej nie ustawił.",
   );
   assert.equal(
     translate("pl", "auto.error.predca.6010"),
-    "Cena tokena jest nieaktualna. Keeper odświeża ceny co kilka minut — spróbuj za chwilę.",
+    "Cena tokena jest nieaktualna. Automat zakupów odświeża ceny co kilka minut — spróbuj za chwilę.",
   );
   assert.equal(RUN_INDEX_TAKEN_MSG, translate("pl", "auto.error.predca.6004"));
   assert.equal(BUY_ALREADY_IN_FLIGHT_MSG, "Zakup już w toku.");

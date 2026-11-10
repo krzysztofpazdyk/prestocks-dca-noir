@@ -60,6 +60,14 @@ export type KeeperRunResult = {
   detail?: string;
   /** Client gave up waiting. The daemon may still finish /enable. */
   pending?: boolean;
+  /** Last purchase fee in USD from /public/status. */
+  feeUsd?: number;
+  /** True only when the public status says the purchase fee is on. */
+  feeEnabled?: boolean;
+  /** USDC the vault still needs for this purchase, including the fee. */
+  need?: number;
+  /** Recent purchases: run index and the fee actually charged. Max 52. */
+  fees?: { runIndex: number; feeUsd: number }[];
   /** Ranking prefs from the public status read. Never includes a Jev key. */
   prefs?: KeeperPrefsPayload;
   /** True when the keeper has a Jev key stored. The key itself is never returned. */
@@ -491,6 +499,7 @@ const TRANSITIONAL_PUBLIC_PHASES = new Set([
   "ranking",
   "confirming",
   "pending",
+  "deferred",
 ]);
 
 /** enabled:false with no settled phase must not be treated as Off. */
@@ -588,6 +597,25 @@ function pickPublicPrefs(raw: unknown): KeeperPrefsPayload | undefined {
   return prefs;
 }
 
+/** Last 52 runs. Only the index and the USDC fee. No lamports, no notes. */
+function pickPublicFees(
+  raw: unknown,
+): { runIndex: number; feeUsd: number }[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: { runIndex: number; feeUsd: number }[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    const runIndex = row.runIndex;
+    const feeUsd = row.feeUsd;
+    if (typeof runIndex !== "number" || typeof feeUsd !== "number") continue;
+    if (!Number.isFinite(runIndex) || !Number.isFinite(feeUsd)) continue;
+    out.push({ runIndex, feeUsd });
+  }
+  if (out.length === 0) return undefined;
+  return out.length > 52 ? out.slice(-52) : out;
+}
+
 /**
  * Copy only the public status fields. A Jev key, RPC URL, port, session
  * token, or other extra field from a careless payload never lands in state.
@@ -615,6 +643,13 @@ function pickPublicStatus(data: KeeperRunResult): KeeperRunResult {
       (out as Record<string, unknown>)[key] = value;
     }
   }
+  if (typeof src.feeUsd === "number" && Number.isFinite(src.feeUsd)) {
+    out.feeUsd = src.feeUsd;
+  }
+  if (typeof src.feeEnabled === "boolean") out.feeEnabled = src.feeEnabled;
+  if (typeof src.need === "number" && Number.isFinite(src.need)) out.need = src.need;
+  const fees = pickPublicFees(src.fees);
+  if (fees) out.fees = fees;
   const error = publicErrorText(src.error);
   if (error) out.error = error;
   const detail = publicErrorText(src.detail);

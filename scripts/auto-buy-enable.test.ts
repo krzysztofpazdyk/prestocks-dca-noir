@@ -365,21 +365,21 @@ test("status is a public read and there is no Sign bar", () => {
   assert.equal(settings.includes("value={typesafeKey}"), true);
   assert.equal(
     translate("pl", "settings.prefsKeeperChanged"),
-    "Ustawienia w keeperze zmieniły się – wczytano je, sprawdź i zapisz ponownie",
+    "Ustawienia w systemie zakupów zmieniły się – wczytano je, sprawdź i zapisz ponownie",
   );
   assert.equal(
     translate("en", "settings.prefsKeeperChanged"),
-    "Keeper settings changed – reloaded, review and save again",
+    "Purchase service settings changed – reloaded, review and save again",
   );
-  assert.equal(translate("pl", "settings.jevKeySaved"), "Klucz zapisany w keeperze");
-  assert.equal(translate("en", "settings.jevKeySaved"), "Key saved in keeper");
+  assert.equal(translate("pl", "settings.jevKeySaved"), "Klucz zapisany w systemie zakupów");
+  assert.equal(translate("en", "settings.jevKeySaved"), "Key saved in the purchase service");
   assert.equal(
     translate("pl", "settings.autoBuyKeeperUnreachable"),
-    "Auto-zakup: keeper nieosiągalny, stan nieznany",
+    "Auto-zakup: system zakupów nieosiągalny, stan nieznany",
   );
   assert.equal(
     translate("en", "settings.autoBuyKeeperUnreachable"),
-    "Auto-buy: keeper unreachable, status unknown",
+    "Auto-buy: the purchase service is unreachable, status unknown",
   );
 });
 
@@ -719,7 +719,7 @@ test("a changed public prefs read does not sign or post", async () => {
   delete process.env.NEXT_PUBLIC_DCA_API_URL;
   Object.defineProperty(globalThis, "window", { configurable: true, value: globalThis });
   const calls: Captured[] = [];
-  let signs = 0;
+  const signs = 0;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     calls.push({

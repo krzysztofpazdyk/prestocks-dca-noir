@@ -102,6 +102,7 @@ const IN_PROGRESS_ENABLE_PHASES = new Set([
   "ranking",
   "enabling",
   "confirming",
+  "deferred",
 ]);
 
 /**
@@ -228,7 +229,8 @@ export type AutoBuyBlockReason =
   | "busy"
   | "vault_low"
   | "not_ready"
-  | "need_wallet";
+  | "need_wallet"
+  | "deferred";
 
 export type AutoBuyDecision =
   | { attempt: false; reason: AutoBuyBlockReason; nextAt: number | null }

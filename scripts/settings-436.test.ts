@@ -82,8 +82,8 @@ test("prefs confirmation stays outside the dirty block, and controls wait for hy
     return [...i18n.matchAll(re)].map((hit) => hit[1]);
   }
   assert.deepEqual(values("settings.prefsLoading"), [
-    "Wczytywanie ustawień keepera…",
-    "Loading keeper settings…",
+    "Wczytywanie ustawień systemu zakupów…",
+    "Loading purchase service settings…",
   ]);
   assert.equal(values("settings.fixedExclusion").length, 0);
   assert.equal(values("settings.intro").length, 0);

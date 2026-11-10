@@ -98,7 +98,14 @@ function categoryKey(raw: string): string | null {
     return "auto.error.slippage";
   }
   if (
-    /insufficient funds|insufficient lamports|insufficient balance|insufficient vault|not enough (?:usdc|funds|balance|sol|lamports)|custom program error:\s*0x1\b|vault_low|niewystarczaj|za mało/i.test(
+    /insufficient lamports|not enough sol|keeper ma za mało sol|deferred|ops_pending/i.test(
+      raw,
+    )
+  ) {
+    return "auto.error.queued";
+  }
+  if (
+    /insufficient funds|insufficient balance|insufficient vault|not enough (?:usdc|funds|balance)|custom program error:\s*0x1\b|vault_low|niewystarczaj|za mało usdc|za mało środków/i.test(
       raw,
     )
   ) {

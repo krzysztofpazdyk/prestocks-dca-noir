@@ -13,6 +13,7 @@ import { runPnl } from "@/lib/position-value";
 import { historyBudgetUsd, historyLegUsd } from "@/lib/history-view";
 import type { JupQuote } from "@/lib/jup-prices";
 import type { RunFillView } from "@/lib/run-fills";
+import { historyFeeLabel } from "@/lib/fee-display";
 import { historyRunMetaText, type RunOrigin } from "@/lib/run-origin";
 import { useI18n } from "@/lib/i18n";
 
@@ -36,14 +37,18 @@ export function HistoryRunEntry({
   fills,
   quotes,
   origin,
+  feeUsd,
 }: {
   run: RunRecordData;
   fills: RunFillView[];
   quotes: Record<string, JupQuote>;
   /** null while unknown or after an RPC miss. The line then has no suffix. */
   origin: RunOrigin | null;
+  /** Charged fee for this run. Missing or zero hides the line. */
+  feeUsd?: number;
 }) {
   const { t, locale } = useI18n();
+  const feeText = historyFeeLabel(feeUsd, t);
   const fill = fills.find((row) => row.runIndex === run.runIndex.toString());
   const priceState = fill?.priceState ?? "unknown";
   const budget = runBudgetUsd(run, fill?.slots, priceState);
@@ -102,6 +107,9 @@ export function HistoryRunEntry({
             <span className="hidden md:col-start-3 md:block" aria-hidden="true" />
           )}
         </div>
+        {feeText ? (
+          <p className="mt-1 text-[10px] text-[#8b95a8]">{feeText}</p>
+        ) : null}
         {priceState === "unknown" ? (
           <p className="mt-1 text-[10px] text-[#8b95a8]">{t("runPrice.loading")}</p>
         ) : null}
