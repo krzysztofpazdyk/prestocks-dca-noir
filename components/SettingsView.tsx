@@ -512,7 +512,7 @@ export function SettingsView() {
       : null;
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
+    <div className="mx-auto max-w-xl space-y-5">
       {predca.sessionCheckMsg ? (
         <TxNotice message={predca.sessionCheckMsg} tone="pending" />
       ) : null}
@@ -534,9 +534,94 @@ export function SettingsView() {
         <p className="text-[10px] text-[#fbbf24]">+{predca.visibleUnresolvedTxs.length - 2}</p>
       ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-2 lg:items-stretch">
-        <div className="space-y-5">
-          <div className="space-y-2 rounded-lg border border-[#1e2633] bg-[#141820] p-5">
+      <label className="block space-y-2 rounded-lg border border-[#1e2633] bg-[#141820] p-5">
+        <span className="text-[11px] uppercase tracking-[0.15em] text-[#2dd4bf]">
+          {t("settings.exclusions")}
+        </span>
+        <input
+          type="text"
+          value={exclusions}
+          disabled={!prefsReady}
+          title={!prefsReady ? t("settings.prefsLoading") : undefined}
+          onChange={(e) => setExclusions(e.target.value)}
+          onBlur={() => {
+            const shown = userExclusions(exclusions).join(", ");
+            setExclusions(shown);
+            writeExclusionsRaw(shown);
+          }}
+          placeholder="OpenAI, Kalshi"
+          className="w-full rounded border border-[#1e2633] bg-[#0c0e12] px-3 py-2 text-sm outline-none focus:border-[#a78bfa66] disabled:opacity-40"
+        />
+      </label>
+
+      <div className="space-y-3 rounded-lg border border-[#1e2633] bg-[#141820] p-5">
+        <span className="text-[11px] uppercase tracking-[0.15em] text-[#2dd4bf]">
+          {t("settings.purchaseFilters")}
+        </span>
+        <CompanyToggle
+          label={t("settings.buyDespiteIpo")}
+          checked={buyDespiteIpo}
+          onChange={setBuyDespiteIpo}
+          disabled={!availability.buyDespiteIpo.enabled}
+          prefsReady={prefsReady}
+          bucket={availability.buyDespiteIpo}
+          kind="ipo"
+          byName={companySnap.byName}
+        />
+        <CompanyToggle
+          label={t("settings.deadlineInvalid")}
+          hint={t("settings.deadlineInvalidHint")}
+          checked={deadlineInvalid}
+          onChange={setDeadlineInvalid}
+          disabled={!availability.deadlinesUnimportant.enabled}
+          prefsReady={prefsReady}
+          bucket={availability.deadlinesUnimportant}
+          kind="deadline"
+          byName={companySnap.byName}
+        />
+        <Toggle
+          label={t("settings.ipoPremium")}
+          checked={ipoPremium}
+          onChange={setIpoPremium}
+          disabled={!prefsReady}
+          title={!prefsReady ? t("settings.prefsLoading") : undefined}
+        />
+        {prefsOk ? (
+          <p className="text-[10px] text-[#2dd4bf]">{t("settings.prefsSignOk")}</p>
+        ) : null}
+        {prefsDirty ? (
+          <div className="space-y-2 border-t border-[#fbbf2433] pt-3">
+            <p className="text-xs leading-relaxed text-[#fbbf24]">
+              {t("settings.prefsDirtyHint")}
+            </p>
+            <div className="space-y-2">
+              <button
+                type="button"
+                disabled={prefsSaving || !canSign}
+                onClick={() => void signAndSavePrefs()}
+                title={
+                  !canSign ? t("settings.prefsConnectWallet") : undefined
+                }
+                className="w-full rounded border border-[#fbbf2466] bg-[#0c0e12] px-3 py-1.5 text-[10px] uppercase tracking-wider text-[#fbbf24] hover:bg-[#fbbf2411] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {prefsSaving
+                  ? t("settings.prefsSignSaving")
+                  : t("settings.prefsSignSave")}
+              </button>
+              {!canSign ? (
+                <span className="text-[10px] text-[#8b95a8]">
+                  {t("settings.prefsConnectWallet")}
+                </span>
+              ) : null}
+            </div>
+            {prefsSaveMsg ? (
+              <p className="text-[10px] text-[#fca5a5]">{prefsSaveMsg}</p>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+
+      <div className="space-y-2 rounded-lg border border-[#1e2633] bg-[#141820] p-5">
             <label className="block space-y-2">
               <span className="text-[11px] uppercase tracking-[0.15em] text-[#8b95a8]">
                 {t("settings.weeklyAmount")}
@@ -735,96 +820,8 @@ export function SettingsView() {
               </div>
             </div>
           ) : null}
-        </div>
-        <div className="space-y-5">
-          <label className="block space-y-2 rounded-lg border border-[#1e2633] bg-[#141820] p-5">
-            <span className="text-[11px] uppercase tracking-[0.15em] text-[#2dd4bf]">
-              {t("settings.exclusions")}
-            </span>
-            <input
-              type="text"
-              value={exclusions}
-              disabled={!prefsReady}
-              title={!prefsReady ? t("settings.prefsLoading") : undefined}
-              onChange={(e) => setExclusions(e.target.value)}
-              onBlur={() => {
-                const shown = userExclusions(exclusions).join(", ");
-                setExclusions(shown);
-                writeExclusionsRaw(shown);
-              }}
-              placeholder="OpenAI, Kalshi"
-              className="w-full rounded border border-[#1e2633] bg-[#0c0e12] px-3 py-2 text-sm outline-none focus:border-[#a78bfa66] disabled:opacity-40"
-            />
-          </label>
 
-          <div className="space-y-3 rounded-lg border border-[#1e2633] bg-[#141820] p-5">
-            <span className="text-[11px] uppercase tracking-[0.15em] text-[#2dd4bf]">
-              {t("settings.purchaseFilters")}
-            </span>
-            <CompanyToggle
-              label={t("settings.buyDespiteIpo")}
-              checked={buyDespiteIpo}
-              onChange={setBuyDespiteIpo}
-              disabled={!availability.buyDespiteIpo.enabled}
-              prefsReady={prefsReady}
-              bucket={availability.buyDespiteIpo}
-              kind="ipo"
-              byName={companySnap.byName}
-            />
-            <CompanyToggle
-              label={t("settings.deadlineInvalid")}
-              hint={t("settings.deadlineInvalidHint")}
-              checked={deadlineInvalid}
-              onChange={setDeadlineInvalid}
-              disabled={!availability.deadlinesUnimportant.enabled}
-              prefsReady={prefsReady}
-              bucket={availability.deadlinesUnimportant}
-              kind="deadline"
-              byName={companySnap.byName}
-            />
-            <Toggle
-              label={t("settings.ipoPremium")}
-              checked={ipoPremium}
-              onChange={setIpoPremium}
-              disabled={!prefsReady}
-              title={!prefsReady ? t("settings.prefsLoading") : undefined}
-            />
-            {prefsOk ? (
-              <p className="text-[10px] text-[#2dd4bf]">{t("settings.prefsSignOk")}</p>
-            ) : null}
-            {prefsDirty ? (
-              <div className="space-y-2 border-t border-[#fbbf2433] pt-3">
-                <p className="text-xs leading-relaxed text-[#fbbf24]">
-                  {t("settings.prefsDirtyHint")}
-                </p>
-                <div className="space-y-2">
-                  <button
-                    type="button"
-                    disabled={prefsSaving || !canSign}
-                    onClick={() => void signAndSavePrefs()}
-                    title={
-                      !canSign ? t("settings.prefsConnectWallet") : undefined
-                    }
-                    className="w-full rounded border border-[#fbbf2466] bg-[#0c0e12] px-3 py-1.5 text-[10px] uppercase tracking-wider text-[#fbbf24] hover:bg-[#fbbf2411] disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {prefsSaving
-                      ? t("settings.prefsSignSaving")
-                      : t("settings.prefsSignSave")}
-                  </button>
-                  {!canSign ? (
-                    <span className="text-[10px] text-[#8b95a8]">
-                      {t("settings.prefsConnectWallet")}
-                    </span>
-                  ) : null}
-                </div>
-                {prefsSaveMsg ? (
-                  <p className="text-[10px] text-[#fca5a5]">{prefsSaveMsg}</p>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-
-          <section className="space-y-3 rounded-lg border border-[#2dd4bf33] bg-[#141820] p-5">
+      <section className="space-y-3 rounded-lg border border-[#2dd4bf33] bg-[#141820] p-5">
             <div className="flex items-center justify-between gap-2">
               <h2 className="text-[11px] uppercase tracking-[0.15em] text-[#2dd4bf]">
                 {t("settings.byokTitle")}
@@ -908,8 +905,6 @@ export function SettingsView() {
               {byokSaved ? t("settings.keysSaved") : t("settings.saveKeys")}
             </button>
           </section>
-        </div>
-      </div>
     </div>
   );
 }
