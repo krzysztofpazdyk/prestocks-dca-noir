@@ -45,7 +45,8 @@ test("Settings shows tx messages once, and History does not show a foreign predc
     new URL("../components/HistoryView.tsx", import.meta.url),
     "utf8",
   );
-  assert.equal(settings.match(/predca\.error\b/g)?.length, 1);
+  // Budget notice, plus the close-account dialog while that dialog is open.
+  assert.equal(settings.match(/predca\.error\b/g)?.length, 2);
   assert.equal(settings.match(/predca\.pendingMsg\b/g)?.length, 1);
   assert.equal(settings.match(/predca\.okMsg\b/g)?.length, 1);
   assert.doesNotMatch(history, /predca\.error &&/);

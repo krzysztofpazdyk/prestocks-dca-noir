@@ -408,7 +408,7 @@ test("outside-app badge shows the unit count and is absent at zero", () => {
     overview.indexOf("function PositionsCard"),
   );
   assert.match(pnlFn, /v\{APP_VERSION\}/);
-  assert.equal(APP_VERSION, "5.0.25");
+  assert.equal(APP_VERSION, "5.0.26");
 
   const entry = readFileSync(
     new URL("../components/HistoryRunEntry.tsx", import.meta.url),
@@ -424,6 +424,9 @@ test("outside-app badge shows the unit count and is absent at zero", () => {
   assert.match(history, /loadRunOrigin\(connection, owner, index\)/);
   assert.match(history, /if \(!result\.ok \|\| !result\.origin\) return;/);
   assert.match(history, /writeRunOriginCache\(/);
-  assert.match(history, /origin=\{origins\[run\.runIndex\.toString\(\)\] \?\? null\}/);
+  assert.match(
+    history,
+    /origin=\{\s*predca\.historyOrigins\[run\.runIndex\.toString\(\)\] \?\?\s*origins\[run\.runIndex\.toString\(\)\] \?\?\s*null\s*\}/,
+  );
   assert.doesNotMatch(entry, /· \?/);
 });

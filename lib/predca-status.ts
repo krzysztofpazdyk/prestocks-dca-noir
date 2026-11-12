@@ -18,6 +18,7 @@ export type PredcaSnapshot = {
   ownerUsdc: number | null;
   solBalance: number | null;
   tokenBalances: MockTokenBalance[];
+  /** Chain RunRecords. The screen merges events, these rows, the receipt snapshot, and the card. */
   runs: RunRecordData[];
   rpcError: string | null;
   /** i18n key. Token ATA read failed softly; previous balances stay. */
@@ -55,6 +56,7 @@ export type RefreshOutcome =
       tokenBalances: MockTokenBalance[];
       /** Keep `prev.tokenBalances` and set a non-blocking warning. */
       tokenBalancesStale?: boolean;
+      /** Chain RunRecords still on the account. History merges other sources beside this list. */
       runs: RunRecordData[];
     }
   | { ok: false; error: string; soft?: false }

@@ -280,6 +280,7 @@ test("enable pending copy does not ask for another try", () => {
     new URL("../lib/hooks/useAutoWeeklyBuy.tsx", import.meta.url),
     "utf8",
   );
+  // The switch and close-account each call the disable endpoint once.
   const disables = hook.match(/keeperDisable\(/g) ?? [];
-  assert.equal(disables.length, 1);
+  assert.equal(disables.length, 2);
 });

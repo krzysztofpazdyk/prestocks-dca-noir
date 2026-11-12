@@ -700,6 +700,7 @@ export function OverviewView() {
     Number.isFinite(withdrawAmt) &&
     withdrawAmt > vaultUsdcCap;
   const depositDisabled =
+    predca.accountUpdating ||
     sigUnresolved ||
     predca.txPending ||
     dupChecking ||
@@ -710,6 +711,7 @@ export function OverviewView() {
     depositOverCap;
   const withdrawPresentation = withdrawUi(predca.status, predca.config != null);
   const withdrawDisabled =
+    predca.accountUpdating ||
     sigUnresolved ||
     predca.txPending ||
     dupChecking ||
@@ -915,6 +917,11 @@ export function OverviewView() {
 
   return (
     <div className="space-y-5">
+      {predca.accountUpdating ? (
+        <p className="rounded border border-[#fbbf2444] bg-[#141820] px-4 py-3 text-sm leading-relaxed text-[#fbbf24]">
+          {t("account.updating")}
+        </p>
+      ) : null}
       {overviewNotice ? (
         <div className="flex flex-wrap items-end justify-end gap-3">
           <p className={`text-xs ${overviewNotice.className}`}>
@@ -1346,6 +1353,7 @@ export function OverviewView() {
                   onClick={() => void handlePurchase(false)}
                   disabled={
                     purchaseDisabled ||
+                    predca.accountUpdating ||
                     predca.txPending ||
                     buyInFlight ||
                     sigUnresolved ||

@@ -26,6 +26,7 @@ const originFlights = new Set<string>();
 function useRunOrigins(
   owner: PublicKey | null,
   runIndexKey: string,
+  known: Record<string, RunOrigin>,
 ): Record<string, RunOrigin> {
   const { connection } = useConnection();
   const ownerBase58 = owner?.toBase58() ?? null;
@@ -37,10 +38,10 @@ function useRunOrigins(
 
   useEffect(() => {
     if (!owner || !ownerBase58) return;
-    const known = new Set(Object.keys(originsFromSnapshot(snapshot)));
+    const cached = new Set(Object.keys(originsFromSnapshot(snapshot)));
     const missing = runIndexKey
       .split(",")
-      .filter((index) => index.length > 0 && !known.has(index));
+      .filter((index) => index.length > 0 && !cached.has(index) && !known[index]);
     if (missing.length === 0) return;
 
     void Promise.all(
@@ -58,7 +59,7 @@ function useRunOrigins(
         }
       }),
     );
-  }, [connection, owner, ownerBase58, runIndexKey, snapshot]);
+  }, [connection, owner, ownerBase58, runIndexKey, snapshot, known]);
 
   return originsFromSnapshot(snapshot);
 }
@@ -71,7 +72,7 @@ export function HistoryView() {
   const mode = historyView(predca.status, predca.runs.length, connected);
   const showRuns = mode === "list" || mode === "list_stale";
   const runIndexKey = predca.runs.map((run) => run.runIndex.toString()).join(",");
-  const origins = useRunOrigins(predca.owner, runIndexKey);
+  const origins = useRunOrigins(predca.owner, runIndexKey, predca.historyOrigins);
   const disconnectedCopy = connecting ? t("connect.busy") : t("connect.title");
 
   let intro: string | null = null;
@@ -136,13 +137,27 @@ export function HistoryView() {
                 run={run}
                 fills={predca.runFills}
                 quotes={predca.jupPrices.quotes}
-                origin={origins[run.runIndex.toString()] ?? null}
+                origin={
+                  predca.historyOrigins[run.runIndex.toString()] ??
+                  origins[run.runIndex.toString()] ??
+                  null
+                }
                 feeUsd={feeUsdForRun(autoBuy.fees, run.runIndex.toString())}
               />
             </li>
           ))}
         </ul>
       )}
+
+      {showRuns && predca.historyHasOlder ? (
+        <button
+          type="button"
+          onClick={() => void predca.showOlderHistory()}
+          className="rounded border border-[#1e2633] px-3 py-2 text-[10px] uppercase tracking-wider text-[#8b95a8] hover:text-[#e8eef5]"
+        >
+          {t("history.showOlder")}
+        </button>
+      ) : null}
     </div>
   );
 }

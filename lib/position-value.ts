@@ -111,6 +111,8 @@ function isPricedRun(dec: DecodedLots): boolean {
 }
 
 /**
+ * Purchase legs + optional price. Callers pass chain RunRecords or the merged
+ * history row (event, chain, snapshot, card) in this same shape.
  * RunRecord legs + optional RunPrice.
  * Confirmed missing account (map value null, run older than ~60s) → legacy 1:1.
  * No map entry, a failed read, or a young run without a decoded account → unknown

@@ -72,6 +72,11 @@ export type KeeperRunResult = {
   prefs?: KeeperPrefsPayload;
   /** True when the keeper has a Jev key stored. The key itself is never returned. */
   hasJevKey?: boolean;
+  /**
+   * Allow-listed defer reason from public status.
+   * `user_not_migrated` and `owner_ata_missing` only. Anything else is dropped.
+   */
+  deferReason?: "user_not_migrated" | "owner_ata_missing";
 };
 
 export type KeeperPrefsPayload = {
@@ -656,6 +661,10 @@ function pickPublicStatus(data: KeeperRunResult): KeeperRunResult {
   if (detail) out.detail = detail;
   const prefs = pickPublicPrefs(src.prefs);
   if (prefs) out.prefs = prefs;
+  const deferRaw = src.deferReason ?? src.defer_reason;
+  if (deferRaw === "user_not_migrated" || deferRaw === "owner_ata_missing") {
+    out.deferReason = deferRaw;
+  }
   return out;
 }
 

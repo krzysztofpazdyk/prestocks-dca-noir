@@ -32,6 +32,7 @@ function fmtUnits(n: number): string {
   return formatGrouped(n, { max: 6 });
 }
 
+/** One purchase from the merged history, shown with the same layout as a chain RunRecord. */
 export function HistoryRunEntry({
   run,
   fills,

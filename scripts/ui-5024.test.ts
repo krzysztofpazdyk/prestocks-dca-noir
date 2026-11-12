@@ -81,8 +81,8 @@ function walkSources(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-test("APP_VERSION stays 5.0.25", () => {
-  assert.equal(APP_VERSION, "5.0.25");
+test("APP_VERSION stays 5.0.26", () => {
+  assert.equal(APP_VERSION, "5.0.26");
 });
 
 test("the fee hint is shown in settings and on deposit only when the fee is on", () => {

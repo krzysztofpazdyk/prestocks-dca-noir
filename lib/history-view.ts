@@ -26,7 +26,7 @@ export function historyView(
 
 export type HistoryPriceState = "priced" | "legacy" | "unknown";
 
-/** USD for one history leg. Unknown RunPrice must not treat token units as dollars. */
+/** USD for one history leg. Unknown price (no event price and no RunPrice) must not treat token units as dollars. */
 export function historyLegUsd(
   priceState: HistoryPriceState,
   slotUsdc: number | null | undefined,

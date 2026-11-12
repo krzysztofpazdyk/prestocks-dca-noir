@@ -23,9 +23,11 @@ export function leaveManualBuy(gate: ManualBuyGate): void {
 }
 
 /**
- * A Kup confirm-timeout may already have created this RunRecord.
- * Remember the index so a later RunAlreadyExists does not buy the next one.
- * Other errors leave the set alone (a keeper collision can still retry once).
+ * A Kup confirm-timeout on the legacy path may already have created this purchase.
+ * Remember the index so a later collision does not buy the next one.
+ * Card mode does not use this set: the card (`last_run_index`, origin 2,
+ * `last_signature_hash`) or a confirmed signature is the confirmation.
+ * Other errors leave the set alone (another buyer can still retry once).
  */
 export function noteUnconfirmedRunIndex(
   createdRunIndices: Set<number>,

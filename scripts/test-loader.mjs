@@ -46,6 +46,8 @@ export async function load(url, context, nextLoad) {
       "export const BN = anchor.BN;",
       "export const AnchorProvider = anchor.AnchorProvider;",
       "export const Program = anchor.Program;",
+      "export const BorshCoder = anchor.BorshCoder;",
+      "export const EventParser = anchor.EventParser;",
       "export const web3 = anchor.web3;",
       "export const utils = anchor.utils;",
       "export const setProvider = anchor.setProvider;",

@@ -14,6 +14,8 @@ import {
   isYoungRunTs,
   mergeRunPrices,
 } from "@/lib/run-price";
+import { cardBuyConfirmed } from "@/lib/card-buy";
+import type { UserCard } from "@/lib/user-config";
 import {
   runLots,
   tokenBalancesCoverLots,
@@ -178,7 +180,11 @@ export function vaultMoved(
   return direction === "up" ? after > before + eps : after < before - eps;
 }
 
-/** Buy is consistent when the new run exists, its RunPrice decoded, and ATAs cover lot units. */
+/**
+ * Legacy: the new run exists, its RunPrice decoded, and ATAs cover lot units.
+ * Card: the card shows that index, origin manual, and the sent signature hash.
+ * A confirmed signature settles the card path without waiting for a RunRecord.
+ */
 export function buyRefreshSettled(input: {
   prevRunCount: number;
   expectedRunIndex: number | null;
@@ -186,7 +192,20 @@ export function buyRefreshSettled(input: {
   prices: ReadonlyMap<number, DecodedLots | null>;
   balances: TokenAmount[];
   nowMs: number;
+  card?: {
+    card: Pick<UserCard, "hasLastRun" | "lastRunIndex" | "lastOrigin" | "lastSignatureHash"> | null;
+    sentSignatureHash: Uint8Array;
+    signatureConfirmed?: boolean;
+  };
 }): boolean {
+  if (input.card && input.expectedRunIndex != null) {
+    return cardBuyConfirmed({
+      expectedRunIndex: input.expectedRunIndex,
+      card: input.card.card,
+      sentSignatureHash: input.card.sentSignatureHash,
+      signatureConfirmed: input.card.signatureConfirmed,
+    });
+  }
   const hasIndex =
     input.expectedRunIndex != null &&
     input.runs.some((run) => run.runIndex === input.expectedRunIndex);

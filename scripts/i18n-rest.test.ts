@@ -161,7 +161,7 @@ test("Polish sentences stay word for word, including vault, prior session, and p
   );
   assert.equal(
     translate("pl", "auto.error.predca.6004"),
-    "Indeks RunRecord zajęty. Spróbuj ponownie.",
+    "Ten numer zakupu jest zajęty. Spróbuj ponownie.",
   );
   assert.equal(
     translate("pl", "auto.error.predca.6009"),

@@ -333,6 +333,8 @@ function toRunIndex(runIndex: number | string | BN): BN {
 /**
  * Oldest signature on PDA ("run", owner, run_index), then the Predca
  * discriminator in that transaction. RPC errors are `{ ok: false }`.
+ * History uses this only when the merged row has no origin yet
+ * (a chain receipt that no event or snapshot has classified).
  */
 export async function loadRunOrigin(
   connection: OriginConnection,
