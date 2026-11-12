@@ -21,7 +21,7 @@ const HEADER_H1 =
   '<h1 className="text-xs uppercase tracking-[0.2em] text-[#a78bfa]">';
 
 test("v5.0.23 stays on the profit/loss section", () => {
-  assert.equal(APP_VERSION, "5.0.24");
+  assert.equal(APP_VERSION, "5.0.25");
   const pnlFn = overviewSrc.slice(
     overviewSrc.indexOf("function PnlSection"),
     overviewSrc.indexOf("function PositionsCard"),

@@ -22,49 +22,35 @@ function values(key: string): string[] {
 
 const ACCOUNT_LABEL = "text-[11px] uppercase tracking-[0.15em] text-[#2dd4bf]";
 
-test("settings uses the Overview width and two columns on large screens", () => {
-  assert.match(settingsSrc, /mx-auto max-w-6xl space-y-5/);
-  assert.doesNotMatch(settingsSrc, /max-w-xl/);
+test("settings is one column at max-w-xl on every width", () => {
+  assert.match(settingsSrc, /mx-auto max-w-xl space-y-5/);
+  assert.doesNotMatch(settingsSrc, /max-w-6xl/);
+  assert.doesNotMatch(settingsSrc, /lg:grid-cols-2/);
   assert.match(overviewSrc, /grid gap-4 lg:grid-cols-2/);
-  assert.match(settingsSrc, /grid gap-4 lg:grid-cols-2 lg:items-stretch/);
 
-  const root = settingsSrc.indexOf('className="mx-auto max-w-6xl space-y-5"');
-  const grid = settingsSrc.indexOf(
-    'className="grid gap-4 lg:grid-cols-2 lg:items-stretch"',
-    root,
-  );
-  const left = settingsSrc.indexOf('className="space-y-5"', grid);
-  const right = settingsSrc.indexOf('className="space-y-5"', left + 1);
-  assert.ok(root > 0 && grid > root && left > grid && right > left);
-
+  const root = settingsSrc.indexOf('className="mx-auto max-w-xl space-y-5"');
   const notice = settingsSrc.indexOf("predca.sessionCheckMsg");
   const unresolved = settingsSrc.indexOf("predca.visibleUnresolvedTxs");
-  assert.ok(notice > root && notice < grid);
-  assert.ok(unresolved > root && unresolved < grid);
-
+  const exclusions = settingsSrc.indexOf('t("settings.exclusions")');
+  const filters = settingsSrc.indexOf('t("settings.purchaseFilters")');
+  const sign = settingsSrc.indexOf("void signAndSavePrefs()");
   const weekly = settingsSrc.indexOf('t("settings.weeklyAmount")');
   const saveBudget = settingsSrc.indexOf("void saveWeeklyBudgetOnChain()");
   const auto = settingsSrc.indexOf('t("settings.autoWeekly")');
   const mode = settingsSrc.indexOf("autoBuy.keeperMode");
-  const exclusions = settingsSrc.indexOf('t("settings.exclusions")');
-  const filters = settingsSrc.indexOf('t("settings.purchaseFilters")');
-  const sign = settingsSrc.indexOf("void signAndSavePrefs()");
   const byok = settingsSrc.indexOf('t("settings.byokTitle")');
 
-  assert.ok(weekly > left && weekly < right);
-  assert.ok(saveBudget > left && saveBudget < right);
-  assert.ok(auto > left && auto < right);
-  assert.ok(mode > left && mode < right);
-  assert.ok(exclusions > right && exclusions < byok);
-  assert.ok(filters > exclusions && filters < byok);
-  assert.ok(sign > filters && sign < byok);
-
-  const gridClass = settingsSrc.slice(
-    grid + 'className="'.length,
-    settingsSrc.indexOf('"', grid + 'className="'.length),
-  );
-  assert.equal(gridClass, "grid gap-4 lg:grid-cols-2 lg:items-stretch");
-  assert.equal(gridClass.startsWith("grid-cols-2"), false);
+  assert.ok(root > 0);
+  assert.ok(notice > root && notice < exclusions);
+  assert.ok(unresolved > root && unresolved < exclusions);
+  assert.ok(exclusions > unresolved);
+  assert.ok(filters > exclusions);
+  assert.ok(sign > filters && sign < weekly);
+  assert.ok(weekly > filters);
+  assert.ok(saveBudget > weekly && saveBudget < byok);
+  assert.ok(auto > weekly && auto < byok);
+  assert.ok(mode > weekly && mode < byok);
+  assert.ok(byok > weekly);
 });
 
 test("purchase filters have the exclusions label style", () => {
@@ -109,8 +95,8 @@ test("the xAI exclusion sentence is gone and xAI stays excluded", () => {
   assert.match(settingsSrc, /userExclusions\(/);
 });
 
-test("v5.0.24 stays on the profit/loss section", () => {
-  assert.equal(APP_VERSION, "5.0.24");
+test("v5.0.25 stays on the profit/loss section", () => {
+  assert.equal(APP_VERSION, "5.0.25");
   const pnl = overviewSrc.slice(
     overviewSrc.indexOf("function PnlSection"),
     overviewSrc.indexOf("function PositionsCard"),

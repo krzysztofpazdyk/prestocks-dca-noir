@@ -46,7 +46,7 @@ test("settings drops the DCA configuration heading and the gap above the form", 
   assert.doesNotMatch(settingsSrc, /Konfiguracja DCA|DCA configuration/);
   assert.match(
     settingsSrc,
-    /mx-auto max-w-6xl space-y-5">\s*\{predca\.sessionCheckMsg \? \(/,
+    /mx-auto max-w-xl space-y-5">\s*\{predca\.sessionCheckMsg \? \(/,
   );
 });
 
@@ -135,9 +135,8 @@ test("keeper mode and the next vault purchase share one line", () => {
     `${translate("en", "settings.keeperModeLive")} · ${translate("en", "auto.status.next", { when: whenEn })}`,
     `${translate("en", "settings.keeperModeDryRun")} · ${translate("en", "auto.status.next", { when: whenEn })}`,
   ];
-  // Wide column inside max-w-6xl (layout px-4, gap-4, card p-5, 1px border).
-  // 10px sans measured under ~5.2px per character.
-  const innerPx = (72 * 16 - 32 - 16) / 2 - 40 - 2;
+  // max-w-xl card, p-5, 1px border. 10px sans measured under ~5.2px per character.
+  const innerPx = 36 * 16 - 40 - 2;
   for (const line of lines) {
     assert.ok(line.length * 5.2 < innerPx, `${line.length} chars ${line}`);
   }
@@ -168,7 +167,7 @@ test("history no longer shows the entry count", () => {
 });
 
 test("v5.0.23 stays on the profit/loss section", () => {
-  assert.equal(APP_VERSION, "5.0.24");
+  assert.equal(APP_VERSION, "5.0.25");
   const pnl = overviewSrc.slice(
     overviewSrc.indexOf("function PnlSection"),
     overviewSrc.indexOf("function PositionsCard"),
