@@ -1,20 +1,39 @@
 /**
  * One purchase, whatever wrote it. Event beats a chain RunRecord+RunPrice,
  * which beats the static snapshot, which beats the last-buy card.
- * Missing prices stay on the same legacy path as a missing RunPrice.
+ * Rows from a closed account stay in the same list. The key is
+ * generation plus runIndex, so a new account's run 0 does not replace
+ * the old account's run 0. Missing prices stay on the legacy path.
  */
 
 import { BN } from "@coral-xyz/anchor";
 import { PublicKey } from "@solana/web3.js";
 import type { DecodedRunPrice } from "@/lib/run-price";
-import { ORIGIN_MANUAL, type UserCard } from "@/lib/user-config";
+import { ORIGIN_AUTO, ORIGIN_MANUAL, type UserCard } from "@/lib/user-config";
 import type { RunRecordData } from "@/lib/predca";
 
 export type HistoryOrigin = "auto" | "manual";
 export type HistorySource = "event" | "chain" | "snapshot" | "card";
 
+/**
+ * A successful close of this owner's account. `generation` counts closes whose
+ * slot is strictly less than the purchase slot (0 = the oldest account).
+ */
+export type CloseMark = {
+  slot: number;
+  ts?: number;
+  signature?: string;
+};
+
 export type HistoryEntry = {
   runIndex: number;
+  /**
+   * Account sequence. 0 is the oldest account. Omitted until `mergeHistory`
+   * sees the close marks. Same `runIndex` on two accounts stays two rows.
+   */
+  generation?: number;
+  /** Discreet marker: this purchase is from an account that was closed. */
+  previousAccount?: boolean;
   origin: HistoryOrigin | null;
   mints: string[];
   /** Token base units (u64). Same raw field RunRecord.amounts carries. */
@@ -53,8 +72,71 @@ export function originFromFeePayer(
   return "auto";
 }
 
-export function originFromCode(origin: number | null | undefined): HistoryOrigin {
-  return origin === ORIGIN_MANUAL ? "manual" : "auto";
+/**
+ * 2 → manual, 1 → auto. 0, null, undefined, and any other code have no label.
+ * A missing code must not be shown as an automatic purchase.
+ */
+export function originFromCode(origin: number | null | undefined): HistoryOrigin | null {
+  if (origin === ORIGIN_MANUAL) return "manual";
+  if (origin === ORIGIN_AUTO) return "auto";
+  return null;
+}
+
+/** One close per slot. A repeated signature must not bump generation twice. */
+export function normalizeCloses(closes: readonly CloseMark[]): CloseMark[] {
+  const bySlot = new Map<number, CloseMark>();
+  for (const mark of closes) {
+    if (!Number.isInteger(mark.slot) || mark.slot < 0) continue;
+    const prev = bySlot.get(mark.slot);
+    if (!prev) {
+      bySlot.set(mark.slot, mark);
+      continue;
+    }
+    if ((prev.ts ?? 0) <= 0 && (mark.ts ?? 0) > 0) bySlot.set(mark.slot, mark);
+  }
+  return [...bySlot.values()].sort((a, b) => a.slot - b.slot);
+}
+
+/**
+ * generation = how many successful closes have a slot strictly below this row.
+ * The card is the account that exists now, so its generation is the close count
+ * even when its slot is missing. A receipt dump from before the upgrade has no
+ * close of its own: generation 0 unless its slot (or, when the slot is missing,
+ * its timestamp) falls after a known close.
+ */
+export function accountGeneration(
+  entry: Pick<HistoryEntry, "source" | "slot" | "ts">,
+  closes: readonly CloseMark[],
+): number {
+  const marks = normalizeCloses(closes);
+  if (entry.source === "card") return marks.length;
+  if (entry.source === "snapshot") {
+    if (entry.slot > 0) return marks.filter((mark) => mark.slot < entry.slot).length;
+    const ts = entry.ts ?? 0;
+    const timed = marks.filter((mark) => (mark.ts ?? 0) > 0);
+    if (ts > 0 && timed.length > 0) {
+      return timed.filter((mark) => (mark.ts ?? 0) < ts).length;
+    }
+    return 0;
+  }
+  return marks.filter((mark) => mark.slot < entry.slot).length;
+}
+
+export function historyMergeKey(generation: number, runIndex: number): string {
+  return `${generation}:${runIndex}`;
+}
+
+/** Lot and fill maps stay numeric. Generation 0 keeps the raw run index. */
+const LOT_GENERATION_STRIDE = 1_000_000_000;
+
+export function historyLotKey(entry: Pick<HistoryEntry, "runIndex" | "generation">): number {
+  const generation = entry.generation ?? 0;
+  if (!Number.isInteger(generation) || generation <= 0) return entry.runIndex;
+  return generation * LOT_GENERATION_STRIDE + entry.runIndex;
+}
+
+export function historyFillKey(runIndex: number, generation = 0): string {
+  return String(historyLotKey({ runIndex, generation }));
 }
 
 function prefer(current: HistoryEntry, next: HistoryEntry): HistoryEntry {
@@ -65,17 +147,38 @@ function prefer(current: HistoryEntry, next: HistoryEntry): HistoryEntry {
   return current;
 }
 
-/** One row per runIndex. Earlier groups do not beat a higher-priority source. */
-export function mergeHistory(groups: ReadonlyArray<readonly HistoryEntry[]>): HistoryEntry[] {
-  const best = new Map<number, HistoryEntry>();
+function stampEntry(entry: HistoryEntry, marks: readonly CloseMark[]): HistoryEntry {
+  const generation = marks.length > 0 ? accountGeneration(entry, marks) : (entry.generation ?? 0);
+  const previousAccount =
+    marks.length > 0 ? generation < marks.length : entry.previousAccount === true;
+  return { ...entry, generation, previousAccount };
+}
+
+/**
+ * One row per `${generation}:${runIndex}`. Earlier groups do not beat a
+ * higher-priority source. Closes order accounts; without them a row keeps
+ * the generation it already has (otherwise 0).
+ */
+export function mergeHistory(
+  groups: ReadonlyArray<readonly HistoryEntry[]>,
+  closes: readonly CloseMark[] = [],
+): HistoryEntry[] {
+  const marks = normalizeCloses(closes);
+  const best = new Map<string, HistoryEntry>();
   for (const group of groups) {
     for (const entry of group) {
       if (!Number.isInteger(entry.runIndex) || entry.runIndex < 0) continue;
-      const prev = best.get(entry.runIndex);
-      best.set(entry.runIndex, prev ? prefer(prev, entry) : entry);
+      const stamped = stampEntry(entry, marks);
+      const key = historyMergeKey(stamped.generation ?? 0, stamped.runIndex);
+      const prev = best.get(key);
+      best.set(key, prev ? prefer(prev, stamped) : stamped);
     }
   }
-  return [...best.values()].sort((a, b) => a.runIndex - b.runIndex);
+  return [...best.values()].sort((a, b) => {
+    const gen = (a.generation ?? 0) - (b.generation ?? 0);
+    if (gen !== 0) return gen;
+    return a.runIndex - b.runIndex;
+  });
 }
 
 function bnBig(value: BN | number | bigint): bigint {
@@ -183,18 +286,19 @@ export function historyToLotInputs(entries: readonly HistoryEntry[]): {
   const runs: HistoryLotRun[] = [];
   const decoded = new Map<number, HistoryDecoded | null>();
   for (const entry of entries) {
+    const key = historyLotKey(entry);
     runs.push({
-      runIndex: entry.runIndex,
+      runIndex: key,
       ts: entry.ts,
       mints: entry.mints,
       amountsUsd: entry.amounts.map((amount) => Number(amount) / 1_000_000),
     });
     if (!entry.priceKnown || !entry.prices) {
       if (entry.priceMissing === false) continue;
-      decoded.set(entry.runIndex, null);
+      decoded.set(key, null);
       continue;
     }
-    decoded.set(entry.runIndex, {
+    decoded.set(key, {
       mints: entry.mints.map((mint) => ({ toBase58: () => mint })),
       prices: entry.prices,
       priceDecimals: entry.priceDecimals,
@@ -211,14 +315,19 @@ export function historyToFillRuns(entries: readonly HistoryEntry[]): Array<{
   tokenAmounts: number[];
 }> {
   return entries.map((entry) => ({
-    runIndex: entry.runIndex,
+    runIndex: historyLotKey(entry),
     ts: entry.ts,
     mints: entry.mints,
     tokenAmounts: entry.amounts.map((amount) => Number(amount) / 1_000_000),
   }));
 }
 
-export function entryToRunRecord(entry: HistoryEntry, owner: PublicKey): RunRecordData {
+export type HistoryRunView = RunRecordData & {
+  generation: number;
+  previousAccount: boolean;
+};
+
+export function entryToRunRecord(entry: HistoryEntry, owner: PublicKey): HistoryRunView {
   return {
     mints: entry.mints.map((mint) => new PublicKey(mint)),
     amounts: entry.amounts.map((amount) => new BN(amount.toString())),
@@ -228,6 +337,8 @@ export function entryToRunRecord(entry: HistoryEntry, owner: PublicKey): RunReco
     runIndex: new BN(entry.runIndex),
     owner,
     bump: 0,
+    generation: entry.generation ?? 0,
+    previousAccount: entry.previousAccount === true,
   };
 }
 

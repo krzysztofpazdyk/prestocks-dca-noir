@@ -6,6 +6,7 @@ import type { PublicKey } from "@solana/web3.js";
 import { usePredca } from "@/lib/hooks/usePredca";
 import { TxNotice } from "@/components/TxNotice";
 import { HistoryRunEntry } from "@/components/HistoryRunEntry";
+import { historyFillKey } from "@/lib/history-entry";
 import { historyView } from "@/lib/history-view";
 import { runsNewestFirst } from "@/lib/run-order";
 import {
@@ -128,24 +129,33 @@ export function HistoryView() {
 
       {showRuns && (
         <ul className="space-y-3">
-          {runsNewestFirst(predca.runs).map((run) => (
-            <li
-              key={run.runIndex.toString()}
-              className="rounded-lg border border-[#1e2633] bg-[#141820] p-4"
-            >
-              <HistoryRunEntry
-                run={run}
-                fills={predca.runFills}
-                quotes={predca.jupPrices.quotes}
-                origin={
-                  predca.historyOrigins[run.runIndex.toString()] ??
-                  origins[run.runIndex.toString()] ??
-                  null
-                }
-                feeUsd={feeUsdForRun(autoBuy.fees, run.runIndex.toString())}
-              />
-            </li>
-          ))}
+          {runsNewestFirst(predca.runs).map((run) => {
+            const extras = run as { generation?: number; previousAccount?: boolean };
+            const generation = extras.generation ?? 0;
+            const index = run.runIndex.toString();
+            const runIndex = Number(index);
+            return (
+              <li
+                key={`${generation}:${index}:${run.slot.toString()}`}
+                className="rounded-lg border border-[#1e2633] bg-[#141820] p-4"
+              >
+                <HistoryRunEntry
+                  run={run}
+                  fills={predca.runFills}
+                  quotes={predca.jupPrices.quotes}
+                  origin={
+                    predca.historyOrigins[run.runIndex.toString()] ??
+                    origins[run.runIndex.toString()] ??
+                    null
+                  }
+                  historyOrigin={predca.historyOrigins[`${generation}:${index}`] ?? null}
+                  previousAccount={extras.previousAccount === true}
+                  fillKey={historyFillKey(Number.isFinite(runIndex) ? runIndex : 0, generation)}
+                  feeUsd={feeUsdForRun(autoBuy.fees, run.runIndex.toString())}
+                />
+              </li>
+            );
+          })}
         </ul>
       )}
 

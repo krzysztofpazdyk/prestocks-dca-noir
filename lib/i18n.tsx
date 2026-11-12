@@ -376,6 +376,7 @@ const pl: Dict = {
   "history.runPnl": "PnL: {pnl}",
   "history.fee": "opłata {fee} USD",
   "history.showOlder": "Pokaż starsze",
+  "history.previousAccount": "poprzednie konto",
   "account.updating":
     "Aktualizujemy Twoje konto. Wpłaty, wypłaty i zakupy wrócą za chwilę. Środki są bezpieczne.",
   "tx.err.runIndexMoved":
@@ -861,6 +862,7 @@ const en: Dict = {
   "history.runPnl": "P/L: {pnl}",
   "history.fee": "fee {fee} USD",
   "history.showOlder": "Show older",
+  "history.previousAccount": "previous account",
   "account.updating":
     "We are updating your account. Deposits, withdrawals and buys will be back shortly. Your funds are safe.",
   "tx.err.runIndexMoved":

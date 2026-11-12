@@ -44,17 +44,24 @@ import {
   entryFromCard,
   entryToRunRecord,
   entriesFromChain,
+  historyLotKey,
   historyToFillRuns,
   historyToLotInputs,
   mergeHistory,
+  normalizeCloses,
+  type CloseMark,
   type HistoryEntry,
 } from "@/lib/history-entry";
 import {
   HISTORY_INITIAL_SIGNATURE_CAP,
   HISTORY_PAGE_SIZE,
-  cachedHistoryEntries,
+  HISTORY_REFRESH_MS,
+  closeMarkFromTransaction,
+  createHistoryRefreshQueue,
   entriesFromTransaction,
   fetchHistoryEvents,
+  historyIncrementalQuery,
+  historyRefreshDecision,
   type HistoryConnection,
   type HistoryTransaction,
   readHistoryCache,
@@ -487,6 +494,18 @@ function usePredcaImpl() {
     oldest: null,
   });
   const historyOwnerRef = useRef<string | null>(null);
+  const historyNewestRef = useRef<string | null>(null);
+  const historyQueueRef = useRef(createHistoryRefreshQueue());
+  const loadIncrementalRef = useRef<(key: string, ownerNow: PublicKey) => Promise<void>>(
+    async () => {},
+  );
+  const closeMarksRef = useRef<CloseMark[]>([]);
+  const [closeMarks, setCloseMarks] = useState<CloseMark[]>([]);
+  const setCloses = useCallback((next: readonly CloseMark[]) => {
+    const merged = normalizeCloses(next);
+    closeMarksRef.current = merged;
+    setCloseMarks(merged);
+  }, []);
   const txVaultRef = useRef<{
     epoch: number;
     before: number | null;
@@ -535,6 +554,9 @@ function usePredcaImpl() {
     setSnapshotEntries([]);
     setHistoryPage({ exhausted: true, oldest: null });
     historyOwnerRef.current = null;
+    historyNewestRef.current = null;
+    closeMarksRef.current = [];
+    setCloseMarks([]);
     legacyRef.current = false;
     accountUpdatingRef.current = false;
     setAccountUpdating(false);
@@ -865,6 +887,24 @@ function usePredcaImpl() {
     };
   }, [refresh, accountUpdating]);
 
+  loadIncrementalRef.current = async (key, ownerNow) => {
+    if (historyOwnerRef.current !== key) return;
+    const query = historyIncrementalQuery(historyNewestRef.current);
+    const page = await fetchHistoryEvents({
+      connection: connectionRef.current as HistoryConnection,
+      address: userConfigPda(ownerNow)[0],
+      owner: key,
+      programId: programId(),
+      storage: browserStorage(),
+      cap: query.cap,
+      ...(query.until ? { until: query.until } : {}),
+    });
+    if (ownerRef.current?.toBase58() !== key || historyOwnerRef.current !== key) return;
+    if (page.newest) historyNewestRef.current = page.newest;
+    if (page.entries.length > 0) setEventEntries((prev) => [...page.entries, ...prev]);
+    if (page.closes.length > 0) setCloses([...closeMarksRef.current, ...page.closes]);
+  };
+
   useEffect(() => {
     if (!ownerKey) return;
     const current = ownerRef.current;
@@ -873,37 +913,91 @@ function usePredcaImpl() {
     historyOwnerRef.current = ownerKey;
     const key = ownerKey;
     let cancelled = false;
-    const cached = cachedHistoryEntries(browserStorage(), key);
-    const rpc = connectionRef.current;
-    void (async () => {
-      await Promise.resolve();
+    const storage = browserStorage();
+    const cachedFile = readHistoryCache(storage, key);
+    const cachedEntries = Object.values(cachedFile.entries).flat();
+    const cachedCloses: CloseMark[] = Object.entries(cachedFile.closes).map(([signature, mark]) => ({
+      signature,
+      slot: mark.slot,
+      ts: mark.ts,
+    }));
+    void historyQueueRef.current.enqueue(async () => {
       if (cancelled || ownerRef.current?.toBase58() !== key) return;
-      if (cached.length > 0) setEventEntries(cached);
+      if (cachedEntries.length > 0) setEventEntries(cachedEntries);
+      if (cachedCloses.length > 0) setCloses(cachedCloses);
       try {
         const page = await fetchHistoryEvents({
-          connection: rpc as HistoryConnection,
+          connection: connectionRef.current as HistoryConnection,
           address: userConfigPda(current)[0],
           owner: key,
           programId: programId(),
           storage: browserStorage(),
           cap: HISTORY_INITIAL_SIGNATURE_CAP,
         });
-        if (cancelled || ownerRef.current?.toBase58() !== key) return;
+        if (cancelled || ownerRef.current?.toBase58() !== key || historyOwnerRef.current !== key) return;
         setEventEntries(page.entries);
         setHistoryPage({ exhausted: page.exhausted, oldest: page.oldest });
+        if (page.newest) historyNewestRef.current = page.newest;
+        setCloses([...cachedCloses, ...page.closes]);
       } catch {
         /* A missed history page must not block the portfolio. */
       }
       try {
         const rows = await receiptEntriesForOwner(key);
-        if (!cancelled && ownerRef.current?.toBase58() === key) setSnapshotEntries(rows);
+        if (!cancelled && ownerRef.current?.toBase58() === key && historyOwnerRef.current === key) {
+          setSnapshotEntries(rows);
+        }
       } catch {
         /* The snapshot loader already warns and skips. */
       }
-    })();
+    });
     return () => {
       cancelled = true;
       if (historyOwnerRef.current === key) historyOwnerRef.current = null;
+    };
+  }, [ownerKey, setCloses]);
+
+  useEffect(() => {
+    if (!ownerKey) return;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const stop = () => {
+      if (timer) clearInterval(timer);
+      timer = null;
+    };
+    const tick = () => {
+      const visible = typeof document !== "undefined" && document.visibilityState === "visible";
+      if (
+        historyRefreshDecision({
+          visible,
+          inFlight: historyQueueRef.current.inFlight,
+        }) !== "poll"
+      ) {
+        return;
+      }
+      if (historyOwnerRef.current !== ownerKey) return;
+      const current = ownerRef.current;
+      if (!current) return;
+      void historyQueueRef.current.enqueue(() => loadIncrementalRef.current(ownerKey, current));
+    };
+    const arm = () => {
+      stop();
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      timer = setInterval(tick, HISTORY_REFRESH_MS);
+    };
+    const onVisibility = () => {
+      if (typeof document === "undefined") return;
+      if (document.visibilityState === "visible") arm();
+      else stop();
+    };
+    arm();
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisibility);
+    }
+    return () => {
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisibility);
+      }
+      stop();
     };
   }, [ownerKey]);
 
@@ -953,13 +1047,16 @@ function usePredcaImpl() {
 
   const historyEntries = useMemo(() => {
     const card = entryFromCard(config);
-    return mergeHistory([
-      eventEntries,
-      entriesFromChain(runs, runPriceByIndex),
-      snapshotEntries,
-      card ? [card] : [],
-    ]);
-  }, [config, eventEntries, runs, runPriceByIndex, snapshotEntries]);
+    return mergeHistory(
+      [
+        eventEntries,
+        entriesFromChain(runs, runPriceByIndex),
+        snapshotEntries,
+        card ? [card] : [],
+      ],
+      closeMarks,
+    );
+  }, [config, eventEntries, runs, runPriceByIndex, snapshotEntries, closeMarks]);
 
   const historyBundle = useMemo(
     () => historyToLotInputs(historyEntries),
@@ -973,13 +1070,16 @@ function usePredcaImpl() {
 
   const historyOrigins = useMemo(() => {
     const out: Record<string, "auto" | "manual"> = {};
+    const current = closeMarks.length;
     for (const entry of historyEntries) {
-      if (entry.origin === "auto" || entry.origin === "manual") {
-        out[String(entry.runIndex)] = entry.origin;
-      }
+      if (entry.origin !== "auto" && entry.origin !== "manual") continue;
+      const bare = String(entry.runIndex);
+      const generation = entry.generation ?? 0;
+      out[`${generation}:${bare}`] = entry.origin;
+      if (current === 0 || generation === current) out[bare] = entry.origin;
     }
     return out;
-  }, [historyEntries]);
+  }, [historyEntries, closeMarks]);
 
   const lots = useMemo(() => {
     if (historyEntries.length === 0) return runLots(runSources(runs), runPriceByIndex);
@@ -1043,8 +1143,13 @@ function usePredcaImpl() {
       const dec = presence === "decoded" ? (runPriceByIndex.get(idx) ?? null) : null;
       return runToLastPurchase(purchaseRun, presence, dec);
     }
-    const presence = effectiveRunPricePresence(historyBundle.decoded, idx, ts, now);
-    const dec = presence === "decoded" ? (historyBundle.decoded.get(idx) ?? null) : null;
+    const generation =
+      "generation" in purchaseRun && typeof purchaseRun.generation === "number"
+        ? purchaseRun.generation
+        : 0;
+    const lotKey = historyLotKey({ runIndex: idx, generation });
+    const presence = effectiveRunPricePresence(historyBundle.decoded, lotKey, ts, now);
+    const dec = presence === "decoded" ? (historyBundle.decoded.get(lotKey) ?? null) : null;
     return runToLastPurchase(purchaseRun, presence, dec);
   }, [purchaseRun, historyEntries.length, runPriceByIndex, historyBundle]);
 
@@ -1943,25 +2048,36 @@ function usePredcaImpl() {
     return legs;
   }, [owner, mint, config, connection]);
 
-  async function rememberBuyEvent(signature: string): Promise<void> {
+  async function loadBuySignature(signature: string): Promise<void> {
     const current = ownerRef.current;
     if (!current) return;
     const key = current.toBase58();
+    if (historyOwnerRef.current !== key) return;
     try {
       const tx = await connection.getTransaction(signature, {
         maxSupportedTransactionVersion: 0,
         commitment: "confirmed",
       });
-      const rows = entriesFromTransaction(tx as HistoryTransaction | null, signature, key, programId());
+      if (ownerRef.current?.toBase58() !== key || historyOwnerRef.current !== key) return;
+      if (tx == null) return;
+      const parsed = tx as HistoryTransaction;
+      const rows = entriesFromTransaction(parsed, signature, key, programId());
+      const close = closeMarkFromTransaction(parsed, signature, programId());
       const storage = browserStorage();
       const cache = readHistoryCache(storage, key);
-      cache[signature] = rows;
+      cache.entries[signature] = rows;
+      if (close) cache.closes[signature] = { slot: close.slot, ts: close.ts ?? 0 };
       writeHistoryCache(storage, key, cache);
-      if (ownerRef.current?.toBase58() !== key) return;
-      setEventEntries((prev) => mergeHistory([prev, rows]));
+      if (rows.length > 0) setEventEntries((prev) => [...rows, ...prev]);
+      if (close) setCloses([...closeMarksRef.current, close]);
+      await loadIncrementalRef.current(key, current);
     } catch {
       /* The card or the chain row still shows this purchase. */
     }
+  }
+
+  function rememberBuyEvent(signature: string): void {
+    void historyQueueRef.current.enqueue(() => loadBuySignature(signature));
   }
 
   /**
@@ -2327,25 +2443,29 @@ function usePredcaImpl() {
     if (!current || historyPage.exhausted || !historyPage.oldest) return;
     const key = current.toBase58();
     const before = historyPage.oldest;
-    try {
-      const page = await fetchHistoryEvents({
-        connection: connection as HistoryConnection,
-        address: userConfigPda(current)[0],
-        owner: key,
-        programId: programId(),
-        storage: browserStorage(),
-        cap: HISTORY_PAGE_SIZE,
-        before,
-      });
-      if (ownerRef.current?.toBase58() !== key) return;
-      setEventEntries((prev) => mergeHistory([prev, page.entries]));
-      setHistoryPage({
-        exhausted: page.exhausted,
-        oldest: page.oldest ?? before,
-      });
-    } catch {
-      /* The button stays available. */
-    }
+    await historyQueueRef.current.enqueue(async () => {
+      if (historyOwnerRef.current !== key) return;
+      try {
+        const page = await fetchHistoryEvents({
+          connection: connectionRef.current as HistoryConnection,
+          address: userConfigPda(current)[0],
+          owner: key,
+          programId: programId(),
+          storage: browserStorage(),
+          cap: HISTORY_PAGE_SIZE,
+          before,
+        });
+        if (ownerRef.current?.toBase58() !== key || historyOwnerRef.current !== key) return;
+        if (page.entries.length > 0) setEventEntries((prev) => [...prev, ...page.entries]);
+        if (page.closes.length > 0) setCloses([...closeMarksRef.current, ...page.closes]);
+        setHistoryPage({
+          exhausted: page.exhausted,
+          oldest: page.oldest ?? before,
+        });
+      } catch {
+        /* The button stays available. */
+      }
+    });
   }
 
   async function readCloseRefundSol(): Promise<number> {
@@ -2454,6 +2574,9 @@ function usePredcaImpl() {
       setSnapshotEntries([]);
       setHistoryPage({ exhausted: true, oldest: null });
       historyOwnerRef.current = null;
+      historyNewestRef.current = null;
+      closeMarksRef.current = [];
+      setCloseMarks([]);
       accountUpdatingRef.current = false;
       setAccountUpdating(false);
       setAccountModeState("onboarding");

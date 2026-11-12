@@ -1,7 +1,9 @@
 /**
  * Purchase history from program events on the UserConfig account.
- * Signatures are paged by 100, capped on the first load. Parsed transactions
- * stay in localStorage and are not fetched again.
+ * Signatures are paged by 100, capped on the first load. A transaction is
+ * cached only after a real read. A timeout or a missing transaction is left
+ * out so the next refresh can try again. Cache key v2 drops the v1 file,
+ * which had no account generation and could store an empty miss.
  */
 
 import { BorshCoder, EventParser, type BN, type Idl } from "@coral-xyz/anchor";
@@ -11,6 +13,7 @@ import {
   originFromCode,
   originFromFeePayer,
   usdcEachFromEvent,
+  type CloseMark,
   type HistoryEntry,
   type HistoryOrigin,
 } from "@/lib/history-entry";
@@ -19,7 +22,11 @@ import { RPC_READ_TIMEOUT_MS, withTimeout } from "@/lib/rpc-timeout";
 export const HISTORY_PAGE_SIZE = 100;
 export const HISTORY_INITIAL_SIGNATURE_CAP = 500;
 export const HISTORY_TX_BATCH = 5;
-export const HISTORY_CACHE_PREFIX = "noir.historyEvents.v1";
+export const HISTORY_REFRESH_MS = 60_000;
+export const HISTORY_CACHE_PREFIX = "noir.historyEvents.v2";
+export const HISTORY_CACHE_LEGACY_PREFIX = "noir.historyEvents.v1";
+
+const CLOSE_USER_LOG = /instruction:\s*close_?user\b/i;
 
 const BUY_EVENTS = new Set([
   "BuyV4Executed",
@@ -34,7 +41,7 @@ export type SignaturePageRow = { signature: string };
 export type HistoryConnection = {
   getSignaturesForAddress(
     address: PublicKey,
-    options?: { before?: string; limit?: number },
+    options?: { before?: string; until?: string; limit?: number },
   ): Promise<ReadonlyArray<SignaturePageRow>>;
   getTransaction(
     signature: string,
@@ -42,24 +49,39 @@ export type HistoryConnection = {
   ): Promise<HistoryTransaction | null>;
 };
 
+export type HistoryInstruction = {
+  programIdIndex: number;
+  data?: Uint8Array | number[] | string;
+};
+
 export type HistoryTransaction = {
   slot?: number;
   blockTime?: number | null;
-  meta?: { logMessages?: string[] | null } | null;
+  meta?: { err?: unknown; logMessages?: string[] | null } | null;
   transaction?: {
     signatures?: string[];
     message?: {
-      staticAccountKeys?: PublicKey[];
+      staticAccountKeys?: Array<PublicKey | string>;
       accountKeys?: Array<PublicKey | string>;
+      compiledInstructions?: HistoryInstruction[];
+      instructions?: HistoryInstruction[];
     };
   };
 };
 
-type CacheFile = Record<string, HistoryEntry[]>;
+type CacheFile = {
+  entries: Record<string, HistoryEntry[]>;
+  closes: Record<string, { slot: number; ts: number }>;
+};
+
+function emptyCache(): CacheFile {
+  return { entries: {}, closes: {} };
+}
 
 export type HistoryCacheStorage = {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
+  removeItem?(key: string): void;
 };
 
 let coderCache: BorshCoder | null = null;
@@ -73,31 +95,62 @@ export function historyCacheKey(owner: string): string {
   return `${HISTORY_CACHE_PREFIX}.${owner}`;
 }
 
+export function historyCacheLegacyKey(owner: string): string {
+  return `${HISTORY_CACHE_LEGACY_PREFIX}.${owner}`;
+}
+
+function dropLegacyCache(storage: HistoryCacheStorage, owner: string): void {
+  const legacy = historyCacheLegacyKey(owner);
+  try {
+    if (storage.getItem(legacy) == null) return;
+    if (storage.removeItem) storage.removeItem(legacy);
+  } catch {
+    /* a stuck v1 file is ignored because reads use the v2 key */
+  }
+}
+
 export function readHistoryCache(storage: HistoryCacheStorage | null, owner: string): CacheFile {
-  if (!storage) return {};
+  if (!storage) return emptyCache();
+  dropLegacyCache(storage, owner);
   try {
     const raw = storage.getItem(historyCacheKey(owner));
-    if (!raw) return {};
+    if (!raw) return emptyCache();
     const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== "object") return {};
+    if (!parsed || typeof parsed !== "object") return emptyCache();
     return reviveCache(parsed as Record<string, unknown>);
   } catch {
-    return {};
+    return emptyCache();
   }
 }
 
 function reviveCache(raw: Record<string, unknown>): CacheFile {
-  const out: CacheFile = {};
-  for (const [signature, value] of Object.entries(raw)) {
+  const entriesRaw =
+    raw.entries && typeof raw.entries === "object"
+      ? (raw.entries as Record<string, unknown>)
+      : null;
+  if (!entriesRaw) return emptyCache();
+  const entries: Record<string, HistoryEntry[]> = {};
+  for (const [signature, value] of Object.entries(entriesRaw)) {
     if (!Array.isArray(value)) continue;
-    const entries: HistoryEntry[] = [];
+    const rows: HistoryEntry[] = [];
     for (const row of value) {
       const entry = reviveEntry(row);
-      if (entry) entries.push(entry);
+      if (entry) rows.push(entry);
     }
-    out[signature] = entries;
+    entries[signature] = rows;
   }
-  return out;
+  const closes: CacheFile["closes"] = {};
+  const closesRaw =
+    raw.closes && typeof raw.closes === "object"
+      ? (raw.closes as Record<string, unknown>)
+      : {};
+  for (const [signature, value] of Object.entries(closesRaw)) {
+    if (!value || typeof value !== "object") continue;
+    const mark = value as { slot?: unknown; ts?: unknown };
+    if (typeof mark.slot !== "number" || mark.slot < 0) continue;
+    closes[signature] = { slot: mark.slot, ts: typeof mark.ts === "number" ? mark.ts : 0 };
+  }
+  return { entries, closes };
 }
 
 function reviveEntry(row: unknown): HistoryEntry | null {
@@ -120,13 +173,15 @@ function reviveEntry(row: unknown): HistoryEntry | null {
     ts: typeof e.ts === "number" ? e.ts : 0,
     source: "event",
     priceKnown: e.priceKnown === true,
+    generation: typeof e.generation === "number" ? e.generation : undefined,
+    previousAccount: e.previousAccount === true,
   };
 }
 
 function cachePayload(file: CacheFile): string {
-  const plain: Record<string, unknown[]> = {};
-  for (const [signature, entries] of Object.entries(file)) {
-    plain[signature] = entries.map((entry) => ({
+  const entries: Record<string, unknown[]> = {};
+  for (const [signature, rows] of Object.entries(file.entries)) {
+    entries[signature] = rows.map((entry) => ({
       ...entry,
       amounts: entry.amounts.map(String),
       prices: entry.prices?.map(String),
@@ -135,7 +190,7 @@ function cachePayload(file: CacheFile): string {
       feeUsdc: entry.feeUsdc?.toString(),
     }));
   }
-  return JSON.stringify(plain);
+  return JSON.stringify({ entries, closes: file.closes });
 }
 
 export function writeHistoryCache(
@@ -144,6 +199,7 @@ export function writeHistoryCache(
   file: CacheFile,
 ): void {
   if (!storage) return;
+  dropLegacyCache(storage, owner);
   try {
     storage.setItem(historyCacheKey(owner), cachePayload(file));
   } catch {
@@ -154,14 +210,24 @@ export function writeHistoryCache(
 export function cachedHistoryEntries(storage: HistoryCacheStorage | null, owner: string): HistoryEntry[] {
   const file = readHistoryCache(storage, owner);
   const out: HistoryEntry[] = [];
-  for (const entries of Object.values(file)) out.push(...entries);
+  for (const entries of Object.values(file.entries)) out.push(...entries);
+  return out;
+}
+
+export function cachedCloseMarks(storage: HistoryCacheStorage | null, owner: string): CloseMark[] {
+  const file = readHistoryCache(storage, owner);
+  const out: CloseMark[] = [];
+  for (const [signature, mark] of Object.entries(file.closes)) {
+    out.push({ signature, slot: mark.slot, ts: mark.ts });
+  }
   return out;
 }
 
 export function clearHistoryCache(storage: HistoryCacheStorage | null, owner: string): void {
   if (!storage) return;
+  dropLegacyCache(storage, owner);
   try {
-    storage.setItem(historyCacheKey(owner), "{}");
+    storage.setItem(historyCacheKey(owner), cachePayload(emptyCache()));
   } catch {
     /* ignore */
   }
@@ -261,6 +327,8 @@ export function entryFromBuyEvent(
   signature: string,
 ): HistoryEntry | null {
   if (!BUY_EVENTS.has(name)) return null;
+  const eventOwner = asPubkey(field(data, "owner"));
+  if (eventOwner && eventOwner !== owner) return null;
   const mints = asArray(field(data, "mints")).map(asPubkey).filter((mint) => mint.length > 0);
   const amounts = asArray(field(data, "amounts")).map((value) => asBigint(value) ?? BigInt(0));
   const pricesRaw = field(data, "prices");
@@ -336,15 +404,100 @@ export function entriesFromTransaction(
   owner: string,
   program: PublicKey,
 ): HistoryEntry[] {
-  if (!tx) return [];
+  if (!tx || tx.meta?.err != null) return [];
   const logs = tx.meta?.logMessages ?? [];
-  return entriesFromLogs(logs, program, owner, feePayerOf(tx), signature);
+  const entries = entriesFromLogs(logs, program, owner, feePayerOf(tx), signature);
+  const slot = typeof tx.slot === "number" ? tx.slot : 0;
+  const ts = typeof tx.blockTime === "number" ? tx.blockTime : 0;
+  if (slot <= 0 && ts <= 0) return entries;
+  return entries.map((entry) => ({
+    ...entry,
+    slot: entry.slot > 0 ? entry.slot : slot,
+    ts: entry.ts > 0 ? entry.ts : ts,
+  }));
+}
+
+function programKey(key: PublicKey | string | undefined): string {
+  if (!key) return "";
+  return typeof key === "string" ? key : key.toBase58();
+}
+
+/** Anchor `Instruction: CloseUser` while our program is the current invoke. */
+export function logsContainCloseUser(logs: readonly string[], programId: PublicKey): boolean {
+  const want = programId.toBase58();
+  const stack: string[] = [];
+  for (const line of logs) {
+    const invoke = /^Program (\S+) invoke \[\d+\]/.exec(line);
+    if (invoke) {
+      stack.push(invoke[1]);
+      continue;
+    }
+    const done = /^Program (\S+) (?:success|failed)/.exec(line);
+    if (done) {
+      const at = stack.lastIndexOf(done[1]);
+      if (at >= 0) stack.splice(at, 1);
+      else if (stack.length > 0) stack.pop();
+      continue;
+    }
+    if (stack.at(-1) === want && CLOSE_USER_LOG.test(line)) return true;
+  }
+  return false;
+}
+
+function instructionBytes(data: HistoryInstruction["data"]): number[] | null {
+  if (data == null || typeof data === "string") return null;
+  if (data instanceof Uint8Array) return [...data.subarray(0, 8)];
+  if (Array.isArray(data)) return data.slice(0, 8).map((byte) => Number(byte));
+  return null;
+}
+
+function closeUserDiscriminator(): number[] {
+  const list = (idl as { instructions?: Array<{ name: string; discriminator?: number[] }> }).instructions;
+  return list?.find((item) => item.name === "close_user")?.discriminator ?? [];
+}
+
+function instructionIsCloseUser(tx: HistoryTransaction, program: PublicKey): boolean {
+  const message = tx.transaction?.message;
+  if (!message) return false;
+  const keys = message.staticAccountKeys ?? message.accountKeys ?? [];
+  const instructions = message.compiledInstructions ?? message.instructions ?? [];
+  const disc = closeUserDiscriminator();
+  if (disc.length !== 8) return false;
+  const want = program.toBase58();
+  for (const ix of instructions) {
+    if (programKey(keys[ix.programIdIndex]) !== want) continue;
+    const data = instructionBytes(ix.data);
+    if (!data || data.length < 8) continue;
+    if (disc.every((byte, index) => data[index] === byte)) return true;
+  }
+  return false;
+}
+
+/**
+ * Successful close of this owner's account. A failed transaction, including
+ * a failed close, does not count. Signatures are already the owner's account.
+ */
+export function closeMarkFromTransaction(
+  tx: HistoryTransaction | null,
+  signature: string,
+  program: PublicKey,
+): CloseMark | null {
+  if (!tx || tx.meta?.err != null) return null;
+  const logs = tx.meta?.logMessages ?? [];
+  if (!logsContainCloseUser(logs, program) && !instructionIsCloseUser(tx, program)) return null;
+  const slot = typeof tx.slot === "number" ? tx.slot : 0;
+  if (slot <= 0) return null;
+  const ts = typeof tx.blockTime === "number" ? tx.blockTime : 0;
+  return { slot, ts, signature };
 }
 
 export type HistoryPage = {
   entries: HistoryEntry[];
+  closes: CloseMark[];
   exhausted: boolean;
   oldest: string | null;
+  /** Newest signature in this page. Null when the page is empty. */
+  newest: string | null;
   /** Transactions actually requested. A cache hit is not a request. */
   fetched: number;
 };
@@ -361,6 +514,8 @@ export async function fetchHistoryEvents(args: {
   storage?: HistoryCacheStorage | null;
   cap?: number;
   before?: string;
+  /** Stop at this signature. Incremental refresh passes the newest one already stored. */
+  until?: string;
   timeoutMs?: number;
 }): Promise<HistoryPage> {
   const timeoutMs = args.timeoutMs ?? RPC_READ_TIMEOUT_MS;
@@ -371,6 +526,7 @@ export async function fetchHistoryEvents(args: {
         args.connection.getSignaturesForAddress(args.address, {
           limit,
           ...(before ? { before } : {}),
+          ...(args.until ? { until: args.until } : {}),
         }),
         timeoutMs,
         "history-sigs",
@@ -379,7 +535,7 @@ export async function fetchHistoryEvents(args: {
     HISTORY_PAGE_SIZE,
     args.before,
   );
-  const missing = signatures.filter((signature) => !(signature in cache));
+  const missing = signatures.filter((signature) => !(signature in cache.entries));
   let fetched = 0;
   for (let i = 0; i < missing.length; i += HISTORY_TX_BATCH) {
     const batch = missing.slice(i, i + HISTORY_TX_BATCH);
@@ -401,18 +557,71 @@ export async function fetchHistoryEvents(args: {
       }),
     );
     batch.forEach((signature, index) => {
-      const tx = txs[index];
-      cache[signature] = tx
-        ? entriesFromTransaction(tx, signature, args.owner, args.programId)
-        : [];
+      const tx = txs[index] ?? null;
+      // A timeout or a missing transaction is not a successful read.
+      if (tx == null) return;
+      const close = closeMarkFromTransaction(tx, signature, args.programId);
+      if (close) cache.closes[signature] = { slot: close.slot, ts: close.ts ?? 0 };
+      else delete cache.closes[signature];
+      cache.entries[signature] = entriesFromTransaction(tx, signature, args.owner, args.programId);
     });
   }
   writeHistoryCache(args.storage ?? null, args.owner, cache);
   const entries: HistoryEntry[] = [];
+  const closes: CloseMark[] = [];
   for (const signature of signatures) {
-    entries.push(...(cache[signature] ?? []));
+    entries.push(...(cache.entries[signature] ?? []));
+    const mark = cache.closes[signature];
+    if (mark) closes.push({ signature, slot: mark.slot, ts: mark.ts });
   }
-  return { entries, exhausted, oldest, fetched };
+  return { entries, closes, exhausted, oldest, newest: signatures[0] ?? null, fetched };
+}
+
+/** Visible tab and no refresh already running. Hidden or busy → skip. */
+export function historyRefreshDecision(input: { visible: boolean; inFlight: boolean }): "poll" | "skip" {
+  if (!input.visible || input.inFlight) return "skip";
+  return "poll";
+}
+
+/**
+ * Incremental signature query. `until` is the newest signature already stored,
+ * so the RPC returns only newer ones. Without it, the first load uses the cap.
+ */
+export function historyIncrementalQuery(newest: string | null | undefined): {
+  until?: string;
+  cap: number;
+} {
+  if (newest) return { until: newest, cap: HISTORY_INITIAL_SIGNATURE_CAP };
+  return { cap: HISTORY_INITIAL_SIGNATURE_CAP };
+}
+
+/** Serializes history reads so a poll cannot overlap a purchase refresh. */
+export function createHistoryRefreshQueue(): {
+  readonly inFlight: boolean;
+  enqueue(job: () => Promise<void>): Promise<void>;
+} {
+  let tail: Promise<void> = Promise.resolve();
+  let active = 0;
+  return {
+    get inFlight() {
+      return active > 0;
+    },
+    enqueue(job) {
+      const run = tail.then(async () => {
+        active += 1;
+        try {
+          await job();
+        } finally {
+          active -= 1;
+        }
+      });
+      tail = run.then(
+        () => undefined,
+        () => undefined,
+      );
+      return run;
+    },
+  };
 }
 
 /**

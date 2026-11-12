@@ -2,6 +2,8 @@
 export type RunOrderFields = {
   runIndex: unknown;
   ts: unknown;
+  /** Higher generation is a newer account. Omitted rows compare as 0. */
+  generation?: unknown;
 };
 
 function asNum(value: unknown): number {
@@ -19,8 +21,10 @@ function asNum(value: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-/** Newer first: higher runIndex, then higher ts. */
+/** Newer first: higher generation, then higher runIndex, then higher ts. */
 export function compareRunsNewestFirst(a: RunOrderFields, b: RunOrderFields): number {
+  const genDelta = asNum(b.generation) - asNum(a.generation);
+  if (genDelta !== 0) return genDelta;
   const indexDelta = asNum(b.runIndex) - asNum(a.runIndex);
   if (indexDelta !== 0) return indexDelta;
   return asNum(b.ts) - asNum(a.ts);

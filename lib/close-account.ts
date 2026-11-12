@@ -15,7 +15,7 @@ import {
   LS_WEEKLY_BUDGET,
   scopedLsKey,
 } from "@/lib/auto-weekly-buy";
-import { historyCacheKey } from "@/lib/history-events";
+import { historyCacheKey, historyCacheLegacyKey } from "@/lib/history-events";
 import { RUN_ORIGIN_LS_PREFIX } from "@/lib/run-origin";
 import { accountMode, type AccountMode } from "@/lib/user-config";
 
@@ -139,6 +139,7 @@ export function planCloseTransaction(
 export function clearClosedOwnerState(storage: Storage, owner: string): void {
   const exact = [
     historyCacheKey(owner),
+    historyCacheLegacyKey(owner),
     scopedLsKey(LS_AUTO_WEEKLY_BUY, owner),
     scopedLsKey(LS_AUTO_WEEKLY_META, owner),
     scopedLsKey(LS_WEEKLY_BUDGET, owner),

@@ -185,8 +185,8 @@ async function readSnapshot(
   const jsonUrl = snapshotUrl(basePath);
   const shaUrl = snapshotShaUrl(basePath);
   const [jsonResp, shaResp] = await Promise.all([
-    fetchImpl(jsonUrl, { cache: "force-cache" }),
-    fetchImpl(shaUrl, { cache: "force-cache" }),
+    fetchImpl(jsonUrl, { cache: "no-cache" }),
+    fetchImpl(shaUrl, { cache: "no-cache" }),
   ]);
   if (!jsonResp.ok || !shaResp.ok) {
     warnSkip("http");
