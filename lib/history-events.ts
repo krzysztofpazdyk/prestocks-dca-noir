@@ -496,11 +496,35 @@ export type HistoryPage = {
   closes: CloseMark[];
   exhausted: boolean;
   oldest: string | null;
-  /** Newest signature in this page. Null when the page is empty. */
+  /**
+   * Cursor to store. The newest signature when every getTransaction on this
+   * page succeeded (an empty buy list still counts). When any read is null,
+   * this is the previous cursor (`until`, or null) so the next poll retries
+   * the hole instead of stepping past it.
+   */
   newest: string | null;
   /** Transactions actually requested. A cache hit is not a request. */
   fetched: number;
 };
+
+/**
+ * Cursor after one page. Signatures are newest-first.
+ * `read` holds signatures whose getTransaction returned a transaction,
+ * including ones that were already cached and ones that yielded no buys.
+ * A null read anywhere keeps `previous`, so `until` cannot jump the gap.
+ * When the page is complete, the cursor is the newest signature.
+ */
+export function committedHistoryNewest(
+  signatures: readonly string[],
+  read: ReadonlySet<string>,
+  previous: string | null,
+): string | null {
+  if (signatures.length === 0) return previous;
+  for (const signature of signatures) {
+    if (!read.has(signature)) return previous;
+  }
+  return signatures[0] ?? previous;
+}
 
 /**
  * Load up to `cap` signatures and parse the ones that are not cached.
@@ -569,18 +593,54 @@ export async function fetchHistoryEvents(args: {
   writeHistoryCache(args.storage ?? null, args.owner, cache);
   const entries: HistoryEntry[] = [];
   const closes: CloseMark[] = [];
+  const read = new Set<string>();
   for (const signature of signatures) {
     entries.push(...(cache.entries[signature] ?? []));
+    if (signature in cache.entries) read.add(signature);
     const mark = cache.closes[signature];
     if (mark) closes.push({ signature, slot: mark.slot, ts: mark.ts });
   }
-  return { entries, closes, exhausted, oldest, newest: signatures[0] ?? null, fetched };
+  return {
+    entries,
+    closes,
+    exhausted,
+    oldest,
+    newest: committedHistoryNewest(signatures, read, args.until ?? null),
+    fetched,
+  };
 }
 
 /** Visible tab and no refresh already running. Hidden or busy → skip. */
 export function historyRefreshDecision(input: { visible: boolean; inFlight: boolean }): "poll" | "skip" {
   if (!input.visible || input.inFlight) return "skip";
   return "poll";
+}
+
+export type HistoryCursor = {
+  owner: string | null;
+  newest: string | null;
+};
+
+/**
+ * Poll and a just-confirmed buy stay off while the cursor has no owner.
+ * close_user clears it. The gap until the next initialize_user stays quiet.
+ */
+export function historyReadsArmed(cursor: Pick<HistoryCursor, "owner">, owner: string | null): boolean {
+  return owner != null && cursor.owner === owner;
+}
+
+/**
+ * Same wallet, cursor cleared by close, UserConfig exists again.
+ * The owner effect does not re-run, so this is the signal to load history.
+ * Onboarding (account not ready) stays false and the poll does not start.
+ */
+export function shouldReloadHistoryAfterInit(input: {
+  cursorOwner: string | null;
+  ownerKey: string | null;
+  accountReady: boolean;
+}): boolean {
+  if (!input.ownerKey || !input.accountReady) return false;
+  return input.cursorOwner !== input.ownerKey;
 }
 
 /**

@@ -61,7 +61,9 @@ import {
   entriesFromTransaction,
   fetchHistoryEvents,
   historyIncrementalQuery,
+  historyReadsArmed,
   historyRefreshDecision,
+  shouldReloadHistoryAfterInit,
   type HistoryConnection,
   type HistoryTransaction,
   readHistoryCache,
@@ -499,6 +501,9 @@ function usePredcaImpl() {
   const loadIncrementalRef = useRef<(key: string, ownerNow: PublicKey) => Promise<void>>(
     async () => {},
   );
+  const loadFullHistoryRef = useRef<
+    (key: string, ownerNow: PublicKey, isCancelled: () => boolean) => Promise<void>
+  >(async () => {});
   const closeMarksRef = useRef<CloseMark[]>([]);
   const [closeMarks, setCloseMarks] = useState<CloseMark[]>([]);
   const setCloses = useCallback((next: readonly CloseMark[]) => {
@@ -887,8 +892,51 @@ function usePredcaImpl() {
     };
   }, [refresh, accountUpdating]);
 
+  const historyArmed = (key: string) =>
+    historyReadsArmed({ owner: historyOwnerRef.current }, key);
+
+  loadFullHistoryRef.current = async (key, ownerNow, isCancelled) => {
+    if (isCancelled() || !historyArmed(key)) return;
+    const storage = browserStorage();
+    const cachedFile = readHistoryCache(storage, key);
+    const cachedEntries = Object.values(cachedFile.entries).flat();
+    const cachedCloses: CloseMark[] = Object.entries(cachedFile.closes).map(([signature, mark]) => ({
+      signature,
+      slot: mark.slot,
+      ts: mark.ts,
+    }));
+    if (ownerRef.current?.toBase58() !== key) return;
+    if (cachedEntries.length > 0) setEventEntries(cachedEntries);
+    if (cachedCloses.length > 0) setCloses(cachedCloses);
+    try {
+      const page = await fetchHistoryEvents({
+        connection: connectionRef.current as HistoryConnection,
+        address: userConfigPda(ownerNow)[0],
+        owner: key,
+        programId: programId(),
+        storage: browserStorage(),
+        cap: HISTORY_INITIAL_SIGNATURE_CAP,
+      });
+      if (isCancelled() || ownerRef.current?.toBase58() !== key || !historyArmed(key)) return;
+      setEventEntries(page.entries);
+      setHistoryPage({ exhausted: page.exhausted, oldest: page.oldest });
+      if (page.newest) historyNewestRef.current = page.newest;
+      setCloses([...cachedCloses, ...page.closes]);
+    } catch {
+      /* A missed history page must not block the portfolio. */
+    }
+    try {
+      const rows = await receiptEntriesForOwner(key);
+      if (!isCancelled() && ownerRef.current?.toBase58() === key && historyArmed(key)) {
+        setSnapshotEntries(rows);
+      }
+    } catch {
+      /* The snapshot loader already warns and skips. */
+    }
+  };
+
   loadIncrementalRef.current = async (key, ownerNow) => {
-    if (historyOwnerRef.current !== key) return;
+    if (!historyArmed(key)) return;
     const query = historyIncrementalQuery(historyNewestRef.current);
     const page = await fetchHistoryEvents({
       connection: connectionRef.current as HistoryConnection,
@@ -899,7 +947,7 @@ function usePredcaImpl() {
       cap: query.cap,
       ...(query.until ? { until: query.until } : {}),
     });
-    if (ownerRef.current?.toBase58() !== key || historyOwnerRef.current !== key) return;
+    if (ownerRef.current?.toBase58() !== key || !historyArmed(key)) return;
     if (page.newest) historyNewestRef.current = page.newest;
     if (page.entries.length > 0) setEventEntries((prev) => [...page.entries, ...prev]);
     if (page.closes.length > 0) setCloses([...closeMarksRef.current, ...page.closes]);
@@ -913,49 +961,47 @@ function usePredcaImpl() {
     historyOwnerRef.current = ownerKey;
     const key = ownerKey;
     let cancelled = false;
-    const storage = browserStorage();
-    const cachedFile = readHistoryCache(storage, key);
-    const cachedEntries = Object.values(cachedFile.entries).flat();
-    const cachedCloses: CloseMark[] = Object.entries(cachedFile.closes).map(([signature, mark]) => ({
-      signature,
-      slot: mark.slot,
-      ts: mark.ts,
-    }));
-    void historyQueueRef.current.enqueue(async () => {
-      if (cancelled || ownerRef.current?.toBase58() !== key) return;
-      if (cachedEntries.length > 0) setEventEntries(cachedEntries);
-      if (cachedCloses.length > 0) setCloses(cachedCloses);
-      try {
-        const page = await fetchHistoryEvents({
-          connection: connectionRef.current as HistoryConnection,
-          address: userConfigPda(current)[0],
-          owner: key,
-          programId: programId(),
-          storage: browserStorage(),
-          cap: HISTORY_INITIAL_SIGNATURE_CAP,
-        });
-        if (cancelled || ownerRef.current?.toBase58() !== key || historyOwnerRef.current !== key) return;
-        setEventEntries(page.entries);
-        setHistoryPage({ exhausted: page.exhausted, oldest: page.oldest });
-        if (page.newest) historyNewestRef.current = page.newest;
-        setCloses([...cachedCloses, ...page.closes]);
-      } catch {
-        /* A missed history page must not block the portfolio. */
-      }
-      try {
-        const rows = await receiptEntriesForOwner(key);
-        if (!cancelled && ownerRef.current?.toBase58() === key && historyOwnerRef.current === key) {
-          setSnapshotEntries(rows);
-        }
-      } catch {
-        /* The snapshot loader already warns and skips. */
-      }
-    });
+    void historyQueueRef.current.enqueue(() =>
+      loadFullHistoryRef.current(key, current, () => cancelled),
+    );
     return () => {
       cancelled = true;
       if (historyOwnerRef.current === key) historyOwnerRef.current = null;
     };
   }, [ownerKey, setCloses]);
+
+  // close_user clears the cursor without changing the wallet, so the effect
+  // above does not run again. A new UserConfig in this session arms it and
+  // reloads events plus the receipt snapshot. Onboarding stays idle, so the
+  // poll and a buy refresh do not run between close and init.
+  useEffect(() => {
+    const accountReady = accountModeState !== "onboarding";
+    if (
+      !shouldReloadHistoryAfterInit({
+        cursorOwner: historyOwnerRef.current,
+        ownerKey,
+        accountReady,
+      })
+    ) {
+      return;
+    }
+    const current = ownerRef.current;
+    if (!current || !ownerKey) return;
+    historyOwnerRef.current = ownerKey;
+    historyNewestRef.current = null;
+    const key = ownerKey;
+    let cancelled = false;
+    void historyQueueRef.current.enqueue(() =>
+      loadFullHistoryRef.current(key, current, () => cancelled),
+    );
+    return () => {
+      cancelled = true;
+      if (historyOwnerRef.current === key) {
+        historyOwnerRef.current = null;
+        historyNewestRef.current = null;
+      }
+    };
+  }, [ownerKey, accountModeState, setCloses]);
 
   useEffect(() => {
     if (!ownerKey) return;
@@ -974,7 +1020,7 @@ function usePredcaImpl() {
       ) {
         return;
       }
-      if (historyOwnerRef.current !== ownerKey) return;
+      if (!historyReadsArmed({ owner: historyOwnerRef.current }, ownerKey)) return;
       const current = ownerRef.current;
       if (!current) return;
       void historyQueueRef.current.enqueue(() => loadIncrementalRef.current(ownerKey, current));
@@ -2052,13 +2098,13 @@ function usePredcaImpl() {
     const current = ownerRef.current;
     if (!current) return;
     const key = current.toBase58();
-    if (historyOwnerRef.current !== key) return;
+    if (!historyReadsArmed({ owner: historyOwnerRef.current }, key)) return;
     try {
       const tx = await connection.getTransaction(signature, {
         maxSupportedTransactionVersion: 0,
         commitment: "confirmed",
       });
-      if (ownerRef.current?.toBase58() !== key || historyOwnerRef.current !== key) return;
+      if (ownerRef.current?.toBase58() !== key || !historyReadsArmed({ owner: historyOwnerRef.current }, key)) return;
       if (tx == null) return;
       const parsed = tx as HistoryTransaction;
       const rows = entriesFromTransaction(parsed, signature, key, programId());
@@ -2444,7 +2490,7 @@ function usePredcaImpl() {
     const key = current.toBase58();
     const before = historyPage.oldest;
     await historyQueueRef.current.enqueue(async () => {
-      if (historyOwnerRef.current !== key) return;
+      if (!historyReadsArmed({ owner: historyOwnerRef.current }, key)) return;
       try {
         const page = await fetchHistoryEvents({
           connection: connectionRef.current as HistoryConnection,
@@ -2455,7 +2501,7 @@ function usePredcaImpl() {
           cap: HISTORY_PAGE_SIZE,
           before,
         });
-        if (ownerRef.current?.toBase58() !== key || historyOwnerRef.current !== key) return;
+        if (ownerRef.current?.toBase58() !== key || !historyReadsArmed({ owner: historyOwnerRef.current }, key)) return;
         if (page.entries.length > 0) setEventEntries((prev) => [...prev, ...page.entries]);
         if (page.closes.length > 0) setCloses([...closeMarksRef.current, ...page.closes]);
         setHistoryPage({
@@ -2661,6 +2707,8 @@ function usePredcaImpl() {
     accountUpdating,
     accountMode: accountModeState,
     historyOrigins,
+    /** Close count. Fee rows that omit generation belong to this account. */
+    historyGeneration: closeMarks.length,
     historyHasOlder: !historyPage.exhausted && historyPage.oldest != null,
     showOlderHistory,
     closeAccount,

@@ -13,6 +13,7 @@ import {
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useKeeperSignMessage } from "@/components/PrivyWalletBridge";
 import { classifyDefer } from "@/lib/account-mode";
+import { type PurchaseFeeRow } from "@/lib/fee-display";
 import {
   clearStatusAuthCache,
   keeperDisable,
@@ -99,7 +100,7 @@ export type AutoWeeklyBuyApi = {
   /** Public status says the purchase fee is on. Unknown stays false. */
   feeEnabled: boolean;
   /** Recent runs from /public/status. Empty until a read succeeds. */
-  fees: { runIndex: number; feeUsd: number }[];
+  fees: PurchaseFeeRow[];
 };
 
 const AutoWeeklyBuyContext = createContext<AutoWeeklyBuyApi | null>(null);
@@ -141,7 +142,7 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
   }, []);
   const [statusChecked, setStatusChecked] = useState(false);
   const [feeEnabled, setFeeEnabled] = useState(false);
-  const [fees, setFees] = useState<{ runIndex: number; feeUsd: number }[]>([]);
+  const [fees, setFees] = useState<PurchaseFeeRow[]>([]);
 
   const ownerKey = publicKey?.toBase58() ?? null;
   // These eight follow the latest render. The copy is a layout effect, so

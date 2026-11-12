@@ -151,7 +151,12 @@ export function HistoryView() {
                   historyOrigin={predca.historyOrigins[`${generation}:${index}`] ?? null}
                   previousAccount={extras.previousAccount === true}
                   fillKey={historyFillKey(Number.isFinite(runIndex) ? runIndex : 0, generation)}
-                  feeUsd={feeUsdForRun(autoBuy.fees, run.runIndex.toString())}
+                  feeUsd={feeUsdForRun(
+                    autoBuy.fees,
+                    run.runIndex.toString(),
+                    generation,
+                    predca.historyGeneration,
+                  )}
                 />
               </li>
             );

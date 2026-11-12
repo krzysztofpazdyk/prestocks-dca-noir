@@ -4,6 +4,7 @@
  * A wallet signature is required only for enable, disable, and prefs.
  */
 
+import { type PurchaseFeeRow } from "@/lib/fee-display";
 import { readTypesafeKey } from "@/lib/keys";
 import {
   ensureRuntimeConfig,
@@ -67,7 +68,7 @@ export type KeeperRunResult = {
   /** USDC the vault still needs for this purchase, including the fee. */
   need?: number;
   /** Recent purchases: run index and the fee actually charged. Max 52. */
-  fees?: { runIndex: number; feeUsd: number }[];
+  fees?: PurchaseFeeRow[];
   /** Ranking prefs from the public status read. Never includes a Jev key. */
   prefs?: KeeperPrefsPayload;
   /** True when the keeper has a Jev key stored. The key itself is never returned. */
@@ -602,12 +603,10 @@ function pickPublicPrefs(raw: unknown): KeeperPrefsPayload | undefined {
   return prefs;
 }
 
-/** Last 52 runs. Only the index and the USDC fee. No lamports, no notes. */
-function pickPublicFees(
-  raw: unknown,
-): { runIndex: number; feeUsd: number }[] | undefined {
+/** Last 52 runs. Index, fee, and account generation when the status sent one. */
+function pickPublicFees(raw: unknown): PurchaseFeeRow[] | undefined {
   if (!Array.isArray(raw)) return undefined;
-  const out: { runIndex: number; feeUsd: number }[] = [];
+  const out: PurchaseFeeRow[] = [];
   for (const item of raw) {
     if (!item || typeof item !== "object") continue;
     const row = item as Record<string, unknown>;
@@ -615,7 +614,12 @@ function pickPublicFees(
     const feeUsd = row.feeUsd;
     if (typeof runIndex !== "number" || typeof feeUsd !== "number") continue;
     if (!Number.isFinite(runIndex) || !Number.isFinite(feeUsd)) continue;
-    out.push({ runIndex, feeUsd });
+    const next: PurchaseFeeRow = { runIndex, feeUsd };
+    const generation = row.generation;
+    if (typeof generation === "number" && Number.isInteger(generation) && generation >= 0) {
+      next.generation = generation;
+    }
+    out.push(next);
   }
   if (out.length === 0) return undefined;
   return out.length > 52 ? out.slice(-52) : out;
