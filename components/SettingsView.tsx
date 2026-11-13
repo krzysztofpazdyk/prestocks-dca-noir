@@ -70,6 +70,7 @@ import {
   writeWeeklyDraft,
 } from "@/lib/weekly-budget";
 import { useAutoWeeklyBuy } from "@/lib/hooks/useAutoWeeklyBuy";
+import { closeAccountUi } from "@/lib/close-account";
 import { useIsClient } from "@/lib/hooks/useIsClient";
 import {
   commitLatestRef,
@@ -127,6 +128,9 @@ export function SettingsView() {
   const [byokSaved, setByokSaved] = useState(false);
   const [hydratedOwner, setHydratedOwner] = useState<string | null>(null);
   const [autoConfirmOpen, setAutoConfirmOpen] = useState(false);
+  const [closeOpen, setCloseOpen] = useState(false);
+  const [closeRefund, setCloseRefund] = useState<number | null>(null);
+  const [closeBusy, setCloseBusy] = useState(false);
   const [syncedBaseline, setSyncedBaseline] = useState<PrefsEditBaseline | null>(
     null,
   );
@@ -506,6 +510,12 @@ export function SettingsView() {
   }
 
   const canSign = !!publicKey && !!signMessage;
+  const closeUi = closeAccountUi({
+    mode: predca.accountMode,
+    accountUpdating: predca.accountUpdating,
+    connected,
+  });
+  const closeDialogError = closeOpen ? predca.error : null;
   const autoBuyError =
     autoBuy.phase === "error" && autoBuy.message
       ? presentAutoBuyError(autoBuy.message, t)
@@ -673,7 +683,7 @@ export function SettingsView() {
             {budgetDirtyOnChain && connected && predca.mint ? (
               <button
                 type="button"
-                disabled={chainBusy || predca.status === "error" || !weeklyParsed.ok}
+                disabled={chainBusy || predca.status === "error" || !weeklyParsed.ok || predca.accountUpdating}
                 onClick={() => void saveWeeklyBudgetOnChain()}
                 className="w-full rounded border border-[#fbbf2466] bg-[#0c0e12] py-2 text-[10px] uppercase tracking-wider text-[#fbbf24] hover:bg-[#fbbf2411] disabled:opacity-40"
               >
@@ -687,7 +697,7 @@ export function SettingsView() {
             ) : null}
             <PrivySignWaitNotice />
             {budgetTxNotice(predca.pendingMsg, "pending")}
-            {budgetTxNotice(predca.error, "error")}
+            {budgetTxNotice(closeDialogError ? null : predca.error, "error")}
             {budgetTxNotice(predca.okMsg, "ok")}
             <div className="border-t border-[#1e2633] pt-4">
               {connected && !autoBuy.statusChecked ? (
@@ -905,6 +915,91 @@ export function SettingsView() {
               {byokSaved ? t("settings.keysSaved") : t("settings.saveKeys")}
             </button>
           </section>
+
+          {closeUi.visible ? (
+            <section className="space-y-3 rounded-lg border border-[#1e2633] bg-[#141820] p-5">
+              <h2 className="text-[11px] uppercase tracking-[0.15em] text-[#8b95a8]">
+                {t("settings.closeTitle")}
+              </h2>
+              <p className="text-xs leading-relaxed text-[#8b95a8]">{t("settings.closeBody")}</p>
+              <p className="text-xs leading-relaxed text-[#8b95a8]">{t("settings.closeTokensStay")}</p>
+              {closeUi.hintKey ? (
+                <p className="text-xs text-[#fbbf24]">{t(closeUi.hintKey)}</p>
+              ) : null}
+              <button
+                type="button"
+                disabled={!closeUi.enabled || closeBusy || predca.txPending}
+                onClick={() => {
+                  setCloseOpen(true);
+                  setCloseRefund(null);
+                  void predca.readCloseRefundSol().then((amount) => {
+                    if (Number.isFinite(amount)) setCloseRefund(amount);
+                  });
+                }}
+                className="w-full rounded border border-[#f8717166] bg-[#0c0e12] py-2 text-[10px] uppercase tracking-wider text-[#fca5a5] hover:bg-[#f8717111] disabled:opacity-40"
+              >
+                {t("settings.closeTitle")}
+              </button>
+            </section>
+          ) : null}
+
+          {closeOpen ? (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-[#0c0e12cc] px-4"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="close-account-title"
+              onClick={() => {
+                if (!closeBusy) setCloseOpen(false);
+              }}
+            >
+              <div
+                className="w-full max-w-md rounded-lg border border-[#f8717144] bg-[#141820] p-5"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h2 id="close-account-title" className="text-sm font-semibold text-[#e8eef5]">
+                  {t("settings.closeTitle")}
+                </h2>
+                <p className="mt-3 text-sm leading-relaxed text-[#c5cedb]">{t("settings.closeBody")}</p>
+                <p className="mt-2 text-sm leading-relaxed text-[#c5cedb]">{t("settings.closeTokensStay")}</p>
+                <p className="mt-3 text-sm text-[#e8eef5]">
+                  {t("settings.closeRefund", {
+                    amount:
+                      closeRefund == null
+                        ? "…"
+                        : formatGrouped(closeRefund, { min: 0, max: 8 }),
+                  })}
+                </p>
+                {closeDialogError ? (
+                  <p className="mt-3 text-xs text-[#fca5a5]">{closeDialogError}</p>
+                ) : null}
+                <div className="mt-5 flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    disabled={closeBusy}
+                    onClick={() => setCloseOpen(false)}
+                    className="rounded border border-[#1e2633] px-4 py-2 text-[10px] uppercase tracking-wider text-[#8b95a8] hover:text-[#e8eef5] disabled:opacity-40"
+                  >
+                    {t("settings.closeCancel")}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={closeBusy || !closeUi.enabled}
+                    onClick={() => {
+                      setCloseBusy(true);
+                      void predca.closeAccount(() => autoBuy.disableQuietly()).then((sig) => {
+                        setCloseBusy(false);
+                        if (sig) setCloseOpen(false);
+                      });
+                    }}
+                    className="rounded border border-[#f8717166] bg-[#0c0e12] px-4 py-2 text-[10px] uppercase tracking-wider text-[#fca5a5] hover:bg-[#f8717111] disabled:opacity-40"
+                  >
+                    {t("settings.closeConfirm")}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
     </div>
   );
 }

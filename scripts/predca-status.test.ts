@@ -26,10 +26,10 @@ import {
 const owner = new PublicKey("11111111111111111111111111111111");
 
 function programWith(
-  fetchNullable: (pda: unknown) => Promise<unknown>,
+  getAccountInfo: (pda: unknown, commitment?: unknown) => Promise<unknown>,
 ): Program<Predca> {
   return {
-    account: { userConfig: { fetchNullable } },
+    provider: { connection: { getAccountInfo } },
   } as unknown as Program<Predca>;
 }
 
@@ -44,7 +44,7 @@ test("fetchUserConfig rejects a real RPC error instead of returning null", async
   await assert.rejects(() => fetchUserConfig(program, owner), /failed to fetch/);
 });
 
-test("fetchUserConfig returns null when fetchNullable finds no account", async () => {
+test("fetchUserConfig returns null when getAccountInfo finds no account", async () => {
   const program = programWith(async () => null);
   assert.equal(await fetchUserConfig(program, owner), null);
 });

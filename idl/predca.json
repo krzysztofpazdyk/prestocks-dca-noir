@@ -8,6 +8,221 @@
   },
   "instructions": [
     {
+      "name": "close_price_feed",
+      "docs": [
+        "Close a PriceFeed. Signer is `config.authority`. Rent goes to `config.keeper`."
+      ],
+      "discriminator": [
+        4,
+        91,
+        255,
+        154,
+        47,
+        74,
+        139,
+        235
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "rent_receiver",
+          "writable": true
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "price_feed"
+          ]
+        },
+        {
+          "name": "price_feed",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  105,
+                  99,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "close_run_receipts",
+      "docs": [
+        "Close legacy RunRecord / RunPrice accounts. Rent goes to `config.keeper`."
+      ],
+      "discriminator": [
+        226,
+        38,
+        191,
+        4,
+        49,
+        51,
+        195,
+        134
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "rent_receiver",
+          "writable": true
+        },
+        {
+          "name": "owner"
+        },
+        {
+          "name": "user_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  115,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "close_user",
+      "docs": [
+        "Close the USDC vault (must be empty) and UserConfig. Rent goes to the owner."
+      ],
+      "discriminator": [
+        86,
+        219,
+        138,
+        140,
+        236,
+        24,
+        118,
+        200
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "user_config"
+          ]
+        },
+        {
+          "name": "user_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  115,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "deposit_usdc",
       "discriminator": [
         184,
@@ -1040,6 +1255,576 @@
       ]
     },
     {
+      "name": "execute_buy_v3",
+      "docs": [
+        "Keeper crank of a priced buy. `fee_usdc` is the keeper's cost quote for this buy.",
+        "The program caps it by `FeeConfig.max_fee_usdc` and `MAX_FEE_USDC`. Zero skips the transfer.",
+        "When `FeeConfig.enabled` is false the buy still runs, but only with `fee_usdc == 0`.",
+        "v2 is unchanged."
+      ],
+      "discriminator": [
+        143,
+        141,
+        130,
+        168,
+        63,
+        180,
+        10,
+        74
+      ],
+      "accounts": [
+        {
+          "name": "keeper",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "docs": [
+            "Global config: only config.keeper may crank."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner",
+          "relations": [
+            "user_config"
+          ]
+        },
+        {
+          "name": "user_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  115,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "usdc_mint",
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "fee_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "fee_usdc_ata",
+          "docs": [
+            "in `check_fee_ata` (same failures as the associated-token constraint plus mint)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "mint_auth",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint_a",
+          "writable": true
+        },
+        {
+          "name": "mint_b",
+          "writable": true
+        },
+        {
+          "name": "mint_c",
+          "writable": true
+        },
+        {
+          "name": "owner_ata_a",
+          "writable": true
+        },
+        {
+          "name": "owner_ata_b",
+          "writable": true
+        },
+        {
+          "name": "owner_ata_c",
+          "writable": true
+        },
+        {
+          "name": "run_record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  117,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "arg",
+                "path": "run_index"
+              }
+            ]
+          }
+        },
+        {
+          "name": "price_feed_a"
+        },
+        {
+          "name": "price_feed_b"
+        },
+        {
+          "name": "price_feed_c"
+        },
+        {
+          "name": "run_price",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "run_index",
+          "type": "u64"
+        },
+        {
+          "name": "mints",
+          "type": {
+            "array": [
+              "pubkey",
+              3
+            ]
+          }
+        },
+        {
+          "name": "signature_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "skip_cooldown",
+          "type": "bool"
+        },
+        {
+          "name": "fee_usdc",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "execute_buy_v4",
+      "docs": [
+        "Keeper crank of a priced buy. Writes the last-buy card. No RunRecord / RunPrice."
+      ],
+      "discriminator": [
+        228,
+        17,
+        252,
+        186,
+        61,
+        6,
+        45,
+        234
+      ],
+      "accounts": [
+        {
+          "name": "keeper",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "docs": [
+            "Global config: only config.keeper may crank."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner",
+          "relations": [
+            "user_config"
+          ]
+        },
+        {
+          "name": "user_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  115,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "usdc_mint",
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "fee_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "fee_usdc_ata",
+          "docs": [
+            "in `check_fee_ata` (same failures as the associated-token constraint plus mint)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "mint_auth",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint_a",
+          "writable": true
+        },
+        {
+          "name": "mint_b",
+          "writable": true
+        },
+        {
+          "name": "mint_c",
+          "writable": true
+        },
+        {
+          "name": "owner_ata_a",
+          "writable": true
+        },
+        {
+          "name": "owner_ata_b",
+          "writable": true
+        },
+        {
+          "name": "owner_ata_c",
+          "writable": true
+        },
+        {
+          "name": "price_feed_a"
+        },
+        {
+          "name": "price_feed_b"
+        },
+        {
+          "name": "price_feed_c"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "run_index",
+          "type": "u64"
+        },
+        {
+          "name": "mints",
+          "type": {
+            "array": [
+              "pubkey",
+              3
+            ]
+          }
+        },
+        {
+          "name": "signature_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "skip_cooldown",
+          "type": "bool"
+        },
+        {
+          "name": "fee_usdc",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "init_fee_config",
+      "docs": [
+        "Create the single fee-config PDA. Signer must be `config.authority`."
+      ],
+      "discriminator": [
+        212,
+        138,
+        200,
+        114,
+        73,
+        176,
+        7,
+        197
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "fee_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "max_fee_usdc",
+          "type": "u64"
+        },
+        {
+          "name": "fee_wallet",
+          "type": "pubkey"
+        },
+        {
+          "name": "enabled",
+          "type": "bool"
+        }
+      ]
+    },
+    {
       "name": "initialize_config",
       "discriminator": [
         208,
@@ -1167,6 +1952,96 @@
       ]
     },
     {
+      "name": "migrate_user",
+      "docs": [
+        "Realloc a 59-byte UserConfig to 305 B and write the last-buy card.",
+        "`payer` is the owner, `config.keeper`, or `config.authority`."
+      ],
+      "discriminator": [
+        159,
+        64,
+        64,
+        6,
+        80,
+        228,
+        54,
+        66
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner"
+        },
+        {
+          "name": "user_config",
+          "docs": [
+            "deserialize as the new UserConfig."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  115,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "last_record"
+        },
+        {
+          "name": "last_run_price"
+        },
+        {
+          "name": "next_record"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "last_run_index",
+          "type": {
+            "option": "u64"
+          }
+        }
+      ]
+    },
+    {
       "name": "record_run",
       "discriminator": [
         203,
@@ -1268,6 +2143,86 @@
               32
             ]
           }
+        }
+      ]
+    },
+    {
+      "name": "set_fee_config",
+      "docs": [
+        "Update the existing fee-config PDA. Signer must be `config.authority`."
+      ],
+      "discriminator": [
+        221,
+        222,
+        52,
+        206,
+        114,
+        198,
+        64,
+        91
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "fee_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "max_fee_usdc",
+          "type": "u64"
+        },
+        {
+          "name": "fee_wallet",
+          "type": "pubkey"
+        },
+        {
+          "name": "enabled",
+          "type": "bool"
         }
       ]
     },
@@ -2335,6 +3290,427 @@
       ]
     },
     {
+      "name": "simulate_buy_v3",
+      "docs": [
+        "Owner-signed priced buy. Writes the last-buy card. Does not touch last_run_ts."
+      ],
+      "discriminator": [
+        162,
+        19,
+        185,
+        19,
+        37,
+        139,
+        142,
+        119
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "user_config"
+          ]
+        },
+        {
+          "name": "user_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  115,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "usdc_mint",
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint_auth",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint_a",
+          "writable": true
+        },
+        {
+          "name": "mint_b",
+          "writable": true
+        },
+        {
+          "name": "mint_c",
+          "writable": true
+        },
+        {
+          "name": "owner_ata_a",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint_a"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "owner_ata_b",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint_b"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "owner_ata_c",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint_c"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "price_feed_a"
+        },
+        {
+          "name": "price_feed_b"
+        },
+        {
+          "name": "price_feed_c"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "run_index",
+          "type": "u64"
+        },
+        {
+          "name": "mints",
+          "type": {
+            "array": [
+              "pubkey",
+              3
+            ]
+          }
+        },
+        {
+          "name": "signature_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "withdraw_usdc",
       "discriminator": [
         114,
@@ -2418,6 +3794,19 @@
   ],
   "accounts": [
     {
+      "name": "FeeConfig",
+      "discriminator": [
+        143,
+        52,
+        146,
+        187,
+        219,
+        123,
+        76,
+        155
+      ]
+    },
+    {
       "name": "PriceFeed",
       "discriminator": [
         189,
@@ -2482,6 +3871,32 @@
         134,
         253,
         99
+      ]
+    },
+    {
+      "name": "BuyV3Executed",
+      "discriminator": [
+        170,
+        40,
+        155,
+        126,
+        82,
+        107,
+        131,
+        96
+      ]
+    },
+    {
+      "name": "BuyV4Executed",
+      "discriminator": [
+        143,
+        181,
+        92,
+        29,
+        170,
+        86,
+        70,
+        244
       ]
     },
     {
@@ -2604,6 +4019,56 @@
       "code": 6015,
       "name": "ZeroTokenAmount",
       "msg": "Token amount rounded to zero"
+    },
+    {
+      "code": 6016,
+      "name": "FeeTooHigh",
+      "msg": "Fee exceeds MAX_FEE_USDC"
+    },
+    {
+      "code": 6017,
+      "name": "FeeDisabled",
+      "msg": "Fee config not enabled"
+    },
+    {
+      "code": 6018,
+      "name": "InvalidFeeWallet",
+      "msg": "Fee wallet is the default pubkey"
+    },
+    {
+      "code": 6019,
+      "name": "RunIndexMismatch",
+      "msg": "Run index does not follow the card"
+    },
+    {
+      "code": 6020,
+      "name": "UserNotMigrated",
+      "msg": "UserConfig has not been migrated"
+    },
+    {
+      "code": 6021,
+      "name": "AlreadyMigrated",
+      "msg": "UserConfig is already migrated"
+    },
+    {
+      "code": 6022,
+      "name": "InstructionDeprecated",
+      "msg": "Instruction is deprecated"
+    },
+    {
+      "code": 6023,
+      "name": "VaultNotEmpty",
+      "msg": "Vault still holds tokens"
+    },
+    {
+      "code": 6024,
+      "name": "InvalidReceipt",
+      "msg": "Account is not a valid run receipt"
+    },
+    {
+      "code": 6025,
+      "name": "InvalidRentReceiver",
+      "msg": "Rent receiver must be the keeper"
     }
   ],
   "types": [
@@ -2676,6 +4141,206 @@
           {
             "name": "ts",
             "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "BuyV3Executed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "run_index",
+            "type": "u64"
+          },
+          {
+            "name": "mints",
+            "type": {
+              "array": [
+                "pubkey",
+                3
+              ]
+            }
+          },
+          {
+            "name": "amounts",
+            "type": {
+              "array": [
+                "u64",
+                3
+              ]
+            }
+          },
+          {
+            "name": "prices",
+            "type": {
+              "array": [
+                "u64",
+                3
+              ]
+            }
+          },
+          {
+            "name": "price_decimals",
+            "type": {
+              "array": [
+                "u8",
+                3
+              ]
+            }
+          },
+          {
+            "name": "usdc_burned",
+            "type": "u64"
+          },
+          {
+            "name": "fee_usdc",
+            "type": "u64"
+          },
+          {
+            "name": "signature_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "slot",
+            "type": "u64"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "BuyV4Executed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "run_index",
+            "type": "u64"
+          },
+          {
+            "name": "origin",
+            "type": "u8"
+          },
+          {
+            "name": "mints",
+            "type": {
+              "array": [
+                "pubkey",
+                3
+              ]
+            }
+          },
+          {
+            "name": "amounts",
+            "type": {
+              "array": [
+                "u64",
+                3
+              ]
+            }
+          },
+          {
+            "name": "prices",
+            "type": {
+              "array": [
+                "u64",
+                3
+              ]
+            }
+          },
+          {
+            "name": "price_decimals",
+            "type": {
+              "array": [
+                "u8",
+                3
+              ]
+            }
+          },
+          {
+            "name": "price_ts",
+            "type": {
+              "array": [
+                "i64",
+                3
+              ]
+            }
+          },
+          {
+            "name": "usdc_each",
+            "type": "u64"
+          },
+          {
+            "name": "usdc_burned",
+            "type": "u64"
+          },
+          {
+            "name": "fee_usdc",
+            "type": "u64"
+          },
+          {
+            "name": "signature_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "slot",
+            "type": "u64"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FeeConfig",
+      "docs": [
+        "Global fee configuration PDA. Seeds = [b\"fee_config\"].",
+        "One account. The per-buy amount is an argument of `execute_buy_v3`, not a stored constant.",
+        "`max_fee_usdc` is the admin cap and must stay <= `MAX_FEE_USDC`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "max_fee_usdc",
+            "type": "u64"
+          },
+          {
+            "name": "fee_wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "enabled",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
           }
         ]
       }
@@ -2964,6 +4629,92 @@
           },
           {
             "name": "vault_bump",
+            "type": "u8"
+          },
+          {
+            "name": "card_version",
+            "type": "u8"
+          },
+          {
+            "name": "has_last_run",
+            "type": "bool"
+          },
+          {
+            "name": "last_run_index",
+            "type": "u64"
+          },
+          {
+            "name": "last_buy_ts",
+            "type": "i64"
+          },
+          {
+            "name": "last_slot",
+            "type": "u64"
+          },
+          {
+            "name": "last_mints",
+            "type": {
+              "array": [
+                "pubkey",
+                3
+              ]
+            }
+          },
+          {
+            "name": "last_amounts",
+            "type": {
+              "array": [
+                "u64",
+                3
+              ]
+            }
+          },
+          {
+            "name": "last_prices",
+            "type": {
+              "array": [
+                "u64",
+                3
+              ]
+            }
+          },
+          {
+            "name": "last_price_decimals",
+            "type": {
+              "array": [
+                "u8",
+                3
+              ]
+            }
+          },
+          {
+            "name": "last_price_ts",
+            "type": {
+              "array": [
+                "i64",
+                3
+              ]
+            }
+          },
+          {
+            "name": "last_usdc_each",
+            "type": "u64"
+          },
+          {
+            "name": "last_fee_usdc",
+            "type": "u64"
+          },
+          {
+            "name": "last_signature_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "last_origin",
             "type": "u8"
           }
         ]

@@ -32,11 +32,15 @@ function fmtUnits(n: number): string {
   return formatGrouped(n, { max: 6 });
 }
 
+/** One purchase from the merged history, shown with the same layout as a chain RunRecord. */
 export function HistoryRunEntry({
   run,
   fills,
   quotes,
   origin,
+  historyOrigin,
+  previousAccount = false,
+  fillKey,
   feeUsd,
 }: {
   run: RunRecordData;
@@ -44,12 +48,19 @@ export function HistoryRunEntry({
   quotes: Record<string, JupQuote>;
   /** null while unknown or after an RPC miss. The line then has no suffix. */
   origin: RunOrigin | null;
+  /** Origin for this account generation. Wins over the shared run-index label. */
+  historyOrigin?: RunOrigin | null;
+  /** Closed account. Same list, no separate section. */
+  previousAccount?: boolean;
+  /** Fill row id. Defaults to the run index when the account was never closed. */
+  fillKey?: string;
   /** Charged fee for this run. Missing or zero hides the line. */
   feeUsd?: number;
 }) {
   const { t, locale } = useI18n();
   const feeText = historyFeeLabel(feeUsd, t);
-  const fill = fills.find((row) => row.runIndex === run.runIndex.toString());
+  const label = historyOrigin ?? (previousAccount ? null : origin);
+  const fill = fills.find((row) => row.runIndex === (fillKey ?? run.runIndex.toString()));
   const priceState = fill?.priceState ?? "unknown";
   const budget = runBudgetUsd(run, fill?.slots, priceState);
   const names = run.mints.map((m) => mintLabel(m, 6));
@@ -94,7 +105,7 @@ export function HistoryRunEntry({
               index: run.runIndex.toString(),
               slot: run.slot.toString(),
               budgetText: priceState === "unknown" ? null : formatUsd(budget ?? 0),
-              origin,
+              origin: label,
             })}
           </p>
           {runPnlText ? (
@@ -107,6 +118,11 @@ export function HistoryRunEntry({
             <span className="hidden md:col-start-3 md:block" aria-hidden="true" />
           )}
         </div>
+        {previousAccount ? (
+          <p className="mt-1 text-[10px] uppercase tracking-wider text-[#8b95a8]">
+            {t("history.previousAccount")}
+          </p>
+        ) : null}
         {feeText ? (
           <p className="mt-1 text-[10px] text-[#8b95a8]">{feeText}</p>
         ) : null}

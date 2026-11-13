@@ -201,8 +201,8 @@ test("fetchUserConfig and fetchRunPrices time out instead of hanging", async () 
     () =>
       fetchUserConfig(
         {
-          account: {
-            userConfig: { fetchNullable: () => new Promise(() => {}) },
+          provider: {
+            connection: { getAccountInfo: () => new Promise(() => {}) },
           },
         } as unknown as Parameters<typeof fetchUserConfig>[0],
         owner,

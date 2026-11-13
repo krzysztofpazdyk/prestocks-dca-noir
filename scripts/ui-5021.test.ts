@@ -93,7 +93,7 @@ test("on-chain budget uses the sign-and-save colors and both buttons are full wi
   assert.match(settingsSrc, /disabled=\{prefsSaving \|\| !canSign\}/);
   assert.match(
     settingsSrc,
-    /disabled=\{chainBusy \|\| predca\.status === "error" \|\| !weeklyParsed\.ok\}/,
+    /disabled=\{chainBusy \|\| predca\.status === "error" \|\| !weeklyParsed\.ok \|\| predca\.accountUpdating\}/,
   );
   assert.equal(translate("pl", "settings.prefsSignSave"), "Podpisz i zapisz");
   assert.equal(translate("en", "settings.prefsSignSave"), "Sign & save");
@@ -162,12 +162,12 @@ test("history no longer shows the entry count", () => {
   assert.match(values("history.loading")[1], /^Loading on-chain history/);
   assert.match(values("history.fetchError")[0], /Nie udało się pobrać historii/);
   assert.match(values("history.fetchError")[1], /Couldn't load history/);
-  assert.match(values("history.noRuns")[0], /Brak RunRecord on-chain/);
-  assert.match(values("history.noRuns")[1], /No on-chain RunRecord/);
+  assert.match(values("history.noRuns")[0], /Brak historii zakupów/);
+  assert.match(values("history.noRuns")[1], /No purchase history/);
 });
 
 test("v5.0.23 stays on the profit/loss section", () => {
-  assert.equal(APP_VERSION, "5.0.25");
+  assert.equal(APP_VERSION, "5.0.26");
   const pnl = overviewSrc.slice(
     overviewSrc.indexOf("function PnlSection"),
     overviewSrc.indexOf("function PositionsCard"),

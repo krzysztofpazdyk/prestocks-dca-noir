@@ -8,7 +8,8 @@
  *
  * `usdc_spent_each` is one raw USDC amount (6 decimals) spent on each of the
  * three legs. `prices[i]` is USD per one whole token, scaled by 10^price_decimals[i].
- * Token amounts live on RunRecord.amounts, not here.
+ * Token amounts live on the purchase row (RunRecord.amounts, or the same field on an event).
+ * `fetchRunPrices` stays one history source beside events, the static snapshot, and the card.
  * Lot price prefers the on-chain price; otherwise usdc spent / token amount.
  */
 

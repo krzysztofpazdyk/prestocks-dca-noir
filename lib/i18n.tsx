@@ -116,7 +116,7 @@ const pl: Dict = {
   "predca.status.no_mint": "brak mint",
   "predca.status.disconnected": "brak portfela",
   "predca.status.error": "błąd",
-  "predca.lastRun": "Ostatni RunRecord on-chain",
+  "predca.lastRun": "Ostatni zakup",
   "predca.runMintAddress": "Adres mintu: {mint}",
 
   "tile.sol": "SOL",
@@ -127,7 +127,7 @@ const pl: Dict = {
   "holdings.titleOffline": "Alokacja holdings (offline)",
   "holdings.titleDisconnected": "Alokacja holdings",
   "holdings.emptyConnected":
-    "Brak niezerowych sald PreStock — wykonaj zakup (simulate_buy_v2) lub czekaj na mint.",
+    "Brak niezerowych sald PreStock — wykonaj zakup lub czekaj na mint.",
   "holdings.empty": "Brak holdings.",
   "holdings.emptyDisconnected": "Podłącz portfel, by zobaczyć holdings on-chain.",
   "holdings.allocation": "alokacja",
@@ -185,7 +185,7 @@ const pl: Dict = {
   "tx.ok.buyConfirmed": "Zakup on-chain potwierdzony: ${amount} z vault.",
   "tx.ok.buyConfirmedShort": "Zakup on-chain potwierdzony.",
   "tx.ok.simulateBuy":
-    "Zakup on-chain (simulate_buy_v2): ${amount} z vault → ⅓ na {names}.{preview}",
+    "Zakup on-chain: ${amount} z vault → ⅓ na {names}.{preview}",
   "tx.buyPreviewLeg": "≈ {tokens} {name} po ${price}",
   "tx.err.noBuyIx": "Brak instrukcji zakupu.",
   "tx.err.rejected": "Transakcja odrzucona. {signature}",
@@ -257,7 +257,7 @@ const pl: Dict = {
   "auto.error.predca.6001": "Kwota musi być większa od zera.",
   "auto.error.predca.6002": "Niewystarczające saldo w vault.",
   "auto.error.predca.6003": "Nieprawidłowy budżet tygodniowy (musi być > 0).",
-  "auto.error.predca.6004": "Indeks RunRecord zajęty. Spróbuj ponownie.",
+  "auto.error.predca.6004": "Ten numer zakupu jest zajęty. Spróbuj ponownie.",
   "auto.error.predca.6005": "Mint authority musi być PDA mint_auth programu.",
   "auto.error.predca.6006": "Mint nie zgadza się z kontem w instrukcji.",
   "auto.error.predca.6007": "Duplikaty mintów w top-3.",
@@ -359,9 +359,9 @@ const pl: Dict = {
 
   "history.title": "Historia",
   "history.connectHint":
-    "Podłącz portfel, aby zobaczyć historię zakupów (RunRecord) z Predca.",
+    "Podłącz portfel, aby zobaczyć historię zakupów.",
   "history.noRuns":
-    "Brak RunRecord on-chain — wykonaj pierwszy zakup (simulate_buy_v2) lub poczekaj na record_run.",
+    "Brak historii zakupów — wykonaj pierwszy zakup.",
   "history.notReady":
     "Predca nie jest gotowe — wpłać USDC na Overview, potem pojawią się przebiegi.",
   "history.fetchError": "Nie udało się pobrać historii",
@@ -375,6 +375,21 @@ const pl: Dict = {
   "history.legPnl": "teraz {value} · {pnl}",
   "history.runPnl": "PnL: {pnl}",
   "history.fee": "opłata {fee} USD",
+  "history.showOlder": "Pokaż starsze",
+  "history.previousAccount": "poprzednie konto",
+  "account.updating":
+    "Aktualizujemy Twoje konto. Wpłaty, wypłaty i zakupy wrócą za chwilę. Środki są bezpieczne.",
+  "tx.err.runIndexMoved":
+    "Inny zakup właśnie się zakończył. Odśwież i spróbuj ponownie.",
+  "tx.err.vaultNotEmpty": "W vaultcie zostały środki. Odśwież i spróbuj ponownie.",
+  "settings.closeTitle": "Zamknij konto",
+  "settings.closeBody":
+    "Wszystkie USDC z vaultu wrócą do portfela. Konto i vault zostaną zamknięte, a opłata za ich utworzenie wróci do portfela.",
+  "settings.closeRefund": "zwrot opłaty za konto: {amount} SOL",
+  "settings.closeTokensStay": "Tokeny zostają w Twoim portfelu.",
+  "settings.closeConfirm": "Zamknij konto",
+  "settings.closeCancel": "Anuluj",
+  "settings.closeAfterUpdate": "Dostępne po aktualizacji konta",
 
   "positions.title": "Pozycje",
   "positions.col.asset": "Aktywo",
@@ -449,7 +464,7 @@ const pl: Dict = {
   "tx.err.budgetPositive": "Budżet tygodniowy musi być > 0.",
   "tx.err.missingMints": "Brak mapowania mint dla: {names}.",
   "tx.err.needThreeMints": "Potrzebne dokładnie 3 tokeny top-3 z mapowaniem mint.",
-  "tx.err.noFreeRunIndex": "Brak wolnego indeksu RunRecord (limit skanu). Odśwież i spróbuj ponownie.",
+  "tx.err.noFreeRunIndex": "Brak wolnego numeru zakupu (limit skanu). Odśwież i spróbuj ponownie.",
   "tx.err.buyInFlight": "Zakup już w toku.",
   "tx.err.invalidAmount": "Nieprawidłowa kwota",
   "tx.err.unknown": "Nieznany błąd",
@@ -587,7 +602,7 @@ const en: Dict = {
   "predca.status.no_mint": "no mint",
   "predca.status.disconnected": "no wallet",
   "predca.status.error": "error",
-  "predca.lastRun": "Last RunRecord on-chain",
+  "predca.lastRun": "Last purchase",
   "predca.runMintAddress": "Mint address: {mint}",
 
   "tile.sol": "SOL",
@@ -598,7 +613,7 @@ const en: Dict = {
   "holdings.titleOffline": "Holdings allocation (offline)",
   "holdings.titleDisconnected": "Holdings allocation",
   "holdings.emptyConnected":
-    "No non-zero PreStock balances — run a buy (simulate_buy_v2) or wait for the mint.",
+    "No non-zero PreStock balances — run a buy or wait for the mint.",
   "holdings.empty": "No holdings.",
   "holdings.emptyDisconnected": "Connect wallet to see on-chain holdings.",
   "holdings.allocation": "allocation",
@@ -656,7 +671,7 @@ const en: Dict = {
   "tx.ok.buyConfirmed": "On-chain purchase confirmed: ${amount} from the vault.",
   "tx.ok.buyConfirmedShort": "On-chain purchase confirmed.",
   "tx.ok.simulateBuy":
-    "On-chain purchase (simulate_buy_v2): ${amount} from the vault → ⅓ across {names}.{preview}",
+    "On-chain purchase: ${amount} from the vault → ⅓ across {names}.{preview}",
   "tx.buyPreviewLeg": "≈ {tokens} {name} at ${price}",
   "tx.err.noBuyIx": "No purchase instruction.",
   "tx.err.rejected": "Transaction rejected. {signature}",
@@ -728,7 +743,7 @@ const en: Dict = {
   "auto.error.predca.6001": "The amount must be greater than zero.",
   "auto.error.predca.6002": "Not enough balance in the vault.",
   "auto.error.predca.6003": "The weekly budget is invalid.",
-  "auto.error.predca.6004": "That purchase slot is taken. Try again.",
+  "auto.error.predca.6004": "That purchase number is taken. Try again.",
   "auto.error.predca.6005": "The mint authority is invalid.",
   "auto.error.predca.6006": "The mint does not match the account.",
   "auto.error.predca.6007": "The top 3 contains duplicate mints.",
@@ -830,9 +845,9 @@ const en: Dict = {
 
   "history.title": "History",
   "history.connectHint":
-    "Connect your wallet to see purchase history (RunRecord) from Predca.",
+    "Connect your wallet to see purchase history.",
   "history.noRuns":
-    "No on-chain RunRecord yet — make a purchase (simulate_buy_v2) or wait for record_run.",
+    "No purchase history yet — make a first purchase.",
   "history.notReady":
     "Predca is not ready — deposit USDC on Overview, then runs will appear.",
   "history.fetchError": "Couldn't load history",
@@ -846,6 +861,21 @@ const en: Dict = {
   "history.legPnl": "now {value} · {pnl}",
   "history.runPnl": "P/L: {pnl}",
   "history.fee": "fee {fee} USD",
+  "history.showOlder": "Show older",
+  "history.previousAccount": "previous account",
+  "account.updating":
+    "We are updating your account. Deposits, withdrawals and buys will be back shortly. Your funds are safe.",
+  "tx.err.runIndexMoved":
+    "Another purchase just finished. Refresh and try again.",
+  "tx.err.vaultNotEmpty": "The vault still holds funds. Refresh and try again.",
+  "settings.closeTitle": "Close account",
+  "settings.closeBody":
+    "All USDC from the vault returns to your wallet. The account and the vault will be closed, and the fee paid to create them returns to your wallet.",
+  "settings.closeRefund": "account fee refund: {amount} SOL",
+  "settings.closeTokensStay": "Tokens stay in your wallet.",
+  "settings.closeConfirm": "Close account",
+  "settings.closeCancel": "Cancel",
+  "settings.closeAfterUpdate": "Available after the account update",
 
   "positions.title": "Positions",
   "positions.col.asset": "Asset",
@@ -920,7 +950,7 @@ const en: Dict = {
   "tx.err.budgetPositive": "Weekly budget must be > 0.",
   "tx.err.missingMints": "No mint mapping for: {names}.",
   "tx.err.needThreeMints": "Exactly 3 top-3 tokens with a mint mapping are required.",
-  "tx.err.noFreeRunIndex": "No free RunRecord index (scan limit). Refresh and try again.",
+  "tx.err.noFreeRunIndex": "No free purchase number (scan limit). Refresh and try again.",
   "tx.err.buyInFlight": "A purchase is already in progress.",
   "tx.err.invalidAmount": "Invalid amount",
   "tx.err.unknown": "Unknown error",

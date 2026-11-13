@@ -20,8 +20,10 @@ import {
   RPC_READ_TIMEOUT_MS,
   withTimeout,
 } from "@/lib/rpc-timeout";
+import { isVaultNotEmpty } from "@/lib/account-mode";
 import { shown, translate } from "@/lib/i18n";
 import { formatDollars } from "@/lib/number-format";
+import { decodeUserConfig, type UserCard } from "@/lib/user-config";
 import { textKeepingSignature } from "@/lib/vault-follow-up";
 
 export const DEFAULT_PROGRAM_ID =
@@ -238,6 +240,11 @@ export type UserConfigData = {
   lastRunTs: BN;
   bump: number;
   vaultBump: number;
+  /** Byte length. 59 = legacy, 305 = card. Absent on fixtures built before 5.0.26. */
+  size?: number;
+  /** True only for a 59-byte account. */
+  legacy?: boolean;
+  card?: UserCard;
 };
 
 export type RunRecordData = {
@@ -312,19 +319,34 @@ export function isRpcDisconnect(err: unknown, msg: string): boolean {
   );
 }
 
+/**
+ * Raw account bytes. `program.account.userConfig.fetch*` cannot decode a
+ * 59-byte account with the 305-byte IDL, so it is not used.
+ */
 export async function fetchUserConfig(
   program: Program<Predca>,
   owner: PublicKey,
   timeoutMs?: number,
 ): Promise<UserConfigData | null> {
   const [pda] = userConfigPda(owner);
-  const pending = program.account.userConfig.fetchNullable(pda);
-  const acc =
+  const pending = program.provider.connection.getAccountInfo(pda, "confirmed");
+  const info =
     timeoutMs == null
       ? await pending
       : await withTimeout(pending, timeoutMs, "userConfig");
-  if (!acc) return null;
-  return acc as unknown as UserConfigData;
+  if (!info) return null;
+  const decoded = decodeUserConfig(Uint8Array.from(info.data));
+  return {
+    owner: decoded.owner,
+    weeklyBudgetUsdc: decoded.weeklyBudgetUsdc,
+    excludeFlags: decoded.excludeFlags,
+    lastRunTs: decoded.lastRunTs,
+    bump: decoded.bump,
+    vaultBump: decoded.vaultBump,
+    size: decoded.size,
+    legacy: decoded.legacy,
+    card: decoded.card,
+  };
 }
 
 export async function fetchVaultBalance(
@@ -397,9 +419,16 @@ const RUN_RECORD_BATCH = 100;
 export const RUN_INDEX_TAKEN_MSG = translate("pl", "auto.error.predca.6004");
 
 /** Run-index collision copy in Polish, English, or the sentence saved earlier. */
+/** Sentence saved before the neutral wording. Still recognized. */
+const LEGACY_RUN_INDEX_TAKEN_MSG = "Indeks RunRecord zajęty. Spróbuj ponownie.";
+
 export function isRunIndexTakenMessage(text: string): boolean {
   const raw = text.trim();
-  return raw === RUN_INDEX_TAKEN_MSG || raw === translate("en", "auto.error.predca.6004");
+  return (
+    raw === RUN_INDEX_TAKEN_MSG ||
+    raw === translate("en", "auto.error.predca.6004") ||
+    raw === LEGACY_RUN_INDEX_TAKEN_MSG
+  );
 }
 
 /** Index of the first null slot. `start` is the on-chain index of slots[0]. */
@@ -507,6 +536,7 @@ export function formatTs(ts: BN | number): string {
 
 export function parseAnchorError(err: unknown): string {
   if (err == null) return shown("tx.err.unknown");
+  if (isVaultNotEmpty(err)) return shown("tx.err.vaultNotEmpty");
   const e = err as {
     error?: { errorCode?: { number?: number; code?: string }; errorMessage?: string };
     message?: string;

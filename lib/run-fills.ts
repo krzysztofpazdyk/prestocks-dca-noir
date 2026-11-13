@@ -1,4 +1,6 @@
 /**
+ * Purchase × price slots for History.
+ * The hook feeds merged history (event, then chain RunRecord+RunPrice, then snapshot, then card).
  * RunRecord × RunPrice slots for History.
  * Confirmed missing account → slots null, legacy 1:1.
  * Unknown (no map entry, failed read, or a young unconfirmed account) must not

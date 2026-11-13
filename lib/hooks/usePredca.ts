@@ -26,6 +26,52 @@ import {
   tryEnterManualBuy,
 } from "@/lib/manual-buy-guard";
 import {
+  ACCOUNT_UPDATE_POLL_MS,
+  isAccountUpdatingError,
+  isRunIndexMismatch,
+} from "@/lib/account-mode";
+import { ZERO_SIGNATURE_HASH, retryCardBuy } from "@/lib/card-buy";
+import {
+  buildCloseInstructions,
+  clearClosedOwnerState,
+  closeAccounts,
+  closeTransaction,
+  modeOfConfig,
+  planCloseTransaction,
+  accountFeeRefundSol,
+} from "@/lib/close-account";
+import {
+  entryFromCard,
+  entryToRunRecord,
+  entriesFromChain,
+  historyLotKey,
+  historyToFillRuns,
+  historyToLotInputs,
+  mergeHistory,
+  normalizeCloses,
+  type CloseMark,
+  type HistoryEntry,
+} from "@/lib/history-entry";
+import {
+  HISTORY_INITIAL_SIGNATURE_CAP,
+  HISTORY_PAGE_SIZE,
+  HISTORY_REFRESH_MS,
+  closeMarkFromTransaction,
+  createHistoryRefreshQueue,
+  entriesFromTransaction,
+  fetchHistoryEvents,
+  historyIncrementalQuery,
+  historyReadsArmed,
+  historyRefreshDecision,
+  shouldReloadHistoryAfterInit,
+  type HistoryConnection,
+  type HistoryTransaction,
+  readHistoryCache,
+  writeHistoryCache,
+} from "@/lib/history-events";
+import { receiptEntriesForOwner } from "@/lib/receipts-snapshot";
+import { nextCardRunIndex, type AccountMode } from "@/lib/user-config";
+import {
   CHAIN_POLL_MS,
   buyRefreshSettled,
   chainPollDecision,
@@ -143,7 +189,9 @@ import {
   readVaultOrNull,
   formatTs,
   getProgram,
+  isMissingAccountError,
   isRunAlreadyExists,
+  programId,
   resolveVaultBalanceForBuy,
   ownerUsdcAta,
   parseAnchorError,
@@ -151,6 +199,8 @@ import {
   rawToDollars,
   runPricePda,
   usdcMintOrNull,
+  userConfigPda,
+  vaultPda,
   type RunRecordData,
   type TokenBalanceRead,
 } from "@/lib/predca";
@@ -215,7 +265,7 @@ function runSources(runs: RunRecordData[]): RunLotSource[] {
 function runToLastPurchase(
   run: RunRecordData,
   presence: RunPricePresence,
-  dec: DecodedRunPrice | null,
+  dec: { usdcSpentEach?: bigint | number } | null,
 ): OnChainLastPurchase {
   const tokenAmounts = run.amounts.map((a) => rawToDollars(a));
   const tokens = run.mints.map((m) => mintLabel(m));
@@ -230,9 +280,10 @@ function runToLastPurchase(
       ? (run.runIndex as BN).toNumber()
       : Number(run.runIndex ?? 0);
   const priceKnown = presence !== "unknown";
+  const spentRaw = dec?.usdcSpentEach;
   const spent =
-    priceKnown && dec && dec.usdcSpentEach > BigInt(0)
-      ? Number(dec.usdcSpentEach) / 1e6
+    priceKnown && spentRaw != null && BigInt(spentRaw) > BigInt(0)
+      ? Number(spentRaw) / 1e6
       : null;
   const amountUsd = !priceKnown
     ? 0
@@ -428,7 +479,38 @@ function usePredcaImpl() {
   const flightGen = useRef(0);
   const txPendingRef = useRef(false);
   const loadingRef = useRef(false);
-  const buyExpectRef = useRef<{ prevRunCount: number; runIndex: number } | null>(null);
+  const buyExpectRef = useRef<{
+    prevRunCount: number;
+    runIndex: number;
+    mode?: "card" | "legacy";
+    signatureHash?: Uint8Array;
+  } | null>(null);
+  const legacyRef = useRef(false);
+  const accountUpdatingRef = useRef(false);
+  const [accountUpdating, setAccountUpdating] = useState(false);
+  const [accountModeState, setAccountModeState] = useState<AccountMode>("onboarding");
+  const [eventEntries, setEventEntries] = useState<HistoryEntry[]>([]);
+  const [snapshotEntries, setSnapshotEntries] = useState<HistoryEntry[]>([]);
+  const [historyPage, setHistoryPage] = useState<{ exhausted: boolean; oldest: string | null }>({
+    exhausted: true,
+    oldest: null,
+  });
+  const historyOwnerRef = useRef<string | null>(null);
+  const historyNewestRef = useRef<string | null>(null);
+  const historyQueueRef = useRef(createHistoryRefreshQueue());
+  const loadIncrementalRef = useRef<(key: string, ownerNow: PublicKey) => Promise<void>>(
+    async () => {},
+  );
+  const loadFullHistoryRef = useRef<
+    (key: string, ownerNow: PublicKey, isCancelled: () => boolean) => Promise<void>
+  >(async () => {});
+  const closeMarksRef = useRef<CloseMark[]>([]);
+  const [closeMarks, setCloseMarks] = useState<CloseMark[]>([]);
+  const setCloses = useCallback((next: readonly CloseMark[]) => {
+    const merged = normalizeCloses(next);
+    closeMarksRef.current = merged;
+    setCloseMarks(merged);
+  }, []);
   const txVaultRef = useRef<{
     epoch: number;
     before: number | null;
@@ -458,6 +540,8 @@ function usePredcaImpl() {
   const owner = wallet?.publicKey ?? null;
   ownerRef.current = owner;
   const ownerKey = owner?.toBase58() ?? null;
+  const connectionRef = useRef(connection);
+  connectionRef.current = connection;
 
   useEffect(() => {
     const prev = seenOwnerKey.current;
@@ -471,6 +555,17 @@ function usePredcaImpl() {
     reportError(null);
     setSnapshot(EMPTY_SNAPSHOT);
     setRunPriceByIndex(new Map());
+    setEventEntries([]);
+    setSnapshotEntries([]);
+    setHistoryPage({ exhausted: true, oldest: null });
+    historyOwnerRef.current = null;
+    historyNewestRef.current = null;
+    closeMarksRef.current = [];
+    setCloseMarks([]);
+    legacyRef.current = false;
+    accountUpdatingRef.current = false;
+    setAccountUpdating(false);
+    setAccountModeState("onboarding");
     unresolvedRef.current = [];
     setUnresolvedTxs([]);
     setSessionChecking(new Set());
@@ -529,6 +624,13 @@ function usePredcaImpl() {
       if (partial.tokenRead.status === "error") {
         throw new Error(partial.tokenRead.detail ?? "token balance read failed");
       }
+      const modeNow = modeOfConfig(partial.config);
+      legacyRef.current = modeNow === "legacy";
+      if (modeNow === "card") {
+        accountUpdatingRef.current = false;
+        setAccountUpdating(false);
+      }
+      setAccountModeState(modeNow);
       const commit = commitRefreshRead({
         prevSnapshot: snapshotRef.current,
         prevPrices: runPriceRef.current,
@@ -771,7 +873,8 @@ function usePredcaImpl() {
     const arm = () => {
       stop();
       if (document.visibilityState !== "visible") return;
-      timer = setInterval(tick, CHAIN_POLL_MS);
+      const wait = accountUpdatingRef.current ? ACCOUNT_UPDATE_POLL_MS : CHAIN_POLL_MS;
+      timer = setInterval(tick, wait);
     };
     const onVisibility = () => {
       if (document.visibilityState === "visible") {
@@ -787,7 +890,162 @@ function usePredcaImpl() {
       document.removeEventListener("visibilitychange", onVisibility);
       stop();
     };
-  }, [refresh]);
+  }, [refresh, accountUpdating]);
+
+  const historyArmed = (key: string) =>
+    historyReadsArmed({ owner: historyOwnerRef.current }, key);
+
+  loadFullHistoryRef.current = async (key, ownerNow, isCancelled) => {
+    if (isCancelled() || !historyArmed(key)) return;
+    const storage = browserStorage();
+    const cachedFile = readHistoryCache(storage, key);
+    const cachedEntries = Object.values(cachedFile.entries).flat();
+    const cachedCloses: CloseMark[] = Object.entries(cachedFile.closes).map(([signature, mark]) => ({
+      signature,
+      slot: mark.slot,
+      ts: mark.ts,
+    }));
+    if (ownerRef.current?.toBase58() !== key) return;
+    if (cachedEntries.length > 0) setEventEntries(cachedEntries);
+    if (cachedCloses.length > 0) setCloses(cachedCloses);
+    try {
+      const page = await fetchHistoryEvents({
+        connection: connectionRef.current as HistoryConnection,
+        address: userConfigPda(ownerNow)[0],
+        owner: key,
+        programId: programId(),
+        storage: browserStorage(),
+        cap: HISTORY_INITIAL_SIGNATURE_CAP,
+      });
+      if (isCancelled() || ownerRef.current?.toBase58() !== key || !historyArmed(key)) return;
+      setEventEntries(page.entries);
+      setHistoryPage({ exhausted: page.exhausted, oldest: page.oldest });
+      if (page.newest) historyNewestRef.current = page.newest;
+      setCloses([...cachedCloses, ...page.closes]);
+    } catch {
+      /* A missed history page must not block the portfolio. */
+    }
+    try {
+      const rows = await receiptEntriesForOwner(key);
+      if (!isCancelled() && ownerRef.current?.toBase58() === key && historyArmed(key)) {
+        setSnapshotEntries(rows);
+      }
+    } catch {
+      /* The snapshot loader already warns and skips. */
+    }
+  };
+
+  loadIncrementalRef.current = async (key, ownerNow) => {
+    if (!historyArmed(key)) return;
+    const query = historyIncrementalQuery(historyNewestRef.current);
+    const page = await fetchHistoryEvents({
+      connection: connectionRef.current as HistoryConnection,
+      address: userConfigPda(ownerNow)[0],
+      owner: key,
+      programId: programId(),
+      storage: browserStorage(),
+      cap: query.cap,
+      ...(query.until ? { until: query.until } : {}),
+    });
+    if (ownerRef.current?.toBase58() !== key || !historyArmed(key)) return;
+    if (page.newest) historyNewestRef.current = page.newest;
+    if (page.entries.length > 0) setEventEntries((prev) => [...page.entries, ...prev]);
+    if (page.closes.length > 0) setCloses([...closeMarksRef.current, ...page.closes]);
+  };
+
+  useEffect(() => {
+    if (!ownerKey) return;
+    const current = ownerRef.current;
+    if (!current) return;
+    if (historyOwnerRef.current === ownerKey) return;
+    historyOwnerRef.current = ownerKey;
+    const key = ownerKey;
+    let cancelled = false;
+    void historyQueueRef.current.enqueue(() =>
+      loadFullHistoryRef.current(key, current, () => cancelled),
+    );
+    return () => {
+      cancelled = true;
+      if (historyOwnerRef.current === key) historyOwnerRef.current = null;
+    };
+  }, [ownerKey, setCloses]);
+
+  // close_user clears the cursor without changing the wallet, so the effect
+  // above does not run again. A new UserConfig in this session arms it and
+  // reloads events plus the receipt snapshot. Onboarding stays idle, so the
+  // poll and a buy refresh do not run between close and init.
+  useEffect(() => {
+    const accountReady = accountModeState !== "onboarding";
+    if (
+      !shouldReloadHistoryAfterInit({
+        cursorOwner: historyOwnerRef.current,
+        ownerKey,
+        accountReady,
+      })
+    ) {
+      return;
+    }
+    const current = ownerRef.current;
+    if (!current || !ownerKey) return;
+    historyOwnerRef.current = ownerKey;
+    historyNewestRef.current = null;
+    const key = ownerKey;
+    let cancelled = false;
+    void historyQueueRef.current.enqueue(() =>
+      loadFullHistoryRef.current(key, current, () => cancelled),
+    );
+    return () => {
+      cancelled = true;
+      if (historyOwnerRef.current === key) {
+        historyOwnerRef.current = null;
+        historyNewestRef.current = null;
+      }
+    };
+  }, [ownerKey, accountModeState, setCloses]);
+
+  useEffect(() => {
+    if (!ownerKey) return;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const stop = () => {
+      if (timer) clearInterval(timer);
+      timer = null;
+    };
+    const tick = () => {
+      const visible = typeof document !== "undefined" && document.visibilityState === "visible";
+      if (
+        historyRefreshDecision({
+          visible,
+          inFlight: historyQueueRef.current.inFlight,
+        }) !== "poll"
+      ) {
+        return;
+      }
+      if (!historyReadsArmed({ owner: historyOwnerRef.current }, ownerKey)) return;
+      const current = ownerRef.current;
+      if (!current) return;
+      void historyQueueRef.current.enqueue(() => loadIncrementalRef.current(ownerKey, current));
+    };
+    const arm = () => {
+      stop();
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      timer = setInterval(tick, HISTORY_REFRESH_MS);
+    };
+    const onVisibility = () => {
+      if (typeof document === "undefined") return;
+      if (document.visibilityState === "visible") arm();
+      else stop();
+    };
+    arm();
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisibility);
+    }
+    return () => {
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisibility);
+      }
+      stop();
+    };
+  }, [ownerKey]);
 
   const refreshPrices = useCallback(async () => {
     const epochAtStart = dataEpoch.current;
@@ -833,28 +1091,66 @@ function usePredcaImpl() {
 
   const lastRun = newestRunRecord(runs);
 
-  const lots = useMemo(
-    () => runLots(runSources(runs), runPriceByIndex),
-    [runs, runPriceByIndex],
+  const historyEntries = useMemo(() => {
+    const card = entryFromCard(config);
+    return mergeHistory(
+      [
+        eventEntries,
+        entriesFromChain(runs, runPriceByIndex),
+        snapshotEntries,
+        card ? [card] : [],
+      ],
+      closeMarks,
+    );
+  }, [config, eventEntries, runs, runPriceByIndex, snapshotEntries, closeMarks]);
+
+  const historyBundle = useMemo(
+    () => historyToLotInputs(historyEntries),
+    [historyEntries],
   );
+
+  const displayRuns = useMemo(() => {
+    if (!owner || historyEntries.length === 0) return runs;
+    return historyEntries.map((entry) => entryToRunRecord(entry, owner));
+  }, [owner, historyEntries, runs]);
+
+  const historyOrigins = useMemo(() => {
+    const out: Record<string, "auto" | "manual"> = {};
+    const current = closeMarks.length;
+    for (const entry of historyEntries) {
+      if (entry.origin !== "auto" && entry.origin !== "manual") continue;
+      const bare = String(entry.runIndex);
+      const generation = entry.generation ?? 0;
+      out[`${generation}:${bare}`] = entry.origin;
+      if (current === 0 || generation === current) out[bare] = entry.origin;
+    }
+    return out;
+  }, [historyEntries, closeMarks]);
+
+  const lots = useMemo(() => {
+    if (historyEntries.length === 0) return runLots(runSources(runs), runPriceByIndex);
+    return runLots(historyBundle.runs, historyBundle.decoded);
+  }, [historyEntries, runs, runPriceByIndex, historyBundle]);
 
   const positions = useMemo(
     () => buildPositions(lots, tokenBalances, jupPrices),
     [lots, tokenBalances, jupPrices],
   );
 
-  const runFills = useMemo(
-    () =>
-      fillsFor(
+  const runFills = useMemo(() => {
+    if (historyEntries.length === 0) {
+      return fillsFor(
         runs.map((run) => ({
           runIndex: bnNum(run.runIndex),
+          ts: bnNum(run.ts),
           mints: run.mints.map((m) => (typeof m === "string" ? m : m.toBase58())),
           tokenAmounts: run.amounts.map((a) => rawToDollars(a)),
         })),
         runPriceByIndex,
-      ),
-    [runs, runPriceByIndex],
-  );
+      );
+    }
+    return fillsFor(historyToFillRuns(historyEntries), historyBundle.decoded);
+  }, [historyEntries, runs, runPriceByIndex, historyBundle]);
 
   /** Pie weights follow USD value. Legacy 1:1 lots match the old unit weights. */
   const holdingsOnChain = useMemo((): Holding[] => {
@@ -882,14 +1178,26 @@ function usePredcaImpl() {
     [owner, priceWarning, balanceWarning, vaultUsdc, positions],
   );
 
+  const purchaseRun = newestRunRecord(displayRuns);
   const lastPurchaseOnChain = useMemo(() => {
-    if (!lastRun) return null;
-    const idx = bnNum(lastRun.runIndex);
-    const ts = bnNum(lastRun.ts);
-    const presence = effectiveRunPricePresence(runPriceByIndex, idx, ts, Date.now());
-    const dec = presence === "decoded" ? (runPriceByIndex.get(idx) ?? null) : null;
-    return runToLastPurchase(lastRun, presence, dec);
-  }, [lastRun, runPriceByIndex]);
+    if (!purchaseRun) return null;
+    const idx = bnNum(purchaseRun.runIndex);
+    const ts = bnNum(purchaseRun.ts);
+    const now = Date.now();
+    if (historyEntries.length === 0) {
+      const presence = effectiveRunPricePresence(runPriceByIndex, idx, ts, now);
+      const dec = presence === "decoded" ? (runPriceByIndex.get(idx) ?? null) : null;
+      return runToLastPurchase(purchaseRun, presence, dec);
+    }
+    const generation =
+      "generation" in purchaseRun && typeof purchaseRun.generation === "number"
+        ? purchaseRun.generation
+        : 0;
+    const lotKey = historyLotKey({ runIndex: idx, generation });
+    const presence = effectiveRunPricePresence(historyBundle.decoded, lotKey, ts, now);
+    const dec = presence === "decoded" ? (historyBundle.decoded.get(lotKey) ?? null) : null;
+    return runToLastPurchase(purchaseRun, presence, dec);
+  }, [purchaseRun, historyEntries.length, runPriceByIndex, historyBundle]);
 
   async function confirmLanded(signature: string): Promise<void> {
     const started = Date.now();
@@ -1318,6 +1626,13 @@ function usePredcaImpl() {
               prices: commit.prices,
               balances: commit.snapshot.tokenBalances,
               nowMs: Date.now(),
+              card:
+                expect.mode === "card"
+                  ? {
+                      card: commit.snapshot.config?.card ?? null,
+                      sentSignatureHash: expect.signatureHash ?? ZERO_SIGNATURE_HASH,
+                    }
+                  : undefined,
             });
           }
           if (useVault && vaultRetry) {
@@ -1399,6 +1714,15 @@ function usePredcaImpl() {
       await refreshAfterTx(opts.kind, epoch);
       return result;
     } catch (e) {
+      if (isAccountUpdatingError(e, legacyRef.current)) {
+        accountUpdatingRef.current = true;
+        setAccountUpdating(true);
+        if (vaultFollowEpoch.current === epoch) {
+          setOkMsg(null);
+          reportError(null);
+        }
+        return null;
+      }
       if (isOnChainSignatureReject(e)) {
         setPending(null);
         if (vaultFollowEpoch.current === epoch) {
@@ -1579,6 +1903,11 @@ function usePredcaImpl() {
       );
       return null;
     }
+    if (accountUpdatingRef.current) {
+      reportError(null);
+      return null;
+    }
+    legacyRef.current = modeOfConfig(config) === "legacy";
     const raw = dollarsToRaw(amountUsd);
     if (raw.lte(new BN(0))) {
       reportError(shown("tx.err.depositPositive"));
@@ -1669,6 +1998,11 @@ function usePredcaImpl() {
       reportError(shown("tx.err.predcaNotInit"));
       return null;
     }
+    if (accountUpdatingRef.current) {
+      reportError(null);
+      return null;
+    }
+    legacyRef.current = modeOfConfig(config) === "legacy";
     const raw = dollarsToRaw(amountUsd);
     if (raw.lte(new BN(0))) {
       reportError(shown("tx.err.withdrawPositive"));
@@ -1709,6 +2043,11 @@ function usePredcaImpl() {
       reportError(shown("auto.status.notReady"));
       return null;
     }
+    if (accountUpdatingRef.current) {
+      reportError(null);
+      return null;
+    }
+    legacyRef.current = modeOfConfig(config) === "legacy";
     const raw = dollarsToRaw(weeklyBudgetUsd);
     if (raw.lte(new BN(0))) {
       reportError(shown("tx.err.budgetPositive"));
@@ -1755,9 +2094,42 @@ function usePredcaImpl() {
     return legs;
   }, [owner, mint, config, connection]);
 
+  async function loadBuySignature(signature: string): Promise<void> {
+    const current = ownerRef.current;
+    if (!current) return;
+    const key = current.toBase58();
+    if (!historyReadsArmed({ owner: historyOwnerRef.current }, key)) return;
+    try {
+      const tx = await connection.getTransaction(signature, {
+        maxSupportedTransactionVersion: 0,
+        commitment: "confirmed",
+      });
+      if (ownerRef.current?.toBase58() !== key || !historyReadsArmed({ owner: historyOwnerRef.current }, key)) return;
+      if (tx == null) return;
+      const parsed = tx as HistoryTransaction;
+      const rows = entriesFromTransaction(parsed, signature, key, programId());
+      const close = closeMarkFromTransaction(parsed, signature, programId());
+      const storage = browserStorage();
+      const cache = readHistoryCache(storage, key);
+      cache.entries[signature] = rows;
+      if (close) cache.closes[signature] = { slot: close.slot, ts: close.ts ?? 0 };
+      writeHistoryCache(storage, key, cache);
+      if (rows.length > 0) setEventEntries((prev) => [...rows, ...prev]);
+      if (close) setCloses([...closeMarksRef.current, close]);
+      await loadIncrementalRef.current(key, current);
+    } catch {
+      /* The card or the chain row still shows this purchase. */
+    }
+  }
+
+  function rememberBuyEvent(signature: string): void {
+    void historyQueueRef.current.enqueue(() => loadBuySignature(signature));
+  }
+
   /**
-   * On-chain simulate_buy_v2 (priced buy). Debits vault USDC only and mints
-   * floor(usdc/price) of each mock PreStock to the owner ATAs.
+   * On-chain priced buy. Card accounts use simulate_buy_v3. A 59-byte account
+   * keeps simulate_buy_v2. Debits vault USDC only and mints floor(usdc/price)
+   * of each mock PreStock to the owner ATAs.
    */
   async function simulateBuy(tokenNames: string[]): Promise<string | null> {
     if (!program || !owner || !mint) {
@@ -1776,6 +2148,11 @@ function usePredcaImpl() {
       reportError(shown("tx.err.predcaNotInit"));
       return null;
     }
+    if (accountUpdatingRef.current) {
+      reportError(null);
+      return null;
+    }
+    legacyRef.current = modeOfConfig(config) === "legacy";
 
     const { mints, names, missing } = resolveTop3Mints(tokenNames);
     if (missing.length > 0) {
@@ -1800,6 +2177,9 @@ function usePredcaImpl() {
         reportError(shown("tx.err.predcaNotInit"));
         return null;
       }
+      const buyMode = modeOfConfig(freshConfig);
+      legacyRef.current = buyMode === "legacy";
+      const useCard = buyMode === "card" && freshConfig.card != null;
       const budget = rawToDollars(freshConfig.weeklyBudgetUsdc);
       const amountEach = Math.floor((budget * 1e6) / 3) / 1e6;
       const totalDebit = amountEach * 3;
@@ -1824,25 +2204,47 @@ function usePredcaImpl() {
         return null;
       }
 
-      // Fresh on-chain index. `runs` is stale after a keeper buy until refresh.
-      let scanned: number | null;
-      try {
-        scanned = await findNextRunIndex(program, owner);
-      } catch (e) {
-        reportError(parseAnchorError(e));
-        return null;
+      // Card: the next index is on the account. Legacy: scan RunRecord PDAs.
+      let nextIndex: number;
+      if (useCard && freshConfig.card) {
+        nextIndex = nextCardRunIndex(freshConfig.card);
+      } else {
+        let scanned: number | null;
+        try {
+          scanned = await findNextRunIndex(program, owner);
+        } catch (e) {
+          reportError(parseAnchorError(e));
+          return null;
+        }
+        if (scanned == null) {
+          reportError(shown("tx.err.noFreeRunIndex"));
+          return null;
+        }
+        nextIndex = scanned;
       }
-      if (scanned == null) {
-        reportError(shown("tx.err.noFreeRunIndex"));
-        return null;
-      }
-      const nextIndex = scanned;
 
       const submitAt = async (runIndex: number) => {
-        // Anchor resolves PDAs that have seeds (vault, mint_auth, ATAs, run_record).
-        // price_feed_* and run_price have no IDL seeds and must be passed.
-        const buyMethod = (index: number) =>
-          program.methods
+        const buyMethod = (index: number) => {
+          if (useCard) {
+            return program.methods
+              .simulateBuyV3(
+                new BN(index),
+                mints,
+                Array.from(ZERO_SIGNATURE_HASH),
+              )
+              .accounts({
+                usdcMint: mint,
+                mintA: mints[0],
+                mintB: mints[1],
+                mintC: mints[2],
+                priceFeedA: priceFeedPda(mints[0])[0],
+                priceFeedB: priceFeedPda(mints[1])[0],
+                priceFeedC: priceFeedPda(mints[2])[0],
+              });
+          }
+          // Anchor resolves PDAs that have seeds (vault, mint_auth, ATAs, run_record).
+          // price_feed_* and run_price have no IDL seeds and must be passed.
+          return program.methods
             .simulateBuyV2(
               new BN(index),
               mints,
@@ -1858,6 +2260,7 @@ function usePredcaImpl() {
               priceFeedC: priceFeedPda(mints[2])[0],
               runPrice: runPricePda(owner, index)[0],
             });
+        };
 
         // The program requires the three owner token accounts. A separate
         // create used to wait on confirmTransaction, which needs a websocket.
@@ -2002,8 +2405,26 @@ function usePredcaImpl() {
         preview = "";
       }
 
-      buyExpectRef.current = { prevRunCount: nextIndex, runIndex: nextIndex };
-      return await withTx(async () => {
+      buyExpectRef.current = {
+        prevRunCount: nextIndex,
+        runIndex: nextIndex,
+        mode: useCard ? "card" : "legacy",
+        signatureHash: ZERO_SIGNATURE_HASH,
+      };
+      const sig = await withTx(async () => {
+        if (useCard) {
+          return retryCardBuy({
+            firstIndex: nextIndex,
+            rereadIndex: async () => {
+              const again = await fetchUserConfig(program, owner);
+              if (!again?.card) throw new Error(shown("tx.err.predcaNotInit"));
+              return nextCardRunIndex(again.card);
+            },
+            submit: submitAndRemember,
+            isMismatch: isRunIndexMismatch,
+            mismatchMessage: translate(buyLocale, "tx.err.runIndexMoved"),
+          });
+        }
         try {
           return await submitAndRemember(nextIndex);
         } catch (e) {
@@ -2028,7 +2449,15 @@ function usePredcaImpl() {
         kind: "buy",
         amountUsd: totalDebit,
       });
+      if (typeof sig === "string" && sig.length > 0) void rememberBuyEvent(sig);
+      return sig;
     } catch (e) {
+      if (isAccountUpdatingError(e, legacyRef.current)) {
+        accountUpdatingRef.current = true;
+        setAccountUpdating(true);
+        reportError(null);
+        return null;
+      }
       reportError(parseAnchorError(e));
       return null;
     } finally {
@@ -2048,6 +2477,176 @@ function usePredcaImpl() {
     reportError(null);
     setOkMsg(null);
     if (clearDropsPending(opts)) setPending(null);
+  }
+
+  function noteAccountUpdating() {
+    accountUpdatingRef.current = true;
+    setAccountUpdating(true);
+  }
+
+  async function showOlderHistory(): Promise<void> {
+    const current = ownerRef.current;
+    if (!current || historyPage.exhausted || !historyPage.oldest) return;
+    const key = current.toBase58();
+    const before = historyPage.oldest;
+    await historyQueueRef.current.enqueue(async () => {
+      if (!historyReadsArmed({ owner: historyOwnerRef.current }, key)) return;
+      try {
+        const page = await fetchHistoryEvents({
+          connection: connectionRef.current as HistoryConnection,
+          address: userConfigPda(current)[0],
+          owner: key,
+          programId: programId(),
+          storage: browserStorage(),
+          cap: HISTORY_PAGE_SIZE,
+          before,
+        });
+        if (ownerRef.current?.toBase58() !== key || !historyReadsArmed({ owner: historyOwnerRef.current }, key)) return;
+        if (page.entries.length > 0) setEventEntries((prev) => [...prev, ...page.entries]);
+        if (page.closes.length > 0) setCloses([...closeMarksRef.current, ...page.closes]);
+        setHistoryPage({
+          exhausted: page.exhausted,
+          oldest: page.oldest ?? before,
+        });
+      } catch {
+        /* The button stays available. */
+      }
+    });
+  }
+
+  async function readCloseRefundSol(): Promise<number> {
+    const current = ownerRef.current;
+    if (!current) return 0;
+    try {
+      const accounts = closeAccounts(current);
+      const infos = await connection.getMultipleAccountsInfo([
+        accounts.userConfig,
+        accounts.vault,
+      ]);
+      return accountFeeRefundSol(infos[0]?.lamports ?? 0, infos[1]?.lamports ?? 0);
+    } catch {
+      return 0;
+    }
+  }
+
+  async function sendCloseTx(
+    instructions: TransactionInstruction[],
+    blockhash: string,
+    feePayer: PublicKey,
+  ): Promise<string> {
+    const tx = closeTransaction(instructions, feePayer, blockhash);
+    const sig = await sendTransaction(tx, connection, {
+      skipPreflight: false,
+      preflightCommitment: "confirmed",
+    });
+    await confirmSignatureByPolling(
+      async (signature) => {
+        const { value } = await connection.getSignatureStatuses([signature]);
+        const row = value[0];
+        if (!row) return [null];
+        return [
+          {
+            err: row.err,
+            confirmationStatus: row.confirmationStatus ?? null,
+          },
+        ];
+      },
+      sig,
+    );
+    return sig;
+  }
+
+  async function closeAccount(before?: () => Promise<void>): Promise<string | null> {
+    if (!program || !owner || !mint) {
+      reportError(
+        !mint
+          ? shown("tx.err.noUsdcMint", { mint: MOCK_USDC_MINT })
+          : shown("tx.err.connectWallet"),
+      );
+      return null;
+    }
+    if (accountUpdatingRef.current || modeOfConfig(config) !== "card") {
+      reportError(null);
+      return null;
+    }
+    try {
+      await before?.();
+    } catch {
+      /* Turning the purchase switch off must not block the close. */
+    }
+    try {
+      let vaultRaw = BigInt(0);
+      try {
+        const bal = await connection.getTokenAccountBalance(vaultPda(owner)[0]);
+        vaultRaw = BigInt(bal.value.amount);
+      } catch (e) {
+        if (!isMissingAccountError(e)) throw e;
+      }
+      const blockhash = (await connection.getLatestBlockhash("confirmed")).blockhash;
+      const instructions = await buildCloseInstructions(program, owner, mint, vaultRaw);
+      const planned = planCloseTransaction(instructions, owner, blockhash, vaultRaw);
+      let signature: string;
+      if (planned.plan === "two-step") {
+        signature = await sendCloseTx([instructions[0]], blockhash, owner);
+        const nextHash = (await connection.getLatestBlockhash("confirmed")).blockhash;
+        signature = await sendCloseTx(
+          [instructions[instructions.length - 1]],
+          nextHash,
+          owner,
+        );
+      } else {
+        signature = await sendCloseTx([...instructions], blockhash, owner);
+      }
+      const accounts = closeAccounts(owner);
+      let gone = false;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const left = await connection.getMultipleAccountsInfo([
+          accounts.userConfig,
+          accounts.vault,
+        ]);
+        gone = left.every((info) => info == null);
+        if (gone) break;
+        await new Promise((resolve) => setTimeout(resolve, 400));
+      }
+      if (!gone) {
+        await refresh();
+        return signature;
+      }
+      const store = browserStorage();
+      if (store && "key" in store && "length" in store) {
+        clearClosedOwnerState(store as Storage, owner.toBase58());
+      }
+      setEventEntries([]);
+      setSnapshotEntries([]);
+      setHistoryPage({ exhausted: true, oldest: null });
+      historyOwnerRef.current = null;
+      historyNewestRef.current = null;
+      closeMarksRef.current = [];
+      setCloseMarks([]);
+      accountUpdatingRef.current = false;
+      setAccountUpdating(false);
+      setAccountModeState("onboarding");
+      publishRef.current({
+        snapshot: {
+          ...EMPTY_SNAPSHOT,
+          config: null,
+          configState: "missing",
+          runs: [],
+        },
+        prices: new Map(),
+      });
+      setOkMsg(translate(getLocaleSnapshot(), "settings.closeTitle"));
+      return signature;
+    } catch (e) {
+      if (isAccountUpdatingError(e, legacyRef.current)) {
+        accountUpdatingRef.current = true;
+        setAccountUpdating(true);
+        reportError(null);
+        return null;
+      }
+      reportError(parseAnchorError(e));
+      return null;
+    }
   }
 
   return {
@@ -2096,7 +2695,7 @@ function usePredcaImpl() {
     refreshPrices,
     runFills,
     weeklyBudgetUsd,
-    runs,
+    runs: displayRuns,
     lastRun,
     lastPurchaseOnChain,
     refresh,
@@ -2105,6 +2704,16 @@ function usePredcaImpl() {
     setWeeklyBudget,
     simulateBuy,
     previewBuy,
+    accountUpdating,
+    accountMode: accountModeState,
+    historyOrigins,
+    /** Close count. Fee rows that omit generation belong to this account. */
+    historyGeneration: closeMarks.length,
+    historyHasOlder: !historyPage.exhausted && historyPage.oldest != null,
+    showOlderHistory,
+    closeAccount,
+    readCloseRefundSol,
+    noteAccountUpdating,
   };
 }
 

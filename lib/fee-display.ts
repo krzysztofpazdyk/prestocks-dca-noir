@@ -3,6 +3,11 @@ import { formatGrouped } from "@/lib/number-format";
 export type PurchaseFeeRow = {
   runIndex: number;
   feeUsd: number;
+  /**
+   * Account sequence. Omitted means the open account, never an older
+   * account that reused the same runIndex.
+   */
+  generation?: number;
 };
 
 type FeeCopy = (
@@ -46,18 +51,35 @@ export function historyFeeLabel(
   return t("history.fee", { fee });
 }
 
+function accountSequence(value: number | undefined, fallback: number): number {
+  if (typeof value === "number" && Number.isInteger(value) && value >= 0) return value;
+  return fallback;
+}
+
+/**
+ * Fee for one history row, matched on generation and runIndex.
+ * `generation` defaults to the open account (`currentGeneration`, else 0),
+ * so feeUsdForRun(fees, "1") still hits rows that omit generation or use 0.
+ * A row that omits generation belongs to the open account and is not applied
+ * to an older account with the same runIndex.
+ */
 export function feeUsdForRun(
   fees: PurchaseFeeRow[] | null | undefined,
   runIndex: number | string,
+  generation?: number,
+  currentGeneration?: number,
 ): number | undefined {
   if (!fees || fees.length === 0) return undefined;
   const index = typeof runIndex === "number" ? runIndex : Number(runIndex);
   if (!Number.isFinite(index)) return undefined;
+  const current = accountSequence(currentGeneration, 0);
+  const want = accountSequence(generation, current);
   for (let i = fees.length - 1; i >= 0; i--) {
     const row = fees[i];
-    if (row && row.runIndex === index && typeof row.feeUsd === "number") {
-      return row.feeUsd;
-    }
+    if (!row || row.runIndex !== index || typeof row.feeUsd !== "number") continue;
+    const rowGeneration = accountSequence(row.generation, current);
+    if (rowGeneration !== want) continue;
+    return row.feeUsd;
   }
   return undefined;
 }

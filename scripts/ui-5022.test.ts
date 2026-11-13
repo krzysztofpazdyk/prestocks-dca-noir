@@ -95,8 +95,8 @@ test("the xAI exclusion sentence is gone and xAI stays excluded", () => {
   assert.match(settingsSrc, /userExclusions\(/);
 });
 
-test("v5.0.25 stays on the profit/loss section", () => {
-  assert.equal(APP_VERSION, "5.0.25");
+test("v5.0.26 stays on the profit/loss section", () => {
+  assert.equal(APP_VERSION, "5.0.26");
   const pnl = overviewSrc.slice(
     overviewSrc.indexOf("function PnlSection"),
     overviewSrc.indexOf("function PositionsCard"),

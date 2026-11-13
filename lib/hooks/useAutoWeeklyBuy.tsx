@@ -12,6 +12,8 @@ import {
 } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useKeeperSignMessage } from "@/components/PrivyWalletBridge";
+import { classifyDefer } from "@/lib/account-mode";
+import { type PurchaseFeeRow } from "@/lib/fee-display";
 import {
   clearStatusAuthCache,
   keeperDisable,
@@ -78,6 +80,8 @@ export type AutoBuyPhase =
 export type AutoWeeklyBuyApi = {
   enabled: boolean;
   setEnabled: (value: boolean) => void;
+  /** Same off-switch as setEnabled(false). Never throws. A failure does not block close. */
+  disableQuietly: () => Promise<void>;
   /** Confirm-enable: start keeper (UI does not buy). */
   startCycle: (weeklyBudgetUsd: number) => Promise<void>;
   phase: AutoBuyPhase;
@@ -96,7 +100,7 @@ export type AutoWeeklyBuyApi = {
   /** Public status says the purchase fee is on. Unknown stays false. */
   feeEnabled: boolean;
   /** Recent runs from /public/status. Empty until a read succeeds. */
-  fees: { runIndex: number; feeUsd: number }[];
+  fees: PurchaseFeeRow[];
 };
 
 const AutoWeeklyBuyContext = createContext<AutoWeeklyBuyApi | null>(null);
@@ -138,7 +142,7 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
   }, []);
   const [statusChecked, setStatusChecked] = useState(false);
   const [feeEnabled, setFeeEnabled] = useState(false);
-  const [fees, setFees] = useState<{ runIndex: number; feeUsd: number }[]>([]);
+  const [fees, setFees] = useState<PurchaseFeeRow[]>([]);
 
   const ownerKey = publicKey?.toBase58() ?? null;
   // These eight follow the latest render. The copy is a layout effect, so
@@ -343,6 +347,26 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
     setEnabledState(value);
     writeAutoWeeklyBuy(value, owner);
   }, []);
+
+  const disableQuietly = useCallback(async () => {
+    const ownerNow = ownerRef.current;
+    const sign = signMessageRef.current;
+    if (!ownerNow || !sign) return;
+    try {
+      const res = await keeperDisable(ownerNow, sign);
+      if (!res.ok) return;
+      enabledEpochRef.current += 1;
+      actionEnabledRef.current = false;
+      setEnabledState(false);
+      writeAutoWeeklyBuy(false, ownerNow);
+      markStatusResolved(true);
+      setPhase("idle");
+      setBlockReason(null);
+      setMessage(tRef.current("auto.status.off"));
+    } catch {
+      /* Closing the account continues even when this step fails. */
+    }
+  }, [markStatusResolved]);
 
   const startCycle = useCallback(async (weeklyBudgetUsd: number) => {
     const pendingNow = predcaRef.current;
@@ -904,7 +928,15 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
       }
       return;
     }
-    if (st.phase === "deferred" || (st.phase === "error" && /deferred|ops_pending|insufficient lamports|not enough sol|keeper ma za mało sol/i.test(st.error || ""))) {
+    const deferKind = classifyDefer(st);
+    if (deferKind === "updating") {
+      predcaRef.current.noteAccountUpdating();
+      setPhase("idle");
+      setMessage("");
+      setBlockReason(null);
+      return;
+    }
+    if (deferKind === "queued") {
       setPhase("queued");
       setMessage(tRef.current("auto.status.queued"));
       setBlockReason("deferred");
@@ -955,6 +987,7 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
     () => ({
       enabled,
       setEnabled,
+      disableQuietly,
       startCycle,
       phase,
       blockReason,
@@ -972,6 +1005,7 @@ function useAutoWeeklyBuyImpl(): AutoWeeklyBuyApi {
     [
       enabled,
       setEnabled,
+      disableQuietly,
       startCycle,
       phase,
       blockReason,
